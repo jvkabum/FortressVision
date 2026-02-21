@@ -609,9 +609,9 @@ func (a *App) processMesherResults() {
 
 		select {
 		case res := <-a.mesher.Results():
-			if len(res.Terreno.Vertices) > 0 || len(res.Liquidos.Vertices) > 0 {
-				log.Printf("[Renderer] Upload de Geometria: %s (Terreno: %d, Água: %d vértices)",
-					res.Origin.String(), len(res.Terreno.Vertices)/3, len(res.Liquidos.Vertices)/3)
+			if len(res.Terreno.Vertices) > 0 || len(res.Liquidos.Vertices) > 0 || len(res.MaterialGeometries) > 0 {
+				log.Printf("[Renderer] Upload de Geometria: %s (Terreno: %d, Água: %d, Texturas: %d tipos)",
+					res.Origin.String(), len(res.Terreno.Vertices)/3, len(res.Liquidos.Vertices)/3, len(res.MaterialGeometries))
 			}
 			a.renderer.UploadResult(res)
 

@@ -6,6 +6,8 @@ package render
 import "C"
 
 import (
+	"fmt"
+	"log"
 	"sync"
 	"unsafe"
 
@@ -102,24 +104,61 @@ void main()
 }
 `
 
+const terrainFragmentShader = `
+#version 330
+in vec2 fragTexCoord;
+in vec4 fragColor;
+uniform sampler2D texture0;
+out vec4 finalColor;
+void main() {
+    vec4 texelColor = texture(texture0, fragTexCoord);
+    if (texelColor.a < 0.1) discard; // Alpha Cutout para plantas
+    finalColor = texelColor * fragColor;
+}
+`
+
+const terrainVertexShader = `
+#version 330
+in vec3 vertexPosition;
+in vec2 vertexTexCoord;
+in vec4 vertexColor;
+uniform mat4 mvp;
+out vec2 fragTexCoord;
+out vec4 fragColor;
+void main() {
+    fragTexCoord = vertexTexCoord;
+    fragColor = vertexColor;
+    gl_Position = mvp * vec4(vertexPosition, 1.0);
+}
+`
+
 // BlockModel representa a geometria renderizável de um bloco do mapa.
 type BlockModel struct {
 	Origin      util.DFCoord
-	Model       rl.Model
+	Model       rl.Model            // Geometria padrão (sem textura)
+	MatModels   map[string]rl.Model // Modelos separados por textura (stone, grass, etc)
 	LiquidModel rl.Model
 	HasLiquid   bool
 	Active      bool
-	MTime       int64 // Versão dos dados (para cache)
+	MTime       int64                   // Versão dos dados (para cache)
+	Instances   []meshing.ModelInstance // Instâncias de modelos 3D neste bloco
 }
 
 // Renderer gerencia o upload e renderização de malhas na GPU.
 type Renderer struct {
-	mu         sync.RWMutex
-	Models     map[util.DFCoord]*BlockModel
+	mu     sync.RWMutex
+	Models map[util.DFCoord]*BlockModel
+	// Shaders
 	MainShader rl.Shader
 
 	WaterShader  rl.Shader
 	WaterLocTime int32
+
+	// Texturas Premium
+	Textures map[string]rl.Texture2D
+
+	// Modelos 3D carregados (shrub, tree, etc)
+	Models3D map[string]rl.Model
 
 	// Sistema de Clima (Fase 8)
 	Weather *ParticleSystem
@@ -133,17 +172,58 @@ func NewRenderer() *Renderer {
 	r := &Renderer{
 		Models:     make(map[util.DFCoord]*BlockModel),
 		purgeQueue: make([]util.DFCoord, 0),
+		Textures:   make(map[string]rl.Texture2D),
+		Models3D:   make(map[string]rl.Model),
 	}
 
 	// Tenta carregar os Shaders Customizados
 	if rl.IsWindowReady() {
+		r.MainShader = rl.LoadShaderFromMemory(terrainVertexShader, terrainFragmentShader)
 		r.WaterShader = rl.LoadShaderFromMemory(waterVertexShader, waterFragmentShader)
 		r.WaterLocTime = rl.GetShaderLocation(r.WaterShader, "time")
+
+		// Carregar Texturas Premium
+		r.loadTextures()
+
+		// Carregar Modelos 3D
+		r.loadModels()
 	}
 
 	r.Weather = NewParticleSystem(2000)
 
 	return r
+}
+
+func (r *Renderer) loadTextures() {
+	assets := []string{"stone", "grass", "wood", "marble", "ore", "gem", "plant"}
+	for _, name := range assets {
+		path := fmt.Sprintf("assets/textures/%s.png", name)
+		tex := rl.LoadTexture(path)
+		if tex.ID != 0 {
+			rl.GenTextureMipmaps(&tex)
+			rl.SetTextureFilter(tex, rl.FilterTrilinear)
+			rl.SetTextureWrap(tex, rl.WrapRepeat)
+			r.Textures[name] = tex
+			log.Printf("[Renderer] Textura carregada: %s", path)
+		} else {
+			log.Printf("[Renderer] FALHA ao carregar textura: %s", path)
+		}
+	}
+}
+
+func (r *Renderer) loadModels() {
+	modelFiles := map[string]string{
+		"shrub": "assets/models/shrub.glb",
+	}
+	for name, path := range modelFiles {
+		model := rl.LoadModel(path)
+		if model.MeshCount > 0 {
+			r.Models3D[name] = model
+			log.Printf("[Renderer] Modelo 3D carregado: %s (%d meshes)", path, model.MeshCount)
+		} else {
+			log.Printf("[Renderer] FALHA ao carregar modelo 3D: %s", path)
+		}
+	}
 }
 
 // HasModel verifica se já existe um modelo carregado para esta coordenada e com a mesma versão.
@@ -172,6 +252,9 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 	if old, ok := r.Models[res.Origin]; ok {
 		if old.Active {
 			rl.UnloadModel(old.Model)
+			for _, m := range old.MatModels {
+				rl.UnloadModel(m)
+			}
 			if old.HasLiquid {
 				rl.UnloadModel(old.LiquidModel)
 			}
@@ -179,20 +262,41 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		delete(r.Models, res.Origin)
 	}
 
-	if len(res.Terreno.Vertices) == 0 && len(res.Liquidos.Vertices) == 0 {
+	if len(res.Terreno.Vertices) == 0 && len(res.Liquidos.Vertices) == 0 && len(res.MaterialGeometries) == 0 {
 		return
 	}
 
 	bm := &BlockModel{
-		Origin: res.Origin,
-		Active: true,
-		MTime:  res.MTime,
+		Origin:    res.Origin,
+		Active:    true,
+		MTime:     res.MTime,
+		MatModels: make(map[string]rl.Model),
 	}
 
+	// 1. Upload de geometria sem textura (Legado/Fallback)
 	if len(res.Terreno.Vertices) > 0 {
 		mesh := r.geometryToMesh(res.Terreno)
 		rl.UploadMesh(&mesh, false)
 		bm.Model = rl.LoadModelFromMesh(mesh)
+	}
+
+	// 2. Upload de geometria por material (Com textura)
+	for matName, geo := range res.MaterialGeometries {
+		if len(geo.Vertices) > 0 {
+			mesh := r.geometryToMesh(geo)
+			rl.UploadMesh(&mesh, false)
+			model := rl.LoadModelFromMesh(mesh)
+
+			// Aplicar textura e shader se existir
+			if tex, ok := r.Textures[matName]; ok {
+				if model.MaterialCount > 0 {
+					materials := unsafe.Slice(model.Materials, model.MaterialCount)
+					materials[0].Shader = r.MainShader
+					rl.SetMaterialTexture(&materials[0], rl.MapDiffuse, tex)
+				}
+			}
+			bm.MatModels[matName] = model
+		}
 	}
 
 	if len(res.Liquidos.Vertices) > 0 {
@@ -209,6 +313,9 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 	}
 
 	r.Models[res.Origin] = bm
+
+	// 4. Salvar instâncias de modelos 3D (arbustos, etc)
+	bm.Instances = res.ModelInstances
 
 	// Como a função geometryToMesh copiou as fatias para o C.malloc,
 	// podemos limpar e devolver os Slices Go para o Pool reaproveitar sem afetar a GPU.
@@ -280,8 +387,24 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 		if !bm.Active {
 			continue
 		}
+		// Desenha modelo padrão
 		if bm.Model.MeshCount > 0 {
 			rl.DrawModel(bm.Model, rl.Vector3{X: 0, Y: 0, Z: 0}, 1.0, rl.White)
+		}
+		// Desenha modelos texturizados
+		for _, m := range bm.MatModels {
+			if m.MeshCount > 0 {
+				rl.DrawModel(m, rl.Vector3{X: 0, Y: 0, Z: 0}, 1.0, rl.White)
+			}
+		}
+
+		// Desenha instâncias de modelos 3D (arbustos, árvores, etc)
+		for _, inst := range bm.Instances {
+			if model3d, ok := r.Models3D[inst.ModelName]; ok {
+				pos := rl.Vector3{X: inst.Position[0], Y: inst.Position[1], Z: inst.Position[2]}
+				tintColor := rl.NewColor(inst.Color[0], inst.Color[1], inst.Color[2], 255)
+				rl.DrawModel(model3d, pos, inst.Scale, tintColor)
+			}
 		}
 	}
 

@@ -50,12 +50,22 @@ type Request struct {
 	MaxDepth int   // Quantas camadas abaixo verificar para oclusão
 }
 
+// ModelInstance representa uma instância de um modelo 3D no mundo.
+type ModelInstance struct {
+	ModelName string     // Nome do modelo (ex: "shrub")
+	Position  [3]float32 // Posição no mundo
+	Scale     float32    // Escala
+	Color     [4]uint8   // Cor/tint
+}
+
 // Result contém os dados de geometria gerados para um bloco.
 type Result struct {
-	Origin   util.DFCoord
-	Terreno  GeometryData
-	Liquidos GeometryData
-	MTime    int64 // Versão dos dados processados
+	Origin             util.DFCoord
+	Terreno            GeometryData // Legado (se não for usar textura)
+	Liquidos           GeometryData
+	MaterialGeometries map[string]GeometryData // Nova geometria separada por nome de textura
+	ModelInstances     []ModelInstance         // Instâncias de modelos 3D (arbustos, árvores, etc)
+	MTime              int64                   // Versão dos dados processados
 }
 
 // Mesher é a interface para geradores de malha.
@@ -85,6 +95,9 @@ func GetMeshBuffer() *MeshBuffer {
 
 // PutMeshBuffer zera os ponteiros e devolve a memória para o Pool.
 func PutMeshBuffer(b *MeshBuffer) {
+	if b == nil {
+		return
+	}
 	b.Geometry.Vertices = b.Geometry.Vertices[:0]
 	b.Geometry.Normals = b.Geometry.Normals[:0]
 	b.Geometry.Colors = b.Geometry.Colors[:0]
@@ -156,6 +169,13 @@ func (b *MeshBuffer) AddTriangleUV(v1, v2, v3 [3]float32, uv1, uv2, uv3 [2]float
 func (b *MeshBuffer) AddFaceAOStandard(v1 [3]float32, c1 [4]uint8, v2 [3]float32, c2 [4]uint8, v3 [3]float32, c3 [4]uint8, v4 [3]float32, c4 [4]uint8, normal [3]float32) {
 	b.AddTriangle(v1, v2, v3, normal, c1)
 	b.AddTriangle(v1, v3, v4, normal, c1)
+}
+
+func (b *MeshBuffer) AddFaceUVStandard(v1 [3]float32, uv1 [2]float32, c1 [4]uint8, v2 [3]float32, uv2 [2]float32, c2 [4]uint8, v3 [3]float32, uv3 [2]float32, c3 [4]uint8, v4 [3]float32, uv4 [2]float32, c4 [4]uint8, normal [3]float32) {
+	b.AddTriangleUV(v1, v2, v3, uv1, uv2, uv3, normal, c1)
+	b.addVertexUV(v1, uv1, normal, c1) // Re-adicionando v1 para o segundo triângulo
+	b.addVertexUV(v3, uv3, normal, c3)
+	b.addVertexUV(v4, uv4, normal, c4)
 }
 
 // MeshBuffer auxilia na construção de malhas dinâmicas.

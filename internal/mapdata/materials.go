@@ -10,12 +10,41 @@ import (
 type MaterialStore struct {
 	// Cache de cores por par de material (MatType, MatIndex)
 	Colors map[dfproto.MatPair]rl.Color
+
+	// Mapeamento de texturas carregadas no Renderer (armazenamos apenas os nomes/IDs aqui)
+	TextureMap map[dfproto.TiletypeMaterial]string
 }
 
 func NewMaterialStore() *MaterialStore {
 	return &MaterialStore{
-		Colors: make(map[dfproto.MatPair]rl.Color),
+		Colors:     make(map[dfproto.MatPair]rl.Color),
+		TextureMap: make(map[dfproto.TiletypeMaterial]string),
 	}
+}
+
+// GetTextureName retorna o nome do arquivo de textura para uma categoria de material.
+func (s *MaterialStore) GetTextureName(mat dfproto.TiletypeMaterial) string {
+	switch mat {
+	case dfproto.TilematStone, dfproto.TilematHBM, dfproto.TilematFeatureStone:
+		return "stone"
+	case dfproto.TilematMineral:
+		return "ore"
+	case dfproto.TilematFrozenLiquid:
+		return "marble" // Gelo parece mármore
+	case dfproto.TilematSoil, dfproto.TilematGrass, dfproto.TilematGrassDark, dfproto.TilematGrassDead, dfproto.TilematGrassDry:
+		return "grass"
+	case dfproto.TilematTreeMaterial, dfproto.TilematPlant, dfproto.TilematMushroom:
+		return "wood"
+	case dfproto.TilematConstruction:
+		return "marble"
+	case dfproto.TilematLava, dfproto.TilematMagma:
+		return "ore" // Magma rock
+	}
+	// Se for uma categoria de gema (baseado no rfr.go, gemas são maiores que Stone)
+	if mat >= dfproto.TilematStone && mat <= dfproto.TilematMineral {
+		return "gem"
+	}
+	return ""
 }
 
 // GetTileColor retorna a cor para um tile específico.

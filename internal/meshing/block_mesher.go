@@ -109,37 +109,43 @@ func (m *BlockMesher) worker() {
 // Generate transforma um bloco de tiles em geometria.
 func (m *BlockMesher) Generate(req Request) Result {
 	res := Result{
-		Origin: req.Origin,
-		MTime:  req.MTime,
+		Origin:             req.Origin,
+		MTime:              req.MTime,
+		MaterialGeometries: make(map[string]GeometryData),
 	}
 
-	terrainBuffer := GetMeshBuffer()
+	// Buffers temporários por textura
+	textureBuffers := make(map[string]*MeshBuffer)
 	liquidBuffer := GetMeshBuffer()
 
-	// Resetamos forçadamente na alocação caso o slice não esteja limpo
-	terrainBuffer.Geometry.Vertices = terrainBuffer.Geometry.Vertices[:0]
-	terrainBuffer.Geometry.Normals = terrainBuffer.Geometry.Normals[:0]
-	terrainBuffer.Geometry.Colors = terrainBuffer.Geometry.Colors[:0]
-
-	liquidBuffer.Geometry.Vertices = liquidBuffer.Geometry.Vertices[:0]
-	liquidBuffer.Geometry.Normals = liquidBuffer.Geometry.Normals[:0]
-	liquidBuffer.Geometry.Colors = liquidBuffer.Geometry.Colors[:0]
-
-	// Algoritmo Greedy Meshing Vertical (1D Y-Axis)
-	// Para cada fatia (Z e X constantes), varremos Y procurando paredes e chãos contínuos
-	// para fundir as faces e economizar vértices.
-	runGreedyMesherX(req, terrainBuffer, liquidBuffer, m)
-
-	if len(terrainBuffer.Geometry.Vertices) > 0 || len(liquidBuffer.Geometry.Vertices) > 0 {
-		// Log reduzido para evitar flood
+	// Função auxiliar para obter ou criar buffer para uma textura
+	getBuffer := func(name string) *MeshBuffer {
+		if buf, ok := textureBuffers[name]; ok {
+			return buf
+		}
+		buf := GetMeshBuffer()
+		textureBuffers[name] = buf
+		return buf
 	}
 
-	res.Terreno = terrainBuffer.Geometry.Clone()
+	// Algoritmo Greedy Meshing Vertical (1D Y-Axis)
+	runGreedyMesherX(req, getBuffer, liquidBuffer, m, &res)
+
+	// Converter buffers para GeometryData
+	for name, buf := range textureBuffers {
+		if len(buf.Geometry.Vertices) > 0 {
+			res.MaterialGeometries[name] = buf.Geometry.Clone()
+		}
+		PutMeshBuffer(buf)
+	}
+
 	res.Liquidos = liquidBuffer.Geometry.Clone()
+	PutMeshBuffer(liquidBuffer)
+
 	return res
 }
 
-func runGreedyMesherX(req Request, terrainBuffer *MeshBuffer, liquidBuffer *MeshBuffer, m *BlockMesher) {
+func runGreedyMesherX(req Request, getBuffer func(string) *MeshBuffer, liquidBuffer *MeshBuffer, m *BlockMesher, res *Result) {
 	// Chunks do DFHack são 16x16x1. O origin.Z é a camada correta.
 	currentZ := req.Origin.Z
 	{
@@ -184,7 +190,11 @@ func runGreedyMesherX(req Request, terrainBuffer *MeshBuffer, liquidBuffer *Mesh
 						drawSouth = true // fallback se nao achar no mapa carregado (borda)
 					}
 
-					m.addCubeGreedy(pos, w, h, d, currentRunColor, drawUp, drawDown, drawNorth, drawSouth, drawWest, drawEast, terrainBuffer, util.DFCoord{X: req.Origin.X + xx, Y: req.Origin.Y + runStartY, Z: currentZ}, req.Data)
+					// Obter buffer correto para esta textura
+					texName := m.MatStore.GetTextureName(runTile.MaterialCategory())
+					targetBuffer := getBuffer(texName)
+
+					m.addCubeGreedy(pos, w, h, d, currentRunColor, drawUp, drawDown, drawNorth, drawSouth, drawWest, drawEast, targetBuffer, util.DFCoord{X: req.Origin.X + xx, Y: req.Origin.Y + runStartY, Z: currentZ}, req.Data)
 				}
 				runStartY = -1
 				runLength = 0
@@ -233,31 +243,35 @@ func runGreedyMesherX(req Request, terrainBuffer *MeshBuffer, liquidBuffer *Mesh
 
 				if shape == dfproto.ShapeRamp {
 					flushRun() // Rampas não são mescladas no greedy mesher por enquanto
-					m.addRamp(worldCoord, color, terrainBuffer, req.Data)
+					texName := m.MatStore.GetTextureName(tile.MaterialCategory())
+					m.addRamp(worldCoord, color, getBuffer(texName), req.Data)
 					continue
 				}
 
 				if shape == dfproto.ShapeStairUp || shape == dfproto.ShapeStairDown || shape == dfproto.ShapeStairUpDown {
 					flushRun()
-					m.addStairs(worldCoord, shape, color, terrainBuffer, req.Data)
+					texName := m.MatStore.GetTextureName(tile.MaterialCategory())
+					m.addStairs(worldCoord, shape, color, getBuffer(texName), req.Data)
 					continue
 				}
 
 				if shape == dfproto.ShapeTreeShape || shape == dfproto.ShapeTrunkBranch {
 					flushRun()
-					m.addTreeTrunk(worldCoord, color, terrainBuffer, req.Data)
+					texName := m.MatStore.GetTextureName(tile.MaterialCategory())
+					m.addTreeTrunk(worldCoord, color, getBuffer(texName), req.Data)
 					continue
 				}
 
 				if shape == dfproto.ShapeBranch || shape == dfproto.ShapeTwig {
 					flushRun()
-					m.addTreeLeaves(worldCoord, color, terrainBuffer, req.Data)
+					texName := m.MatStore.GetTextureName(tile.MaterialCategory())
+					m.addTreeLeaves(worldCoord, color, getBuffer(texName), req.Data)
 					continue
 				}
 
 				if shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
 					flushRun()
-					m.addShrub(worldCoord, color, terrainBuffer, req.Data)
+					m.addShrub(worldCoord, color, res)
 					continue
 				}
 
@@ -317,66 +331,59 @@ func (m *BlockMesher) addCubeGreedy(pos rl.Vector3, w, h, d float32, color [4]ui
 		aoSW := getAO(coord, util.DirSouth, util.DirWest, util.DirSouthWest)
 		aoSE := getAO(coord, util.DirSouth, util.DirEast, util.DirSouthEast)
 
-		buffer.AddFaceAOStandard(
-			[3]float32{x, y + h, z}, applyAO(color, aoNW), // NW
-			[3]float32{x + w, y + h, z}, applyAO(color, aoNE), // NE
-			[3]float32{x + w, y + h, z - d}, applyAO(color, aoSE), // SE
-			[3]float32{x, y + h, z - d}, applyAO(color, aoSW), // SW
+		// Topo usa X e Z (Z no DF é Y no Raylib, mas aqui estamos no Raylib space já)
+		// No Raylib: X é X, Y é Y (altura), Z é Z.
+		// Queremos a repetição baseada em X e Z do mundo.
+		buffer.AddFaceUVStandard(
+			[3]float32{x, y + h, z}, [2]float32{x, -z}, applyAO(color, aoNW),
+			[3]float32{x + w, y + h, z}, [2]float32{x + w, -z}, applyAO(color, aoNE),
+			[3]float32{x + w, y + h, z - d}, [2]float32{x + w, -(z - d)}, applyAO(color, aoSE),
+			[3]float32{x, y + h, z - d}, [2]float32{x, -(z - d)}, applyAO(color, aoSW),
 			[3]float32{0, 1, 0},
 		)
 	}
 
 	// Face Baixo (-Y)
 	if drawDown {
-		buffer.AddFace(
-			[3]float32{x, y, z},         // NW
-			[3]float32{x, y, z - d},     // SW
-			[3]float32{x + w, y, z - d}, // SE
-			[3]float32{x + w, y, z},     // NE
+		buffer.AddFaceUV(
+			[3]float32{x, y, z}, [3]float32{x, y, z - d}, [3]float32{x + w, y, z - d}, [3]float32{x + w, y, z},
+			[2]float32{x, -z}, [2]float32{x, -(z - d)}, [2]float32{x + w, -(z - d)}, [2]float32{x + w, -z},
 			[3]float32{0, -1, 0}, color,
 		)
 	}
 
 	// Face Norte (+Z)
 	if drawNorth {
-		buffer.AddFace(
-			[3]float32{x, y, z},         // Bottom-NW
-			[3]float32{x + w, y, z},     // Bottom-NE
-			[3]float32{x + w, y + h, z}, // Top-NE
-			[3]float32{x, y + h, z},     // Top-NW
+		buffer.AddFaceUV(
+			[3]float32{x, y, z}, [3]float32{x + w, y, z}, [3]float32{x + w, y + h, z}, [3]float32{x, y + h, z},
+			[2]float32{x, -y}, [2]float32{x + w, -y}, [2]float32{x + w, -(y + h)}, [2]float32{x, -(y + h)},
 			[3]float32{0, 0, 1}, color,
 		)
 	}
 
 	// Face Sul (-Z)
 	if drawSouth {
-		buffer.AddFace(
-			[3]float32{x + w, y, z - d},     // Bottom-SE
-			[3]float32{x, y, z - d},         // Bottom-SW
-			[3]float32{x, y + h, z - d},     // Top-SW
-			[3]float32{x + w, y + h, z - d}, // Top-SE
+		buffer.AddFaceUV(
+			[3]float32{x + w, y, z - d}, [3]float32{x, y, z - d}, [3]float32{x, y + h, z - d}, [3]float32{x + w, y + h, z - d},
+			[2]float32{x + w, -y}, [2]float32{x, -y}, [2]float32{x, -(y + h)}, [2]float32{x + w, -(y + h)},
 			[3]float32{0, 0, -1}, color,
 		)
 	}
 
 	// Face Oeste (-X)
 	if drawWest {
-		buffer.AddFace(
-			[3]float32{x, y, z - d},     // Bottom-SW
-			[3]float32{x, y, z},         // Bottom-NW
-			[3]float32{x, y + h, z},     // Top-NW
-			[3]float32{x, y + h, z - d}, // Top-SW
+		buffer.AddFaceUV(
+			[3]float32{x, y, z - d}, [3]float32{x, y, z}, [3]float32{x, y + h, z}, [3]float32{x, y + h, z - d},
+			[2]float32{-z + d, -y}, [2]float32{-z, -y}, [2]float32{-z, -(y + h)}, [2]float32{-z + d, -(y + h)},
 			[3]float32{-1, 0, 0}, color,
 		)
 	}
 
 	// Face Leste (+X)
 	if drawEast {
-		buffer.AddFace(
-			[3]float32{x + w, y, z},         // Bottom-NE
-			[3]float32{x + w, y, z - d},     // Bottom-SE
-			[3]float32{x + w, y + h, z - d}, // Top-SE
-			[3]float32{x + w, y + h, z},     // Top-NE
+		buffer.AddFaceUV(
+			[3]float32{x + w, y, z}, [3]float32{x + w, y, z - d}, [3]float32{x + w, y + h, z - d}, [3]float32{x + w, y + h, z},
+			[2]float32{-z, -y}, [2]float32{-z + d, -y}, [2]float32{-z + d, -(y + h)}, [2]float32{-z, -(y + h)},
 			[3]float32{1, 0, 0}, color,
 		)
 	}
@@ -632,58 +639,53 @@ func (m *BlockMesher) addTreeTrunk(coord util.DFCoord, color [4]uint8, buffer *M
 	pos := util.DFToWorldPos(coord)
 	x, y, z := pos.X, pos.Y, pos.Z
 
-	// Cor de madeira mais escura para o tronco
 	trunkColor := [4]uint8{uint8(float32(color[0]) * 0.8), uint8(float32(color[1]) * 0.8), uint8(float32(color[2]) * 0.8), 255}
-
-	// Simplificamos o tronco como um paralelepípedo mais fino (0.4x0.4)
-	// para não parecer apenas um bloco sólido
-	o := float32(0.3) // Offset para centralizar
+	o := float32(0.3)
 	tw, td := float32(0.4), float32(0.4)
 
-	// Face Norte (+Z)
-	buffer.AddFaceAOStandard([3]float32{x + o, y, z - o}, trunkColor, [3]float32{x + o + tw, y, z - o}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o}, trunkColor, [3]float32{x + o, y + 1.0, z - o}, trunkColor, [3]float32{0, 0, 1})
-	// Face Sul (-Z)
-	buffer.AddFaceAOStandard([3]float32{x + o, y, z - o - td}, trunkColor, [3]float32{x + o, y + 1.0, z - o - td}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o - td}, trunkColor, [3]float32{x + o + tw, y, z - o - td}, trunkColor, [3]float32{0, 0, -1})
-	// Face Oeste (-X)
-	buffer.AddFaceAOStandard([3]float32{x + o, y, z - o}, trunkColor, [3]float32{x + o, y + 1.0, z - o}, trunkColor, [3]float32{x + o, y + 1.0, z - o - td}, trunkColor, [3]float32{x + o, y, z - o - td}, trunkColor, [3]float32{-1, 0, 0})
-	// Face Leste (+X)
-	buffer.AddFaceAOStandard([3]float32{x + o + tw, y, z - o}, trunkColor, [3]float32{x + o + tw, y, z - o - td}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o - td}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o}, trunkColor, [3]float32{1, 0, 0})
-
-	// Topo e Baixo se necessário (geralmente cobertos por outros troncos ou folhas)
-	buffer.AddFaceAOStandard([3]float32{x + o, y + 1.0, z - o}, trunkColor, [3]float32{x + o, y + 1.0, z - o - td}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o - td}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o}, trunkColor, [3]float32{0, 1, 0})
+	// Norte
+	buffer.AddFaceUVStandard([3]float32{x + o, y, z - o}, [2]float32{x + o, -y}, trunkColor, [3]float32{x + o + tw, y, z - o}, [2]float32{x + o + tw, -y}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o}, [2]float32{x + o + tw, -(y + 1.0)}, trunkColor, [3]float32{x + o, y + 1.0, z - o}, [2]float32{x + o, -(y + 1.0)}, trunkColor, [3]float32{0, 0, 1})
+	// Sul
+	buffer.AddFaceUVStandard([3]float32{x + o, y, z - o - td}, [2]float32{x + o, -y}, trunkColor, [3]float32{x + o, y + 1.0, z - o - td}, [2]float32{x + o, -(y + 1.0)}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o - td}, [2]float32{x + o + tw, -(y + 1.0)}, trunkColor, [3]float32{x + o + tw, y, z - o - td}, [2]float32{x + o + tw, -y}, trunkColor, [3]float32{0, 0, -1})
+	// Oeste
+	buffer.AddFaceUVStandard([3]float32{x + o, y, z - o}, [2]float32{-z, -y}, trunkColor, [3]float32{x + o, y + 1.0, z - o}, [2]float32{-z, -(y + 1.0)}, trunkColor, [3]float32{x + o, y + 1.0, z - o - td}, [2]float32{-(z - td), -(y + 1.0)}, trunkColor, [3]float32{x + o, y, z - o - td}, [2]float32{-(z - td), -y}, trunkColor, [3]float32{-1, 0, 0})
+	// Leste
+	buffer.AddFaceUVStandard([3]float32{x + o + tw, y, z - o}, [2]float32{-z, -y}, trunkColor, [3]float32{x + o + tw, y, z - o - td}, [2]float32{-(z - td), -y}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o - td}, [2]float32{-(z - td), -(y + 1.0)}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o}, [2]float32{-z, -(y + 1.0)}, trunkColor, [3]float32{1, 0, 0})
+	// Topo
+	buffer.AddFaceUVStandard([3]float32{x + o, y + 1.0, z - o}, [2]float32{x + o, -z}, trunkColor, [3]float32{x + o, y + 1.0, z - o - td}, [2]float32{x + o, -(z - td)}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o - td}, [2]float32{x + o + tw, -(z - td)}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o}, [2]float32{x + o + tw, -z}, trunkColor, [3]float32{0, 1, 0})
 }
 
 func (m *BlockMesher) addTreeLeaves(coord util.DFCoord, color [4]uint8, buffer *MeshBuffer, data *mapdata.MapDataStore) {
 	pos := util.DFToWorldPos(coord)
 	x, y, z := pos.X, pos.Y, pos.Z
 
-	// Para folhas, usamos um bloco levemente menor (0.8) e centralizado para dar aspecto de "nuget" de folhas
 	o := float32(0.1)
 	s := float32(0.8)
-
-	// Cor esverdeada para folhas (DF pode mandar cores variadas, vamos garantir o alpha)
 	leafColor := color
 	leafColor[3] = 255
 
-	// 6 Faces CCW
-	buffer.AddFaceAOStandard([3]float32{x + o, y + o, z - o}, leafColor, [3]float32{x + o + s, y + o, z - o}, leafColor, [3]float32{x + o + s, y + o + s, z - o}, leafColor, [3]float32{x + o, y + o + s, z - o}, leafColor, [3]float32{0, 0, 1})
-	buffer.AddFaceAOStandard([3]float32{x + o, y + o, z - o - s}, leafColor, [3]float32{x + o, y + o + s, z - o - s}, leafColor, [3]float32{x + o + s, y + o + s, z - o - s}, leafColor, [3]float32{x + o + s, y + o, z - o - s}, leafColor, [3]float32{0, 0, -1})
-	buffer.AddFaceAOStandard([3]float32{x + o, y + o, z - o}, leafColor, [3]float32{x + o, y + o + s, z - o}, leafColor, [3]float32{x + o, y + o + s, z - o - s}, leafColor, [3]float32{x + o, y + o, z - o - s}, leafColor, [3]float32{-1, 0, 0})
-	buffer.AddFaceAOStandard([3]float32{x + o + s, y + o, z - o}, leafColor, [3]float32{x + o + s, y + o, z - o - s}, leafColor, [3]float32{x + o + s, y + o + s, z - o - s}, leafColor, [3]float32{x + o + s, y + o + s, z - o}, leafColor, [3]float32{1, 0, 0})
-	buffer.AddFaceAOStandard([3]float32{x + o, y + o + s, z - o}, leafColor, [3]float32{x + o, y + o + s, z - o - s}, leafColor, [3]float32{x + o + s, y + o + s, z - o - s}, leafColor, [3]float32{x + o + s, y + o + s, z - o}, leafColor, [3]float32{0, 1, 0})
-	buffer.AddFaceAOStandard([3]float32{x + o, y + o, z - o}, leafColor, [3]float32{x + o + s, y + o, z - o}, leafColor, [3]float32{x + o + s, y + o, z - o - s}, leafColor, [3]float32{x + o, y + o, z - o - s}, leafColor, [3]float32{0, -1, 0})
+	// Norte
+	buffer.AddFaceUVStandard([3]float32{x + o, y + o, z - o}, [2]float32{x, -y}, leafColor, [3]float32{x + o + s, y + o, z - o}, [2]float32{x + s, -y}, leafColor, [3]float32{x + o + s, y + o + s, z - o}, [2]float32{x + s, -(y + s)}, leafColor, [3]float32{x + o, y + o + s, z - o}, [2]float32{x, -(y + s)}, leafColor, [3]float32{0, 0, 1})
+	// Sul
+	buffer.AddFaceUVStandard([3]float32{x + o, y + o, z - o - s}, [2]float32{x, -y}, leafColor, [3]float32{x + o, y + o + s, z - o - s}, [2]float32{x, -(y + s)}, leafColor, [3]float32{x + o + s, y + o + s, z - o - s}, [2]float32{x + s, -(y + s)}, leafColor, [3]float32{x + o + s, y + o, z - o - s}, [2]float32{x + s, -y}, leafColor, [3]float32{0, 0, -1})
+	// Oeste
+	buffer.AddFaceUVStandard([3]float32{x + o, y + o, z - o}, [2]float32{-z, -y}, leafColor, [3]float32{x + o, y + o + s, z - o}, [2]float32{-z, -(y + s)}, leafColor, [3]float32{x + o, y + o + s, z - o - s}, [2]float32{-(z - s), -(y + s)}, leafColor, [3]float32{x + o, y + o, z - o - s}, [2]float32{-(z - s), -y}, leafColor, [3]float32{-1, 0, 0})
+	// Leste
+	buffer.AddFaceUVStandard([3]float32{x + o + s, y + o, z - o}, [2]float32{-z, -y}, leafColor, [3]float32{x + o + s, y + o, z - o - s}, [2]float32{-(z - s), -y}, leafColor, [3]float32{x + o + s, y + o + s, z - o - s}, [2]float32{-(z - s), -(y + s)}, leafColor, [3]float32{x + o + s, y + o + s, z - o}, [2]float32{-z, -(y + s)}, leafColor, [3]float32{1, 0, 0})
+	// Topo
+	buffer.AddFaceUVStandard([3]float32{x + o, y + o + s, z - o}, [2]float32{x, -z}, leafColor, [3]float32{x + o, y + o + s, z - o - s}, [2]float32{x, -(z - s)}, leafColor, [3]float32{x + o + s, y + o + s, z - o - s}, [2]float32{x + s, -(z - s)}, leafColor, [3]float32{x + o + s, y + o + s, z - o}, [2]float32{x + s, -z}, leafColor, [3]float32{0, 1, 0})
+	// Baixo
+	buffer.AddFaceUVStandard([3]float32{x + o, y + o, z - o}, [2]float32{x, -z}, leafColor, [3]float32{x + o + s, y + o, z - o}, [2]float32{x + s, -z}, leafColor, [3]float32{x + o + s, y + o, z - o - s}, [2]float32{x + s, -(z - s)}, leafColor, [3]float32{x + o, y + o, z - o - s}, [2]float32{x, -(z - s)}, leafColor, [3]float32{0, -1, 0})
 }
 
-func (m *BlockMesher) addShrub(coord util.DFCoord, color [4]uint8, buffer *MeshBuffer, data *mapdata.MapDataStore) {
+func (m *BlockMesher) addShrub(coord util.DFCoord, color [4]uint8, res *Result) {
 	pos := util.DFToWorldPos(coord)
-	x, y, z := pos.X, pos.Y, pos.Z
 
-	// Arbustos são pequenos "X" (cross-quads) como em jogos retro
-	c := color
-	c[3] = 255
-
-	// Diagonal 1
-	buffer.AddFace([3]float32{x, y, z}, [3]float32{x + 1, y, z - 1}, [3]float32{x + 1, y + 0.7, z - 1}, [3]float32{x, y + 0.7, z}, [3]float32{0, 1, 0}, c)
-	// Diagonal 2
-	buffer.AddFace([3]float32{x + 1, y, z}, [3]float32{x, y, z - 1}, [3]float32{x, y + 0.7, z - 1}, [3]float32{x + 1, y + 0.7, z}, [3]float32{0, 1, 0}, c)
+	// Em vez de gerar geometria, emitimos uma instância de modelo 3D
+	res.ModelInstances = append(res.ModelInstances, ModelInstance{
+		ModelName: "shrub",
+		Position:  [3]float32{pos.X + 0.5, pos.Y + 0.1, pos.Z - 0.5}, // Centro do tile, acima do chão
+		Scale:     0.4,
+		Color:     color,
+	})
 }
