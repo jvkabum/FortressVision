@@ -135,3 +135,16 @@ var DirOffsets = map[Directions]DFCoord{
 	DirUp:        {X: 0, Y: 0, Z: 1},
 	DirDown:      {X: 0, Y: 0, Z: -1},
 }
+
+// AddDir retorna uma nova coordenada deslocada na direção especificada.
+func (c DFCoord) AddDir(dir Directions) DFCoord {
+	return c.Add(DirOffsets[dir])
+}
+
+// Helpers para direções rápidas
+func (c DFCoord) Up() DFCoord    { return c.AddDir(DirUp) }
+func (c DFCoord) Down() DFCoord  { return c.AddDir(DirDown) }
+func (c DFCoord) North() DFCoord { return c.AddDir(DirNorth) }
+func (c DFCoord) South() DFCoord { return c.AddDir(DirSouth) }
+func (c DFCoord) East() DFCoord  { return c.AddDir(DirEast) }
+func (c DFCoord) West() DFCoord  { return c.AddDir(DirWest) }

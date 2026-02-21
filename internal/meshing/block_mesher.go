@@ -140,7 +140,9 @@ func (m *BlockMesher) Generate(req Request) Result {
 }
 
 func runGreedyMesherX(req Request, terrainBuffer *MeshBuffer, liquidBuffer *MeshBuffer, m *BlockMesher) {
-	for currentZ := req.FocusZ - 200; currentZ <= req.FocusZ+50; currentZ++ {
+	// Chunks do DFHack são 16x16x1. O origin.Z é a camada correta.
+	currentZ := req.Origin.Z
+	{
 		for xx := int32(0); xx < 16; xx++ {
 			var runStartY int32 = -1
 			var runLength int32 = 0
@@ -182,7 +184,7 @@ func runGreedyMesherX(req Request, terrainBuffer *MeshBuffer, liquidBuffer *Mesh
 						drawSouth = true // fallback se nao achar no mapa carregado (borda)
 					}
 
-					m.addCubeGreedy(pos, w, h, d, currentRunColor, drawUp, drawDown, drawNorth, drawSouth, drawWest, drawEast, terrainBuffer)
+					m.addCubeGreedy(pos, w, h, d, currentRunColor, drawUp, drawDown, drawNorth, drawSouth, drawWest, drawEast, terrainBuffer, util.DFCoord{X: req.Origin.X + xx, Y: req.Origin.Y + runStartY, Z: currentZ}, req.Data)
 				}
 				runStartY = -1
 				runLength = 0
@@ -229,6 +231,24 @@ func runGreedyMesherX(req Request, terrainBuffer *MeshBuffer, liquidBuffer *Mesh
 					flushRun()
 				}
 
+				if shape == dfproto.ShapeRamp {
+					flushRun() // Rampas não são mescladas no greedy mesher por enquanto
+					m.addRamp(worldCoord, color, terrainBuffer, req.Data)
+					continue
+				}
+
+				if shape == dfproto.ShapeStairUp || shape == dfproto.ShapeStairDown || shape == dfproto.ShapeStairUpDown {
+					flushRun()
+					m.addStairs(worldCoord, shape, color, terrainBuffer, req.Data)
+					continue
+				}
+
+				if shape == dfproto.ShapeFortification {
+					flushRun()
+					m.addFortification(worldCoord, color, terrainBuffer, req.Data)
+					continue
+				}
+
 				if runStartY == -1 {
 					runStartY = yy
 					currentRunShape = shape
@@ -247,68 +267,104 @@ func (m *BlockMesher) generateTileGeometry(tile *mapdata.Tile, buffer *MeshBuffe
 }
 
 // addCubeGreedy adiciona um cubo com culling de faces previamente calculado pelo Greedy Mesher.
-func (m *BlockMesher) addCubeGreedy(pos rl.Vector3, w, h, d float32, color [4]uint8, drawUp, drawDown, drawNorth, drawSouth, drawWest, drawEast bool, buffer *MeshBuffer) {
+func (m *BlockMesher) addCubeGreedy(pos rl.Vector3, w, h, d float32, color [4]uint8,
+	drawUp, drawDown, drawNorth, drawSouth, drawWest, drawEast bool, buffer *MeshBuffer, coord util.DFCoord, data *mapdata.MapDataStore) {
 	x, y, z := pos.X, pos.Y, pos.Z
+
+	// Helper para Ambient Occlusion (DAO)
+	// Retorna um multiplicador de cor baseado na presença de blocos vizinhos
+	getAO := func(c util.DFCoord, d1, d2, d3 util.Directions) float32 {
+		occ1 := m.isSolidAO(c, d1, data)
+		occ2 := m.isSolidAO(c, d2, data)
+		occ3 := m.isSolidAO(c, d3, data)
+
+		if occ1 && occ2 {
+			return 0.8 // Canto triplo (suave)
+		}
+		res := 1.0
+		if occ1 {
+			res -= 0.05
+		}
+		if occ2 {
+			res -= 0.05
+		}
+		if occ3 {
+			res -= 0.05
+		}
+		return float32(res)
+	}
+
+	applyAO := func(c [4]uint8, ao float32) [4]uint8 {
+		return [4]uint8{uint8(float32(c[0]) * ao), uint8(float32(c[1]) * ao), uint8(float32(c[2]) * ao), c[3]}
+	}
 
 	// Face Topo (+Y)
 	if drawUp {
-		buffer.AddFace(
-			[3]float32{x, y + h, z},
-			[3]float32{x, y + h, z - d},
-			[3]float32{x + w, y + h, z - d},
-			[3]float32{x + w, y + h, z},
-			[3]float32{0, 1, 0}, color,
+		aoNW := getAO(coord, util.DirNorth, util.DirWest, util.DirNorthWest)
+		aoNE := getAO(coord, util.DirNorth, util.DirEast, util.DirNorthEast)
+		aoSW := getAO(coord, util.DirSouth, util.DirWest, util.DirSouthWest)
+		aoSE := getAO(coord, util.DirSouth, util.DirEast, util.DirSouthEast)
+
+		buffer.AddFaceAOStandard(
+			[3]float32{x, y + h, z}, applyAO(color, aoNW), // NW
+			[3]float32{x + w, y + h, z}, applyAO(color, aoNE), // NE
+			[3]float32{x + w, y + h, z - d}, applyAO(color, aoSE), // SE
+			[3]float32{x, y + h, z - d}, applyAO(color, aoSW), // SW
+			[3]float32{0, 1, 0},
 		)
 	}
 
 	// Face Baixo (-Y)
 	if drawDown {
 		buffer.AddFace(
-			[3]float32{x, y, z},
-			[3]float32{x + w, y, z},
-			[3]float32{x + w, y, z - d},
-			[3]float32{x, y, z - d},
+			[3]float32{x, y, z},         // NW
+			[3]float32{x, y, z - d},     // SW
+			[3]float32{x + w, y, z - d}, // SE
+			[3]float32{x + w, y, z},     // NE
 			[3]float32{0, -1, 0}, color,
 		)
 	}
 
-	// Face Norte (-Z no mundo 3D)
+	// Face Norte (+Z)
 	if drawNorth {
 		buffer.AddFace(
-			[3]float32{x, y, z},
-			[3]float32{x, y + h, z},
-			[3]float32{x + w, y + h, z},
-			[3]float32{x + w, y, z},
+			[3]float32{x, y, z},         // Bottom-NW
+			[3]float32{x + w, y, z},     // Bottom-NE
+			[3]float32{x + w, y + h, z}, // Top-NE
+			[3]float32{x, y + h, z},     // Top-NW
 			[3]float32{0, 0, 1}, color,
 		)
 	}
 
+	// Face Sul (-Z)
 	if drawSouth {
 		buffer.AddFace(
-			[3]float32{x + w, y, z - d},
-			[3]float32{x + w, y + h, z - d},
-			[3]float32{x, y + h, z - d},
-			[3]float32{x, y, z - d},
+			[3]float32{x + w, y, z - d},     // Bottom-SE
+			[3]float32{x, y, z - d},         // Bottom-SW
+			[3]float32{x, y + h, z - d},     // Top-SW
+			[3]float32{x + w, y + h, z - d}, // Top-SE
 			[3]float32{0, 0, -1}, color,
 		)
 	}
 
+	// Face Oeste (-X)
 	if drawWest {
 		buffer.AddFace(
-			[3]float32{x, y, z - d},
-			[3]float32{x, y + h, z - d},
-			[3]float32{x, y + h, z},
-			[3]float32{x, y, z},
+			[3]float32{x, y, z - d},     // Bottom-SW
+			[3]float32{x, y, z},         // Bottom-NW
+			[3]float32{x, y + h, z},     // Top-NW
+			[3]float32{x, y + h, z - d}, // Top-SW
 			[3]float32{-1, 0, 0}, color,
 		)
 	}
 
+	// Face Leste (+X)
 	if drawEast {
 		buffer.AddFace(
-			[3]float32{x + w, y, z},
-			[3]float32{x + w, y + h, z},
-			[3]float32{x + w, y + h, z - d},
-			[3]float32{x + w, y, z - d},
+			[3]float32{x + w, y, z},         // Bottom-NE
+			[3]float32{x + w, y, z - d},     // Bottom-SE
+			[3]float32{x + w, y + h, z - d}, // Top-SE
+			[3]float32{x + w, y + h, z},     // Top-NE
 			[3]float32{1, 0, 0}, color,
 		)
 	}
@@ -335,8 +391,20 @@ func (m *BlockMesher) shouldDrawFace(tile *mapdata.Tile, dir util.Directions) bo
 	}
 
 	// Se eu sou parede e o vizinho é parede, não desenha face interna
-	if tile.Shape() == dfproto.ShapeWall && neighborShape == dfproto.ShapeWall {
-		return false
+	if (tile.Shape() == dfproto.ShapeWall || tile.Shape() == dfproto.ShapeFortification) &&
+		(neighborShape == dfproto.ShapeWall || neighborShape == dfproto.ShapeFortification) {
+		// Se ambos forem fortificações ou um for fortificação, só não desenha se as faces forem totalmente sólidas.
+		// Mas como fortificações têm fendas, é melhor SEMPRE desenhar as faces laterais da fenda se o vizinho for uma wall.
+		// Porém, para otimização, se forem duas fortificações adjacentes, as fendas se alinham.
+		if tile.Shape() == dfproto.ShapeWall && neighborShape == dfproto.ShapeWall {
+			return false
+		}
+		// Se houver uma fortificação, permitimos o culling apenas se for Top/Bottom, onde são sólidas.
+		if dir == util.DirUp || dir == util.DirDown {
+			return false
+		}
+		// Para as laterais, desenha para garantir que a fenda não mostre o "nada" interno do bloco adjacente
+		return true
 	}
 
 	// Caso especial: Piso em cima de parede sólida
@@ -345,4 +413,205 @@ func (m *BlockMesher) shouldDrawFace(tile *mapdata.Tile, dir util.Directions) bo
 	}
 
 	return true
+}
+
+func (m *BlockMesher) addRamp(coord util.DFCoord, color [4]uint8, buffer *MeshBuffer, data *mapdata.MapDataStore) {
+	pos := util.DFToWorldPos(coord)
+	x, y, z := pos.X, pos.Y, pos.Z
+	w, d := float32(1.0), float32(1.0)
+
+	// Direções que têm conexão
+	north := m.isSolid(coord, util.DirNorth, data)
+	south := m.isSolid(coord, util.DirSouth, data)
+	east := m.isSolid(coord, util.DirEast, data)
+	west := m.isSolid(coord, util.DirWest, data)
+
+	// Geometria básica: Piso
+	buffer.AddFace(
+		[3]float32{x, y, z},
+		[3]float32{x + w, y, z},
+		[3]float32{x + w, y, z - d},
+		[3]float32{x, y, z - d},
+		[3]float32{0, -1, 0}, color,
+	)
+
+	// Alturas dos cantos (0 = baixo, 1 = alto)
+	// DF Coord: North is Y-1, South is Y+1
+	// World Coord: North is +Z, South is -Z (based on coords.go: Z: float32(-coord.Y) * GameScale)
+	// Wait, coords.go says:
+	// DirNorth: {X: 0, Y: -1, Z: 0} -> World Pos Z: -(Y-1) = -Y + 1 (moved North)
+	// So North is +Z, South is -Z.
+	hNW, hNE, hSE, hSW := float32(0.0), float32(0.0), float32(0.0), float32(0.0)
+
+	if north {
+		hNW, hNE = 1, 1
+	}
+	if south {
+		hSW, hSE = 1, 1
+	}
+	if east {
+		hNE, hSE = 1, 1
+	}
+	if west {
+		hNW, hSW = 1, 1
+	}
+
+	// Se for uma rampa isolada (sem vizinhos solidos), vira um bloco baixo (piso)
+	if !north && !south && !east && !west {
+		hNW, hNE, hSE, hSW = 0.1, 0.1, 0.1, 0.1
+	}
+
+	// Vértices do topo
+	vNW := [3]float32{x, y + hNW, z}
+	vNE := [3]float32{x + w, y + hNE, z}
+	vSE := [3]float32{x + w, y + hSE, z - d}
+	vSW := [3]float32{x, y + hSW, z - d}
+
+	// Vértices da base
+	bNW := [3]float32{x, y, z}
+	bNE := [3]float32{x + w, y, z}
+	bSE := [3]float32{x + w, y, z - d}
+	bSW := [3]float32{x, y, z - d}
+
+	// Face de cima (Rampa) - CCW
+	buffer.AddFace(vNW, vSW, vSE, vNE, [3]float32{0, 1, 0}, color)
+
+	// Proteger as laterais se houver desnível - CCW
+	if hNW > 0 || hNE > 0 { // Face Norte (+Z)
+		buffer.AddFace(bNW, bNE, vNE, vNW, [3]float32{0, 0, 1}, color)
+	}
+	if hSW > 0 || hSE > 0 { // Face Sul (-Z)
+		buffer.AddFace(bSE, bSW, vSW, vSE, [3]float32{0, 0, -1}, color)
+	}
+	if hNW > 0 || hSW > 0 { // Face Oeste (-X)
+		buffer.AddFace(bSW, bNW, vNW, vSW, [3]float32{-1, 0, 0}, color)
+	}
+	if hNE > 0 || hSE > 0 { // Face Leste (+X)
+		buffer.AddFace(bNE, bSE, vSE, vNE, [3]float32{1, 0, 0}, color)
+	}
+}
+
+func (m *BlockMesher) isSolidAO(coord util.DFCoord, dir util.Directions, data *mapdata.MapDataStore) bool {
+	neighborPos := coord.AddDir(dir)
+	tile := data.GetTile(neighborPos)
+	if tile == nil {
+		return false
+	}
+	shape := tile.Shape()
+	return shape == dfproto.ShapeWall || shape == dfproto.ShapeFortification
+}
+
+func (m *BlockMesher) isSolid(coord util.DFCoord, dir util.Directions, data *mapdata.MapDataStore) bool {
+	neighborCoord := coord.Add(util.DirOffsets[dir])
+	tile := data.GetTile(neighborCoord)
+	if tile == nil {
+		return false
+	}
+	shape := tile.Shape()
+	return shape == dfproto.ShapeWall || shape == dfproto.ShapeRamp
+}
+
+func (m *BlockMesher) addStairs(coord util.DFCoord, shape dfproto.TiletypeShape, color [4]uint8, buffer *MeshBuffer, data *mapdata.MapDataStore) {
+	pos := util.DFToWorldPos(coord)
+	x, y, z := pos.X, pos.Y, pos.Z
+	w, d := float32(1.0), float32(1.0)
+
+	// Desenha 4 degraus subindo
+	// O DF não especifica a direção das escadas, então vamos fazer uma direção fixa por enquanto
+	steps := 4
+	stepH := float32(1.0) / float32(steps)
+	stepD := d / float32(steps)
+
+	// Cor um pouco mais escura para os degraus laterais para dar profundidade
+	sideColor := [4]uint8{uint8(float32(color[0]) * 0.8), uint8(float32(color[1]) * 0.8), uint8(float32(color[2]) * 0.8), color[3]}
+
+	for i := 0; i < steps; i++ {
+		curH := float32(i+1) * stepH
+		prevH := float32(i) * stepH
+		curZ := z - float32(i)*stepD
+
+		// Topo do degrau - CCW com AO
+		buffer.AddFaceAOStandard(
+			[3]float32{x, y + curH, curZ}, color,
+			[3]float32{x, y + curH, curZ - stepD}, color,
+			[3]float32{x + w, y + curH, curZ - stepD}, color,
+			[3]float32{x + w, y + curH, curZ}, color,
+			[3]float32{0, 1, 0},
+		)
+
+		// Frente do degrau (+Z/North) - CCW
+		buffer.AddFace(
+			[3]float32{x, y + prevH, curZ},
+			[3]float32{x + w, y + prevH, curZ},
+			[3]float32{x + w, y + curH, curZ},
+			[3]float32{x, y + curH, curZ},
+			[3]float32{0, 0, 1}, sideColor,
+		)
+
+		// Lados do degrau (West/East)
+		// West (-X)
+		buffer.AddFace(
+			[3]float32{x, y + prevH, curZ - stepD},
+			[3]float32{x, y + prevH, curZ},
+			[3]float32{x, y + curH, curZ},
+			[3]float32{x, y + curH, curZ - stepD},
+			[3]float32{-1, 0, 0}, sideColor,
+		)
+		// Leste (+X) - CCW
+		buffer.AddFace(
+			[3]float32{x + w, y, curZ},
+			[3]float32{x + w, y, curZ - stepD},
+			[3]float32{x + w, y + curH, curZ - stepD},
+			[3]float32{x + w, y + curH, curZ},
+			[3]float32{1, 0, 0}, sideColor,
+		)
+	}
+
+	// Se for StairUpDown ou StairDown, adicionamos um fundo sólido para não ver através do chão
+	if shape == dfproto.ShapeStairDown || shape == dfproto.ShapeStairUpDown {
+		// Piso base
+		buffer.AddFace(
+			[3]float32{x, y, z},
+			[3]float32{x + w, y, z},
+			[3]float32{x + w, y, z - d},
+			[3]float32{x, y, z - d},
+			[3]float32{0, -1, 0}, color,
+		)
+	}
+}
+
+func (m *BlockMesher) addFortification(coord util.DFCoord, color [4]uint8, buffer *MeshBuffer, data *mapdata.MapDataStore) {
+	pos := util.DFToWorldPos(coord)
+	x, y, z := pos.X, pos.Y, pos.Z
+	w, d := float32(1.0), float32(1.0)
+
+	// Uma fortificação no DF é uma parede com uma fenda horizontal.
+	// Vamos fazer:
+	// Base: 0.0 -> 0.4
+	// Topo: 0.7 -> 1.0
+	// Isso deixa uma fenda de 0.3 no meio para ver as flechas (ou anões).
+
+	// Parte de Baixo (0.0 a 0.4)
+	m.addCubeGreedy(rl.Vector3{X: x, Y: y, Z: z}, w, 0.4, d, color, false, true, true, true, true, true, buffer, coord, data)
+
+	// Parte de Cima (0.7 a 1.0)
+	m.addCubeGreedy(rl.Vector3{X: x, Y: y + 0.7, Z: z}, w, 0.3, d, color, true, false, true, true, true, true, buffer, coord, data)
+
+	// Adicionamos as faces internas da fenda para não ficar "oco"
+	// Sola do bloco de cima
+	buffer.AddFace(
+		[3]float32{x, y + 0.7, z},
+		[3]float32{x + w, y + 0.7, z},
+		[3]float32{x + w, y + 0.7, z - d},
+		[3]float32{x, y + 0.7, z - d},
+		[3]float32{0, -1, 0}, color,
+	)
+	// Teto do bloco de baixo
+	buffer.AddFace(
+		[3]float32{x, y + 0.4, z},
+		[3]float32{x, y + 0.4, z - d},
+		[3]float32{x + w, y + 0.4, z - d},
+		[3]float32{x + w, y + 0.4, z},
+		[3]float32{0, 1, 0}, color,
+	)
 }

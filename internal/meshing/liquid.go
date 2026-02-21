@@ -70,17 +70,60 @@ func addLiquidPlane(tile *mapdata.Tile, level int32, color [4]uint8, buffer *Mes
 		[3]float32{0, 1, 0}, color, // Normal
 	)
 
-	// Face INFERIOR plana (Sem inclinações drásticas para facilitar visual debaixo d'água)
+	// Face INFERIOR plana (Sem inclinações drásticas para facilitar visual debaixo d'água) - CCW
 	buffer.AddFaceUV(
-		[3]float32{x, y, z},
-		[3]float32{x, y, z - d},
-		[3]float32{x + w, y, z - d},
-		[3]float32{x + w, y, z},
+		[3]float32{x, y, z},         // NW
+		[3]float32{x, y, z - d},     // SW
+		[3]float32{x + w, y, z - d}, // SE
+		[3]float32{x + w, y, z},     // NE
 		flowUV, flowUV, flowUV, flowUV,
 		[3]float32{0, -1, 0}, color,
 	)
 
-	// BORDAS/LATERAIS DA ÁGUA (Waterfall/Culling)
-	// Só desenhamos o lado de água caindo se o vizinho lado X tiver ar ou se o vizinho abaixo tiver água (pra ligar).
-	// Mas como otimização 1 do Surface Mesh, deixamos assim por enquanto.
+	// BORDAS/LATERAIS DA ÁGUA (Waterfall/Volume)
+	// Se o nível de fluido cair drasticamente em relação aos vizinhos, desenhamos as faces verticais.
+	// Norte (+Z)
+	if getFluidLevel(0, -1) < getFluidLevel(0, 0) {
+		buffer.AddFaceUV(
+			[3]float32{x, y, z},          // Base-NW
+			[3]float32{x + w, y, z},      // Base-NE
+			[3]float32{x + w, y + ne, z}, // Top-NE
+			[3]float32{x, y + nw, z},     // Top-NW
+			flowUV, flowUV, flowUV, flowUV,
+			[3]float32{0, 0, 1}, color,
+		)
+	}
+	// Sul (-Z)
+	if getFluidLevel(0, 1) < getFluidLevel(0, 0) {
+		buffer.AddFaceUV(
+			[3]float32{x + w, y, z - d},      // Base-SE
+			[3]float32{x, y, z - d},          // Base-SW
+			[3]float32{x, y + sw, z - d},     // Top-SW
+			[3]float32{x + w, y + se, z - d}, // Top-SE
+			flowUV, flowUV, flowUV, flowUV,
+			[3]float32{0, 0, -1}, color,
+		)
+	}
+	// Oeste (-X)
+	if getFluidLevel(-1, 0) < getFluidLevel(0, 0) {
+		buffer.AddFaceUV(
+			[3]float32{x, y, z - d},      // Base-SW
+			[3]float32{x, y, z},          // Base-NW
+			[3]float32{x, y + nw, z},     // Top-NW
+			[3]float32{x, y + sw, z - d}, // Top-SW
+			flowUV, flowUV, flowUV, flowUV,
+			[3]float32{-1, 0, 0}, color,
+		)
+	}
+	// Leste (+X)
+	if getFluidLevel(1, 0) < getFluidLevel(0, 0) {
+		buffer.AddFaceUV(
+			[3]float32{x + w, y, z},          // Base-NE
+			[3]float32{x + w, y, z - d},      // Base-SE
+			[3]float32{x + w, y + se, z - d}, // Top-SE
+			[3]float32{x + w, y + ne, z},     // Top-NE
+			flowUV, flowUV, flowUV, flowUV,
+			[3]float32{1, 0, 0}, color,
+		)
+	}
 }

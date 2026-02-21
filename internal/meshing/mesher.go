@@ -139,5 +139,24 @@ func (b *MeshBuffer) addVertexUV(v [3]float32, uv [2]float32, n [3]float32, c [4
 	b.Geometry.UVs = append(b.Geometry.UVs, uv[0], uv[1])
 }
 
+// AddTriangle adiciona uma face triangular ao buffer.
+func (b *MeshBuffer) AddTriangle(v1, v2, v3 [3]float32, n [3]float32, c [4]uint8) {
+	b.addVertex(v1, n, c)
+	b.addVertex(v2, n, c)
+	b.addVertex(v3, n, c)
+}
+
+// AddTriangleUV adiciona uma face triangular ao buffer com coordenadas UV.
+func (b *MeshBuffer) AddTriangleUV(v1, v2, v3 [3]float32, uv1, uv2, uv3 [2]float32, normal [3]float32, color [4]uint8) {
+	b.addVertexUV(v1, uv1, normal, color)
+	b.addVertexUV(v2, uv2, normal, color)
+	b.addVertexUV(v3, uv3, normal, color)
+}
+
+func (b *MeshBuffer) AddFaceAOStandard(v1 [3]float32, c1 [4]uint8, v2 [3]float32, c2 [4]uint8, v3 [3]float32, c3 [4]uint8, v4 [3]float32, c4 [4]uint8, normal [3]float32) {
+	b.AddTriangle(v1, v2, v3, normal, c1)
+	b.AddTriangle(v1, v3, v4, normal, c1)
+}
+
 // MeshBuffer auxilia na construção de malhas dinâmicas.
 // Agora atua apenas como um container, sem sistema de reset para evitar vazamento de memória Go -> C.
