@@ -216,6 +216,28 @@ func (r *Renderer) loadModels() {
 		// Carregando apenas vegetação por enquanto (testado e funcional)
 		"shrub": "assets/models/BUSH.obj",
 	}
+
+	// Adicionar as 26 variantes de rampa
+	for i := 1; i <= 26; i++ {
+		name := fmt.Sprintf("ramp_%d", i)
+		var fileName string
+		switch {
+		case i <= 5:
+			fileName = fmt.Sprintf("RAMP_%d.obj", i)
+		case i >= 6 && i <= 13:
+			fileName = fmt.Sprintf("RAMP_%d_sharp.obj", i)
+		case i == 14:
+			fileName = "RAMP_14_sharp.obj"
+		case i == 15:
+			fileName = "RAMP_15_sharp.obj"
+		case i == 16 || i == 17:
+			fileName = fmt.Sprintf("RAMP_%d.obj", i)
+		default: // 18-26
+			fileName = fmt.Sprintf("RAMP_%d_sharp.obj", i)
+		}
+		modelFiles[name] = "assets/models/ramps/" + fileName
+	}
+
 	for name, path := range modelFiles {
 		model := rl.LoadModel(path)
 		if model.MeshCount > 0 {

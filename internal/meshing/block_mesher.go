@@ -4,7 +4,8 @@ import (
 	"FortressVision/internal/mapdata"
 	"FortressVision/internal/util"
 	"FortressVision/pkg/dfproto"
-	"log"
+	"fmt"
+	"log" // Added based on the provided Code Edit
 	"sync"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -243,8 +244,7 @@ func runGreedyMesherX(req Request, getBuffer func(string) *MeshBuffer, liquidBuf
 
 				if shape == dfproto.ShapeRamp {
 					flushRun() // Rampas não são mescladas no greedy mesher por enquanto
-					texName := m.MatStore.GetTextureName(tile.MaterialCategory())
-					m.addRamp(worldCoord, color, getBuffer(texName), req.Data)
+					m.addRamp(worldCoord, tile, color, res)
 					continue
 				}
 
@@ -434,80 +434,28 @@ func (m *BlockMesher) shouldDrawFace(tile *mapdata.Tile, dir util.Directions) bo
 	return true
 }
 
-func (m *BlockMesher) addRamp(coord util.DFCoord, color [4]uint8, buffer *MeshBuffer, data *mapdata.MapDataStore) {
+func (m *BlockMesher) addRamp(coord util.DFCoord, tile *mapdata.Tile, color [4]uint8, res *Result) {
 	pos := util.DFToWorldPos(coord)
-	x, y, z := pos.X, pos.Y, pos.Z
-	w, d := float32(1.0), float32(1.0)
 
-	// Direções que têm conexão
-	north := m.isSolid(coord, util.DirNorth, data)
-	south := m.isSolid(coord, util.DirSouth, data)
-	east := m.isSolid(coord, util.DirEast, data)
-	west := m.isSolid(coord, util.DirWest, data)
+	// Garante que o tipo de rampa foi calculado usando a lógica de 8 vizinhos do Armok
+	tile.CalculateRampType()
+	rampType := tile.RampType
 
-	// Geometria básica: Piso
-	buffer.AddFace(
-		[3]float32{x, y, z},
-		[3]float32{x + w, y, z},
-		[3]float32{x + w, y, z - d},
-		[3]float32{x, y, z - d},
-		[3]float32{0, -1, 0}, color,
-	)
-
-	// Alturas dos cantos (0 = baixo, 1 = alto)
-	// DF Coord: North is Y-1, South is Y+1
-	// World Coord: North is +Z, South is -Z (based on coords.go: Z: float32(-coord.Y) * GameScale)
-	// Wait, coords.go says:
-	// DirNorth: {X: 0, Y: -1, Z: 0} -> World Pos Z: -(Y-1) = -Y + 1 (moved North)
-	// So North is +Z, South is -Z.
-	hNW, hNE, hSE, hSW := float32(0.0), float32(0.0), float32(0.0), float32(0.0)
-
-	if north {
-		hNW, hNE = 1, 1
-	}
-	if south {
-		hSW, hSE = 1, 1
-	}
-	if east {
-		hNE, hSE = 1, 1
-	}
-	if west {
-		hNW, hSW = 1, 1
+	// Se não houver rampa válida (ex: isolada), o Armok as vezes retorna 0 ou usa um valor padrão.
+	// Vamos usar a rampa 1 como fallback se o tipo for inválido.
+	if rampType <= 0 || rampType > 26 {
+		rampType = 1
 	}
 
-	// Se for uma rampa isolada (sem vizinhos solidos), vira um bloco baixo (piso)
-	if !north && !south && !east && !west {
-		hNW, hNE, hSE, hSW = 0.1, 0.1, 0.1, 0.1
-	}
+	modelName := fmt.Sprintf("ramp_%d", rampType)
 
-	// Vértices do topo
-	vNW := [3]float32{x, y + hNW, z}
-	vNE := [3]float32{x + w, y + hNE, z}
-	vSE := [3]float32{x + w, y + hSE, z - d}
-	vSW := [3]float32{x, y + hSW, z - d}
-
-	// Vértices da base
-	bNW := [3]float32{x, y, z}
-	bNE := [3]float32{x + w, y, z}
-	bSE := [3]float32{x + w, y, z - d}
-	bSW := [3]float32{x, y, z - d}
-
-	// Face de cima (Rampa) - CCW
-	buffer.AddFace(vNW, vSW, vSE, vNE, [3]float32{0, 1, 0}, color)
-
-	// Proteger as laterais se houver desnível - CCW
-	if hNW > 0 || hNE > 0 { // Face Norte (+Z)
-		buffer.AddFace(bNW, bNE, vNE, vNW, [3]float32{0, 0, 1}, color)
-	}
-	if hSW > 0 || hSE > 0 { // Face Sul (-Z)
-		buffer.AddFace(bSE, bSW, vSW, vSE, [3]float32{0, 0, -1}, color)
-	}
-	if hNW > 0 || hSW > 0 { // Face Oeste (-X)
-		buffer.AddFace(bSW, bNW, vNW, vSW, [3]float32{-1, 0, 0}, color)
-	}
-	if hNE > 0 || hSE > 0 { // Face Leste (+X)
-		buffer.AddFace(bNE, bSE, vSE, vNE, [3]float32{1, 0, 0}, color)
-	}
+	// Emite a instância do modelo 3D
+	res.ModelInstances = append(res.ModelInstances, ModelInstance{
+		ModelName: modelName,
+		Position:  [3]float32{pos.X + 0.5, pos.Y, pos.Z - 0.5},
+		Scale:     1.0,
+		Color:     color,
+	})
 }
 
 func (m *BlockMesher) isSolidAO(coord util.DFCoord, dir util.Directions, data *mapdata.MapDataStore) bool {
