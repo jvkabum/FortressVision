@@ -323,6 +323,25 @@ func (a *App) connectDFHack() {
 	// Verificar se o mundo já tem dados salvos
 	if a.mapStore.HasData() {
 		log.Println("[App] Mundo já possui dados salvos. Iniciando modo streaming normal.")
+
+		// Recarrega todos os blocos do banco p/ GPU antes de ativar Live Streaming
+		a.Loading = true
+		a.LoadingStatus = "Desempacotando terreno da memoria (SQLite)..."
+		a.LoadingProcessedBlocks = 0
+
+		total := a.mapStore.QueueAllStoredChunks(func(origin util.DFCoord, mtime int64) {
+			a.mesher.Enqueue(meshing.Request{
+				Origin:   origin,
+				Data:     a.mapStore,
+				FocusZ:   int(a.mapCenter.Z),
+				MaxDepth: 130, // Padrão
+				MTime:    mtime,
+			})
+		})
+
+		a.LoadingTotalBlocks = total
+		a.Loading = false
+
 		a.scanner.Start()
 	} else {
 		log.Println("[App] Mundo NOVO detectado. Iniciando download total (Deep Scan)...")

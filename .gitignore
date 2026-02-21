@@ -1,0 +1,16 @@
+# Voxel Game Database & Caches
+saves/
+
+# Compilados Nativos e Metadados do CGO
+*.exe
+*.syso
+*.o
+*.a
+*.dll
+
+# Logs de Crash e Terminal
+*.log
+
+# Arquivos temporários do Sistema (OS)
+.DS_Store
+Thumbs.db

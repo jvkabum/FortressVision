@@ -159,7 +159,30 @@ func runGreedyMesherX(req Request, terrainBuffer *MeshBuffer, liquidBuffer *Mesh
 					if currentRunShape == dfproto.ShapeFloor {
 						h = 0.1
 					}
-					m.addCube(pos, w, h, d, currentRunColor, runTile, terrainBuffer)
+
+					// Construir flags de face baseados na fita
+					// A fita anda no eixo Y do DF (Norte->Sul).
+					// Logo, a face Norte da FITA é a face Norte do primeiro tile (runTile).
+					// A face Sul da FITA é a face Sul do último tile (o tile anterior à quebra).
+					// As faces laterais, topo e baixo são idênticas em todos os tiles da fita!
+					endTileY := runStartY + runLength - 1
+					endWorldCoord := util.NewDFCoord(req.Origin.X+xx, req.Origin.Y+endTileY, int32(currentZ))
+					endTile := req.Data.GetTile(endWorldCoord)
+
+					drawUp := m.shouldDrawFace(runTile, util.DirUp)
+					drawDown := m.shouldDrawFace(runTile, util.DirDown)
+					drawWest := m.shouldDrawFace(runTile, util.DirWest)
+					drawEast := m.shouldDrawFace(runTile, util.DirEast)
+					drawNorth := m.shouldDrawFace(runTile, util.DirNorth)
+
+					var drawSouth bool
+					if endTile != nil {
+						drawSouth = m.shouldDrawFace(endTile, util.DirSouth)
+					} else {
+						drawSouth = true // fallback se nao achar no mapa carregado (borda)
+					}
+
+					m.addCubeGreedy(pos, w, h, d, currentRunColor, drawUp, drawDown, drawNorth, drawSouth, drawWest, drawEast, terrainBuffer)
 				}
 				runStartY = -1
 				runLength = 0
@@ -190,12 +213,13 @@ func runGreedyMesherX(req Request, terrainBuffer *MeshBuffer, liquidBuffer *Mesh
 					if shape != currentRunShape || color != currentRunColor {
 						canMerge = false
 					} else {
-						cw1 := m.shouldDrawFace(tile, util.DirWest)
-						cw2 := m.shouldDrawFace(runTile, util.DirWest)
-						ce1 := m.shouldDrawFace(tile, util.DirEast)
-						ce2 := m.shouldDrawFace(runTile, util.DirEast)
-
-						if cw1 != cw2 || ce1 != ce2 {
+						// Para fundir blocos na mesma fita, TODAS as faces (Top, Bottom, West, East)
+						// visíveis devem bater, exceto o eixo do movimento (North/South).
+						// Se a fita anda em Y (Norte para Sul), o Teto de um tem q ser = o Teto do outro.
+						if m.shouldDrawFace(tile, util.DirWest) != m.shouldDrawFace(runTile, util.DirWest) ||
+							m.shouldDrawFace(tile, util.DirEast) != m.shouldDrawFace(runTile, util.DirEast) ||
+							m.shouldDrawFace(tile, util.DirUp) != m.shouldDrawFace(runTile, util.DirUp) ||
+							m.shouldDrawFace(tile, util.DirDown) != m.shouldDrawFace(runTile, util.DirDown) {
 							canMerge = false
 						}
 					}
@@ -222,15 +246,12 @@ func (m *BlockMesher) generateTileGeometry(tile *mapdata.Tile, buffer *MeshBuffe
 	// Agora substituído pelo GreedyMesher interno
 }
 
-// addCube adiciona um cubo com culling de faces.
-func (m *BlockMesher) addCube(pos rl.Vector3, w, h, d float32, color [4]uint8, tile *mapdata.Tile, buffer *MeshBuffer) {
+// addCubeGreedy adiciona um cubo com culling de faces previamente calculado pelo Greedy Mesher.
+func (m *BlockMesher) addCubeGreedy(pos rl.Vector3, w, h, d float32, color [4]uint8, drawUp, drawDown, drawNorth, drawSouth, drawWest, drawEast bool, buffer *MeshBuffer) {
 	x, y, z := pos.X, pos.Y, pos.Z
 
-	// Definições das faces (v1, v2, v3, v4)
-	// Nota: No nosso sistema, Y é CIMA (Z do DF), Z é SUL (Y do DF).
-
 	// Face Topo (+Y)
-	if m.shouldDrawFace(tile, util.DirUp) {
+	if drawUp {
 		buffer.AddFace(
 			[3]float32{x, y + h, z},
 			[3]float32{x, y + h, z - d},
@@ -241,7 +262,7 @@ func (m *BlockMesher) addCube(pos rl.Vector3, w, h, d float32, color [4]uint8, t
 	}
 
 	// Face Baixo (-Y)
-	if m.shouldDrawFace(tile, util.DirDown) {
+	if drawDown {
 		buffer.AddFace(
 			[3]float32{x, y, z},
 			[3]float32{x + w, y, z},
@@ -251,14 +272,8 @@ func (m *BlockMesher) addCube(pos rl.Vector3, w, h, d float32, color [4]uint8, t
 		)
 	}
 
-	// Face Norte (-Z no mundo 3D, norte no DF é Y-)
-	// Lembrete: util.DFToWorldPos inverte Y para Z. DF(Y-) -> 3D(Z+) ??
-	// No coords.go: Z: float32(-coord.Y) * GameScale
-	// Então Norte (Y=10) -> Z=-10. Sul (Y=20) -> Z=-20.
-	// Então Norte é "Z maior" (mais perto da origem sonora/visual se considerarmos Y+ para Sul).
-	// Vamos simplificar: Usar as direções do DF.
-
-	if m.shouldDrawFace(tile, util.DirNorth) {
+	// Face Norte (-Z no mundo 3D)
+	if drawNorth {
 		buffer.AddFace(
 			[3]float32{x, y, z},
 			[3]float32{x, y + h, z},
@@ -268,7 +283,7 @@ func (m *BlockMesher) addCube(pos rl.Vector3, w, h, d float32, color [4]uint8, t
 		)
 	}
 
-	if m.shouldDrawFace(tile, util.DirSouth) {
+	if drawSouth {
 		buffer.AddFace(
 			[3]float32{x + w, y, z - d},
 			[3]float32{x + w, y + h, z - d},
@@ -278,7 +293,7 @@ func (m *BlockMesher) addCube(pos rl.Vector3, w, h, d float32, color [4]uint8, t
 		)
 	}
 
-	if m.shouldDrawFace(tile, util.DirWest) {
+	if drawWest {
 		buffer.AddFace(
 			[3]float32{x, y, z - d},
 			[3]float32{x, y + h, z - d},
@@ -288,7 +303,7 @@ func (m *BlockMesher) addCube(pos rl.Vector3, w, h, d float32, color [4]uint8, t
 		)
 	}
 
-	if m.shouldDrawFace(tile, util.DirEast) {
+	if drawEast {
 		buffer.AddFace(
 			[3]float32{x + w, y, z},
 			[3]float32{x + w, y + h, z},

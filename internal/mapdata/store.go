@@ -289,3 +289,24 @@ func (s *MapDataStore) HasData() bool {
 	s.DB.Model(&ChunkModel{}).Count(&count)
 	return count > 0
 }
+
+// QueueAllStoredChunks carrega todos os blocos do SQLite na tela inicializando o mapa 3D sem depender do socket.
+func (s *MapDataStore) QueueAllStoredChunks(enqueueFunc func(origin util.DFCoord, mtime int64)) int {
+	if s.DB == nil {
+		return 0
+	}
+
+	// Retira apenas os metadados para não estourar a RAM
+	var chunks []ChunkModel
+	s.DB.Select("x", "y", "z", "m_time").Find(&chunks)
+
+	count := len(chunks)
+	log.Printf("[Persistence] Enfileirando %d blocos carregados do SQLite local.", count)
+
+	for _, model := range chunks {
+		origin := util.NewDFCoord(model.X, model.Y, model.Z)
+		enqueueFunc(origin, model.MTime)
+	}
+
+	return count
+}
