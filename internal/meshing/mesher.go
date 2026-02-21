@@ -3,6 +3,7 @@ package meshing
 import (
 	"FortressVision/internal/mapdata"
 	"FortressVision/internal/util"
+	"sync"
 )
 
 // GeometryData contém os buffers de vértices para uma malha.
@@ -64,6 +65,34 @@ type Mesher interface {
 	Stop()
 }
 
+// Global Poll para reciclar MeshBuffers e evitar alocação excessiva (GC Pressure)
+var meshBufferPool = sync.Pool{
+	New: func() interface{} {
+		return &MeshBuffer{
+			Geometry: GeometryData{
+				Vertices: make([]float32, 0, 4096),
+				Normals:  make([]float32, 0, 4096),
+				Colors:   make([]uint8, 0, 4096),
+			},
+		}
+	},
+}
+
+// GetMeshBuffer aloca ou recicla um buffer vazio para meshing.
+func GetMeshBuffer() *MeshBuffer {
+	return meshBufferPool.Get().(*MeshBuffer)
+}
+
+// PutMeshBuffer zera os ponteiros e devolve a memória para o Pool.
+func PutMeshBuffer(b *MeshBuffer) {
+	b.Geometry.Vertices = b.Geometry.Vertices[:0]
+	b.Geometry.Normals = b.Geometry.Normals[:0]
+	b.Geometry.Colors = b.Geometry.Colors[:0]
+	b.Geometry.UVs = b.Geometry.UVs[:0]
+	b.Geometry.Indices = b.Geometry.Indices[:0]
+	meshBufferPool.Put(b)
+}
+
 // MeshBuffer auxilia na construção de malhas dinâmicas.
 type MeshBuffer struct {
 	Geometry GeometryData
@@ -86,6 +115,28 @@ func (b *MeshBuffer) addVertex(v [3]float32, n [3]float32, c [4]uint8) {
 	b.Geometry.Vertices = append(b.Geometry.Vertices, v[0], v[1], v[2])
 	b.Geometry.Normals = append(b.Geometry.Normals, n[0], n[1], n[2])
 	b.Geometry.Colors = append(b.Geometry.Colors, c[0], c[1], c[2], c[3])
+	// Default UV 0,0 for standard vertices
+	b.Geometry.UVs = append(b.Geometry.UVs, 0, 0)
+}
+
+// AddFaceUV adiciona uma face ao buffer suportando coordenadas de textura UV / custom variables.
+func (b *MeshBuffer) AddFaceUV(v1, v2, v3, v4 [3]float32, uv1, uv2, uv3, uv4 [2]float32, n [3]float32, c [4]uint8) {
+	// Triângulo 1 (v1, v2, v3)
+	b.addVertexUV(v1, uv1, n, c)
+	b.addVertexUV(v2, uv2, n, c)
+	b.addVertexUV(v3, uv3, n, c)
+
+	// Triângulo 2 (v1, v3, v4)
+	b.addVertexUV(v1, uv1, n, c)
+	b.addVertexUV(v3, uv3, n, c)
+	b.addVertexUV(v4, uv4, n, c)
+}
+
+func (b *MeshBuffer) addVertexUV(v [3]float32, uv [2]float32, n [3]float32, c [4]uint8) {
+	b.Geometry.Vertices = append(b.Geometry.Vertices, v[0], v[1], v[2])
+	b.Geometry.Normals = append(b.Geometry.Normals, n[0], n[1], n[2])
+	b.Geometry.Colors = append(b.Geometry.Colors, c[0], c[1], c[2], c[3])
+	b.Geometry.UVs = append(b.Geometry.UVs, uv[0], uv[1])
 }
 
 // MeshBuffer auxilia na construção de malhas dinâmicas.

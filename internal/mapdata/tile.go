@@ -22,6 +22,9 @@ type Tile struct {
 	WaterLevel int32
 	MagmaLevel int32
 
+	// FlowVector armazena a direção do fluxo do líquido (-1, 0, 1 para X e Y)
+	FlowVector util.DFCoord
+
 	RampType int32
 	Hidden   bool
 
@@ -55,6 +58,7 @@ func (t *Tile) CopyFrom(orig *Tile) {
 	t.ConstructionItem = orig.ConstructionItem
 	t.WaterLevel = orig.WaterLevel
 	t.MagmaLevel = orig.MagmaLevel
+	t.FlowVector = orig.FlowVector
 	t.RampType = orig.RampType
 	t.Hidden = orig.Hidden
 	t.TrunkPercent = orig.TrunkPercent

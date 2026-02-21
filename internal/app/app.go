@@ -475,16 +475,22 @@ func (a *App) updateMap() {
 		defer func() { a.isUpdatingMap = false }()
 
 		// DFHack RemoteFortressReader exige coordenadas em BLOCOS (1 bloco = 16x16 tiles)
-		radiusInBlocks := int32(5) // Reduzido de 8 para 5 para ser mais suave, Scanner cuida do resto
+		// O Scanner (Background) lida com o mapa todo. O "updateMap" atualiza só uma bolha muito estreita
+		// (água caindo, anão construindo pareder na visão Imediata) para a CPU focar em animar.
+		radiusInBlocks := int32(2) // Reduzido drasticamente para 2 (32x32 tiles de atualização dinâmica)
 		minX := (centerPos.X / 16) - radiusInBlocks
 		maxX := (centerPos.X / 16) + radiusInBlocks
 		minY := (centerPos.Y / 16) - radiusInBlocks
 		maxY := (centerPos.Y / 16) + radiusInBlocks
 
-		minZ := centerPos.Z - 30 // Aumentado para 30 níveis abaixo para capturar montanhas e vales
-		maxZ := int32(1000)
+		// Limitando Z para uma fatia fininha "perto da câmera" em vez de puxar 30 andares por frame.
+		minZ := centerPos.Z - 3
+		maxZ := centerPos.Z + 1
+
 		if a.dfClient != nil && a.dfClient.MapInfo != nil {
-			maxZ = a.dfClient.MapInfo.BlockSizeZ - 1
+			if maxZ >= a.dfClient.MapInfo.BlockSizeZ {
+				maxZ = a.dfClient.MapInfo.BlockSizeZ - 1
+			}
 		}
 
 		if minX < 0 {
@@ -521,7 +527,11 @@ func (a *App) updateMap() {
 					continue
 				}
 
-				if a.renderer.GetModelVersion(origin) < chunk.MTime {
+				// VERIFICAÇÃO RÍGIDA DE PERFORMANCE (STUTTER FIX 3)
+				// Só envia para a thread de geometria se o chunk "sujou" (MTime subiu) no SQLite/Memória E a GPU está desatualizada.
+				// Como GetModelVersion já devolve a versão que a GPU tem, se ela for >= MTime do chunk, pula!
+				gpuVersion := a.renderer.GetModelVersion(origin)
+				if gpuVersion < chunk.MTime {
 					if a.mesher.Enqueue(meshing.Request{
 						Origin:   origin,
 						Data:     a.mapStore,
@@ -549,19 +559,27 @@ func (a *App) updateMap() {
 
 // processMesherResults consome resultados da fila e envia para a GPU.
 func (a *App) processMesherResults() {
-	// Durante o loading, processamos o máximo possível para liberar a fila.
-	// Durante o jogo, limitamos para evitar quedas de FPS (stuttering).
-	limit := 1 // Super conservador durante o jogo
+	// Durante o loading, podemos gastar bastante tempo por frame subindo malha
+	// Durante o jogo (StateViewing), aplicamos um "Time Slicing" (Fatiamento de Tempo) rígido para evitar Stutters.
+	// 1 frame a 60FPS = 16.6ms. Vamos dedicar no máximo 4ms para upload de malha por frame.
+	timeBudget := 0.004 // 4 milissegundos
 	if a.Loading {
-		limit = 128 // Upload ultra-rápido para GPU durante o carregamento
+		timeBudget = 0.500 // 500ms durante a tela de loading para agilizar
 	}
 
-	for i := 0; i < limit; i++ {
+	startTime := rl.GetTime()
+
+	for {
+		// Se já estouramos o orçamento de tempo deste frame, paramos e deixamos pro próximo.
+		if rl.GetTime()-startTime > timeBudget {
+			break
+		}
+
 		select {
 		case res := <-a.mesher.Results():
 			if len(res.Terreno.Vertices) > 0 || len(res.Liquidos.Vertices) > 0 {
-				log.Printf("[Renderer] Recebido resultado de meshing para %s (Geometria: %d vértices)",
-					res.Origin.String(), len(res.Terreno.Vertices)/3)
+				log.Printf("[Renderer] Upload de Geometria: %s (Terreno: %d, Água: %d vértices)",
+					res.Origin.String(), len(res.Terreno.Vertices)/3, len(res.Liquidos.Vertices)/3)
 			}
 			a.renderer.UploadResult(res)
 
@@ -585,6 +603,7 @@ func (a *App) processMesherResults() {
 				}
 			}
 		default:
+			// Não há mais resultados prontos na fila, sai do loop imediatamente
 			return
 		}
 	}
@@ -842,7 +861,16 @@ func (a *App) drawHUD() {
 	// Controles
 	rl.DrawText("Controles:", 10, 105, 16, rl.NewColor(200, 200, 200, 255))
 	rl.DrawText("WASD/Setas: Mover | Scroll: Zoom | F11: Fullscreen", 10, 125, 14, rl.NewColor(170, 170, 170, 255))
-	rl.DrawText("Q/E: Nível Z | G: Grid | F3: Debug | F4: Wireframe", 10, 143, 14, rl.NewColor(170, 170, 170, 255))
+
+	// Feedback Visual do Wireframe (F4)
+	wireframeStatus := "[OFF]"
+	wireframeColor := rl.NewColor(170, 170, 170, 255)
+	if a.Config.WireframeMode {
+		wireframeStatus = "[ON]"
+		wireframeColor = rl.Orange
+	}
+
+	rl.DrawText(fmt.Sprintf("Q/E: Nível Z | G: Grid | F3: Debug | F4: Wireframe %s", wireframeStatus), 10, 143, 14, wireframeColor)
 	rl.DrawText("F5: Salvar Mundo (Manual) | F6: Forçar Download Total", 10, 161, 14, rl.NewColor(150, 200, 150, 255))
 
 	// Título no topo

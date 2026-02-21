@@ -80,6 +80,146 @@ const (
 
 // ---------- STRUCTS ----------
 
+type Coord struct {
+	X int32
+	Y int32
+	Z int32
+}
+
+func (c *Coord) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			c.X = int32(v)
+		case 2:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			c.Y = int32(v)
+		case 3:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			c.Z = int32(v)
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+type FlowType int32
+
+const (
+	FlowMiasma        FlowType = 0
+	FlowSteam         FlowType = 1
+	FlowMist          FlowType = 2
+	FlowMaterialDust  FlowType = 3
+	FlowMagmaMist     FlowType = 4
+	FlowSmoke         FlowType = 5
+	FlowDragonfire    FlowType = 6
+	FlowFire          FlowType = 7
+	FlowWeb           FlowType = 8
+	FlowMaterialGas   FlowType = 9
+	FlowMaterialVapor FlowType = 10
+	FlowOceanWave     FlowType = 11
+	FlowSeaFoam       FlowType = 12
+	FlowItemCloud     FlowType = 13
+)
+
+type FlowInfo struct {
+	Index     int32
+	Type      FlowType
+	Density   int32
+	Pos       Coord
+	Dest      Coord
+	Expanding bool
+	Fast      bool
+	Creeping  bool
+}
+
+func (f *FlowInfo) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			f.Index = int32(v)
+		case 2:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			f.Type = FlowType(v)
+		case 3:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			f.Density = int32(v)
+		case 4:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			if err := f.Pos.Unmarshal(subData); err != nil {
+				return err
+			}
+		case 5:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			if err := f.Dest.Unmarshal(subData); err != nil {
+				return err
+			}
+		case 6:
+			v, err := d.ReadBool()
+			if err != nil {
+				return err
+			}
+			f.Expanding = v
+		case 12:
+			v, err := d.ReadBool()
+			if err != nil {
+				return err
+			}
+			f.Fast = v
+		case 13:
+			v, err := d.ReadBool()
+			if err != nil {
+				return err
+			}
+			f.Creeping = v
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // MatPair representa um par (tipo_mat, indice_mat).
 type MatPair struct {
 	MatType  int32
@@ -366,6 +506,7 @@ type MapBlock struct {
 	BaseMaterials      []MatPair
 	LayerMaterials     []MatPair
 	VeinMaterials      []MatPair
+	Flows              []FlowInfo
 }
 
 func (m *MapBlock) Unmarshal(data []byte) error {
@@ -506,6 +647,16 @@ func (m *MapBlock) Unmarshal(data []byte) error {
 				}
 				m.TileDigDesignation = append(m.TileDigDesignation, TileDigDesignation(v))
 			}
+		case 30:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var flow FlowInfo
+			if err := flow.Unmarshal(subData); err != nil {
+				return err
+			}
+			m.Flows = append(m.Flows, flow)
 		default:
 			if err := d.SkipField(wireType); err != nil {
 				return err

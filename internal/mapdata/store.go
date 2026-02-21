@@ -102,6 +102,35 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) {
 	// Flag para indicar se houve mudança real nos dados deste chunk
 	chunkChanged := false
 
+	// Pré-processa os fluxos (Flows) para busca rápida por coordenada
+	flowMap := make(map[util.DFCoord]util.DFCoord)
+	for _, flow := range block.Flows {
+		// Apenas guardamos a direção (Destino - Origem)
+		if flow.Dest.X != flow.Pos.X || flow.Dest.Y != flow.Pos.Y || flow.Dest.Z != flow.Pos.Z {
+			pos := util.NewDFCoord(flow.Pos.X, flow.Pos.Y, flow.Pos.Z)
+			dir := util.NewDFCoord(flow.Dest.X-flow.Pos.X, flow.Dest.Y-flow.Pos.Y, flow.Dest.Z-flow.Pos.Z)
+
+			// Normalizamos para 1 ou -1
+			if dir.X > 0 {
+				dir.X = 1
+			} else if dir.X < 0 {
+				dir.X = -1
+			}
+			if dir.Y > 0 {
+				dir.Y = 1
+			} else if dir.Y < 0 {
+				dir.Y = -1
+			}
+			if dir.Z > 0 {
+				dir.Z = 1
+			} else if dir.Z < 0 {
+				dir.Z = -1
+			}
+
+			flowMap[pos] = dir
+		}
+	}
+
 	for yy := int32(0); yy < 16; yy++ {
 		for xx := int32(0); xx < 16; xx++ {
 			idx := xx + (yy * 16)
@@ -150,6 +179,12 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) {
 					chunkChanged = true
 				}
 			}
+			checkChangeCoord := func(name string, current *util.DFCoord, newVal util.DFCoord) {
+				if current.X != newVal.X || current.Y != newVal.Y || current.Z != newVal.Z {
+					*current = newVal
+					chunkChanged = true
+				}
+			}
 
 			// Preenche dados básicos se presentes no bloco e marca se mudou
 			if len(block.Tiles) > int(idx) {
@@ -175,6 +210,15 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) {
 			}
 			if len(block.Hidden) > int(idx) {
 				checkChangeBool("Hidden", &tile.Hidden, block.Hidden[idx])
+			}
+
+			// Procura por fluxo na posição global
+			flowDir, hasFlow := flowMap[worldCoord]
+			if hasFlow {
+				checkChangeCoord("FlowVector", &tile.FlowVector, flowDir)
+			} else {
+				// Reseta se não houver mais fluxo
+				checkChangeCoord("FlowVector", &tile.FlowVector, util.NewDFCoord(0, 0, 0))
 			}
 		}
 	}

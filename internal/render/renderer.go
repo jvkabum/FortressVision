@@ -4,6 +4,7 @@ package render
 #include <stdlib.h>
 */
 import "C"
+
 import (
 	"sync"
 	"unsafe"
@@ -13,6 +14,86 @@ import (
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
+
+const waterVertexShader = `
+#version 330
+
+in vec3 vertexPosition;
+in vec2 vertexTexCoord;
+in vec3 vertexNormal;
+in vec4 vertexColor;
+
+uniform mat4 mvp;
+uniform float time;
+
+out vec2 fragTexCoord;
+out vec4 fragColor;
+out vec3 fragNormal;
+
+void main()
+{
+    // O TexCoord carrega a direção de fluxo: X (TexCoord.x), Y (TexCoord.y)
+    vec2 flowDir = vertexTexCoord;
+
+    // Deslocamento animado pelo tempo
+    float speed = 2.0;
+    vec2 offset = flowDir * time * speed;
+    
+    // O UV final baseia-se na coord do mundo + fluxo
+    fragTexCoord = vertexPosition.xz + offset;
+    
+    fragColor = vertexColor;
+    fragNormal = vertexNormal;
+
+    vec3 animatedPos = vertexPosition;
+    // Pequena ondulação se escoando
+    if (length(flowDir) > 0.1) {
+    	animatedPos.y += sin(time * 3.0 + vertexPosition.x) * 0.05 * length(flowDir);
+	}
+
+    gl_Position = mvp * vec4(animatedPos, 1.0);
+}
+`
+
+const waterFragmentShader = `
+#version 330
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+in vec3 fragNormal;
+
+out vec4 finalColor;
+
+void main()
+{
+    // Escala para as ondas
+    vec2 uv = fragTexCoord * 2.5;
+    
+    // Múltiplas ondas senoidais cruzadas em diferentes frequências 
+    // Isto gera o padrão de refração caústica na superfície
+    float w1 = sin(uv.x + uv.y);
+    float w2 = sin(uv.x * 0.7 - uv.y * 1.3);
+    float w3 = cos(uv.x * 1.5 + uv.y * 0.8);
+    
+    // Média de ruído da superfície [-1.0 a 1.0]
+    float wave = (w1 + w2 + w3) / 3.0; 
+    
+    // Converte a onda para um padrão afiado nas cristas (estilo espelho)
+    wave = 1.0 - abs(wave);
+    wave = pow(wave, 3.0); 
+    
+    vec4 waterColor = fragColor;
+    
+    // Deixa as cristas iluminadas com um leve Tonal Ciano e espuma brilhante
+    waterColor.rgb += wave * vec3(0.15, 0.45, 0.65);
+    
+    // Adiciona escurecimento nas calhas (Vales)
+    waterColor.rgb -= (1.0 - wave) * 0.1;
+    
+    // Mantemos intacto o canal Alpha vindo do CGO / CPU (Ex: 180 = 70% opaco)
+    finalColor = vec4(waterColor.rgb, fragColor.a);
+}
+`
 
 // BlockModel representa a geometria renderizável de um bloco do mapa.
 type BlockModel struct {
@@ -30,16 +111,27 @@ type Renderer struct {
 	Models     map[util.DFCoord]*BlockModel
 	MainShader rl.Shader
 
+	WaterShader  rl.Shader
+	WaterLocTime int32
+
 	// Fila de modelos para purga (evita stutter)
 	purgeQueue []util.DFCoord
 }
 
 // NewRenderer cria um novo renderizador.
 func NewRenderer() *Renderer {
-	return &Renderer{
+	r := &Renderer{
 		Models:     make(map[util.DFCoord]*BlockModel),
 		purgeQueue: make([]util.DFCoord, 0),
 	}
+
+	// Tenta carregar os Shaders Customizados
+	if rl.IsWindowReady() {
+		r.WaterShader = rl.LoadShaderFromMemory(waterVertexShader, waterFragmentShader)
+		r.WaterLocTime = rl.GetShaderLocation(r.WaterShader, "time")
+	}
+
+	return r
 }
 
 // HasModel verifica se já existe um modelo carregado para esta coordenada e com a mesma versão.
@@ -96,9 +188,20 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		rl.UploadMesh(&mesh, false)
 		bm.LiquidModel = rl.LoadModelFromMesh(mesh)
 		bm.HasLiquid = true
+
+		// Associa o WaterShader ao material 0
+		if r.WaterShader.ID != 0 && bm.LiquidModel.MaterialCount > 0 {
+			materials := unsafe.Slice(bm.LiquidModel.Materials, bm.LiquidModel.MaterialCount)
+			materials[0].Shader = r.WaterShader
+		}
 	}
 
 	r.Models[res.Origin] = bm
+
+	// Como a função geometryToMesh copiou as fatias para o C.malloc,
+	// podemos limpar e devolver os Slices Go para o Pool reaproveitar sem afetar a GPU.
+	meshing.PutMeshBuffer(&meshing.MeshBuffer{Geometry: res.Terreno})
+	meshing.PutMeshBuffer(&meshing.MeshBuffer{Geometry: res.Liquidos})
 }
 
 func (r *Renderer) geometryToMesh(data meshing.GeometryData) rl.Mesh {
@@ -120,6 +223,9 @@ func (r *Renderer) geometryToMesh(data meshing.GeometryData) rl.Mesh {
 	}
 	if len(data.Colors) > 0 {
 		mesh.Colors = (*uint8)(r.copyToC(unsafe.Pointer(&data.Colors[0]), len(data.Colors)))
+	}
+	if len(data.UVs) > 0 {
+		mesh.Texcoords = (*float32)(r.copyToC(unsafe.Pointer(&data.UVs[0]), len(data.UVs)*4))
 	}
 
 	return mesh
@@ -144,27 +250,42 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	// Update da variavel global de tempo nos shaders
+	timeVal := float32(rl.GetTime())
+	if r.WaterShader.ID != 0 {
+		rl.SetShaderValue(r.WaterShader, r.WaterLocTime, []float32{timeVal}, rl.ShaderUniformFloat)
+	}
+
 	// Raio padrão para níveis verticais distantes
 	const cullingRadiusSq = 80 * 80
 
+	// DISTANCE CULLING: REMOVIDO para Visão Ilimitada
+	// Renderiza tudo o que estiver carregado na GPU
+
+	// ====== PASS 1: GEOMETRIA OPACA (TERRENO, PAREDES) ======
+	// Importante para garantir que o Z-Buffer oclua objetos corretamente antes da água por cima.
 	for _, bm := range r.Models {
 		if !bm.Active {
 			continue
 		}
-
-		// DISTANCE CULLING: REMOVIDO para Visão Ilimitada
-		// Renderiza tudo o que estiver carregado na GPU
-
-		// 1. Renderizar Terreno
 		if bm.Model.MeshCount > 0 {
 			rl.DrawModel(bm.Model, rl.Vector3{X: 0, Y: 0, Z: 0}, 1.0, rl.White)
 		}
+	}
 
-		// 2. Renderizar Líquidos (Transparente)
+	// ====== PASS 2: GEOMETRIA TRANSLÚCIDA (ÁGUA E MAGMA) ======
+	// Somente após TODO o terreno sólido estar na tela, chamamos o Pass BlendAlpha
+	// para que a água possa "mesclar" visualmente sua cor com a pedra no fundo.
+	rl.BeginBlendMode(rl.BlendAlpha)
+	for _, bm := range r.Models {
+		if !bm.Active {
+			continue
+		}
 		if bm.HasLiquid {
 			rl.DrawModel(bm.LiquidModel, rl.Vector3{X: 0, Y: 0, Z: 0}, 1.0, rl.White)
 		}
 	}
+	rl.EndBlendMode()
 }
 
 // Purge desativado para Unlimited Vision

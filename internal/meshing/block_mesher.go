@@ -113,76 +113,25 @@ func (m *BlockMesher) Generate(req Request) Result {
 		MTime:  req.MTime,
 	}
 
-	terrainBuffer := &MeshBuffer{}
-	liquidBuffer := &MeshBuffer{}
+	terrainBuffer := GetMeshBuffer()
+	liquidBuffer := GetMeshBuffer()
 
-	visibleCount := 0
-	// Algoritmo de Raycasting Vertical (Coluna)
-	// Para cada posição X,Y na fatia (chunk), iteramos de cima para baixo (do FocusZ)
-	// desenhando apenas o que é visível a partir do céu/câmera.
+	// Resetamos forçadamente na alocação caso o slice não esteja limpo
+	terrainBuffer.Geometry.Vertices = terrainBuffer.Geometry.Vertices[:0]
+	terrainBuffer.Geometry.Normals = terrainBuffer.Geometry.Normals[:0]
+	terrainBuffer.Geometry.Colors = terrainBuffer.Geometry.Colors[:0]
 
-	for xx := int32(0); xx < 16; xx++ {
-		for yy := int32(0); yy < 16; yy++ {
-			// 1. Verificação de Escopo Vertical (Aumentado para Unlimited Vision)
-			// Permitimos uma margem maior para ver o mundo inteiro.
-			// Coordenada base X,Y dentro do chunk
-			baseX := req.Origin.X + xx
-			baseY := req.Origin.Y + yy
+	liquidBuffer.Geometry.Vertices = liquidBuffer.Geometry.Vertices[:0]
+	liquidBuffer.Geometry.Normals = liquidBuffer.Geometry.Normals[:0]
+	liquidBuffer.Geometry.Colors = liquidBuffer.Geometry.Colors[:0]
 
-			focusZ := int32(req.FocusZ)
-			currentZ := req.Origin.Z
-
-			if currentZ > focusZ+50 || currentZ < focusZ-200 {
-				continue
-			}
-
-			// 2. Verificação de Oclusão DESATIVADA para Unlimited Vision
-			// No modo Unlimited Vision, processamos cada nível independentemente da obstrução acima.
-			visible := true
-			/*
-				if currentZ < focusZ {
-					for z := focusZ; z > currentZ; z-- {
-						checkCoord := util.NewDFCoord(baseX, baseY, z)
-						checkTile := req.Data.GetTile(checkCoord)
-						if checkTile == nil {
-							continue
-						}
-						shape := checkTile.Shape()
-						if shape == dfproto.ShapeFloor || shape == dfproto.ShapeWall || shape == dfproto.ShapeFortification {
-							visible = false
-							break
-						}
-					}
-				}
-			*/
-
-			if !visible {
-				continue
-			}
-
-			// Renderiza o tile atual
-			worldCoord := util.NewDFCoord(baseX, baseY, currentZ)
-			tile := req.Data.GetTile(worldCoord)
-			if tile == nil {
-				continue
-			}
-
-			visibleCount++
-
-			// 1. Geometria Sólida (Terreno)
-			shape := tile.Shape()
-			if shape != dfproto.ShapeEmpty && shape != dfproto.ShapeNone {
-				m.generateTileGeometry(tile, terrainBuffer)
-			}
-
-			// 2. Geometria de Líquidos
-			GenerateLiquidGeometry(tile, liquidBuffer)
-		}
-	}
+	// Algoritmo Greedy Meshing Vertical (1D Y-Axis)
+	// Para cada fatia (Z e X constantes), varremos Y procurando paredes e chãos contínuos
+	// para fundir as faces e economizar vértices.
+	runGreedyMesherX(req, terrainBuffer, liquidBuffer, m)
 
 	if len(terrainBuffer.Geometry.Vertices) > 0 || len(liquidBuffer.Geometry.Vertices) > 0 {
-		// Log reduzido para evitar flood apenas com contagem
-		// log.Printf("[Mesher] %s: %d tiles visíveis.", req.Origin.String(), visibleCount)
+		// Log reduzido para evitar flood
 	}
 
 	res.Terreno = terrainBuffer.Geometry.Clone()
@@ -190,20 +139,87 @@ func (m *BlockMesher) Generate(req Request) Result {
 	return res
 }
 
-func (m *BlockMesher) generateTileGeometry(tile *mapdata.Tile, buffer *MeshBuffer) {
-	shape := tile.Shape()
-	pos := util.DFToWorldPos(tile.Position)
+func runGreedyMesherX(req Request, terrainBuffer *MeshBuffer, liquidBuffer *MeshBuffer, m *BlockMesher) {
+	for currentZ := req.FocusZ - 200; currentZ <= req.FocusZ+50; currentZ++ {
+		for xx := int32(0); xx < 16; xx++ {
+			var runStartY int32 = -1
+			var runLength int32 = 0
+			var currentRunShape dfproto.TiletypeShape
+			var currentRunColor [4]uint8
+			var runTile *mapdata.Tile
 
-	// Cor baseada no material
-	rlColor := m.MatStore.GetTileColor(tile)
-	color := [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}
+			flushRun := func() {
+				if runLength > 0 && runTile != nil {
+					// Quando terminamos uma fita ininterrupta, geramos a geometria.
+					pos := util.DFToWorldPos(util.DFCoord{X: req.Origin.X + xx, Y: req.Origin.Y + runStartY, Z: int32(currentZ)})
 
-	switch shape {
-	case dfproto.ShapeWall:
-		m.addCube(pos, 1.0, 1.0, 1.0, color, tile, buffer)
-	case dfproto.ShapeFloor:
-		m.addCube(pos, 1.0, 0.1, 1.0, color, tile, buffer) // Chão fino por enquanto
+					w := float32(1.0)
+					d := float32(runLength) // No raylib Z avança quando Y do DF avança (negativamente ou não, tratado no addCube)
+					h := float32(1.0)
+					if currentRunShape == dfproto.ShapeFloor {
+						h = 0.1
+					}
+					m.addCube(pos, w, h, d, currentRunColor, runTile, terrainBuffer)
+				}
+				runStartY = -1
+				runLength = 0
+				runTile = nil
+			}
+
+			for yy := int32(0); yy < 16; yy++ {
+				baseX := req.Origin.X + xx
+				baseY := req.Origin.Y + yy
+				worldCoord := util.NewDFCoord(baseX, baseY, int32(currentZ))
+				tile := req.Data.GetTile(worldCoord)
+
+				if tile == nil || tile.Shape() == dfproto.ShapeEmpty || tile.Shape() == dfproto.ShapeNone {
+					flushRun()
+					continue
+				}
+
+				GenerateLiquidGeometry(tile, liquidBuffer)
+
+				shape := tile.Shape()
+				rlColor := m.MatStore.GetTileColor(tile)
+				color := [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}
+
+				// Verifica quebra de fita (Cor ou formato diferente, ou necessidades de culling lateral diferentes)
+				// Na nossa engine simplificada, quebramos fita se a face Oeste ou Leste mudar de visibilidade.
+				canMerge := true
+				if runLength > 0 {
+					if shape != currentRunShape || color != currentRunColor {
+						canMerge = false
+					} else {
+						cw1 := m.shouldDrawFace(tile, util.DirWest)
+						cw2 := m.shouldDrawFace(runTile, util.DirWest)
+						ce1 := m.shouldDrawFace(tile, util.DirEast)
+						ce2 := m.shouldDrawFace(runTile, util.DirEast)
+
+						if cw1 != cw2 || ce1 != ce2 {
+							canMerge = false
+						}
+					}
+				}
+
+				if !canMerge {
+					flushRun()
+				}
+
+				if runStartY == -1 {
+					runStartY = yy
+					currentRunShape = shape
+					currentRunColor = color
+					runTile = tile
+				}
+				runLength++
+			}
+			flushRun() // Descarrega a ponta da fita se acabou o chunk no Y=15
+		}
 	}
+}
+
+func (m *BlockMesher) generateTileGeometry(tile *mapdata.Tile, buffer *MeshBuffer) {
+	// Agora substituído pelo GreedyMesher interno
 }
 
 // addCube adiciona um cubo com culling de faces.
