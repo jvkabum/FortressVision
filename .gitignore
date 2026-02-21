@@ -2,7 +2,6 @@
 saves/
 
 # Compilados Nativos e Metadados do CGO
-*.exe
 *.syso
 *.o
 *.a
