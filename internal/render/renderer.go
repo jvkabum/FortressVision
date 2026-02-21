@@ -29,6 +29,7 @@ uniform float time;
 out vec2 fragTexCoord;
 out vec4 fragColor;
 out vec3 fragNormal;
+out float fragDist;
 
 void main()
 {
@@ -51,7 +52,11 @@ void main()
     	animatedPos.y += sin(time * 3.0 + vertexPosition.x) * 0.05 * length(flowDir);
 	}
 
-    gl_Position = mvp * vec4(animatedPos, 1.0);
+    // Distância para o Fog (no espaço da view)
+    vec4 viewPos = mvp * vec4(animatedPos, 1.0);
+    fragDist = length(viewPos.xyz);
+
+    gl_Position = viewPos;
 }
 `
 
@@ -61,6 +66,7 @@ const waterFragmentShader = `
 in vec2 fragTexCoord;
 in vec4 fragColor;
 in vec3 fragNormal;
+in float fragDist;
 
 out vec4 finalColor;
 
@@ -69,29 +75,30 @@ void main()
     // Escala para as ondas
     vec2 uv = fragTexCoord * 2.5;
     
-    // Múltiplas ondas senoidais cruzadas em diferentes frequências 
-    // Isto gera o padrão de refração caústica na superfície
+    // Múltiplas ondas senoidais cruzadas
     float w1 = sin(uv.x + uv.y);
     float w2 = sin(uv.x * 0.7 - uv.y * 1.3);
     float w3 = cos(uv.x * 1.5 + uv.y * 0.8);
     
-    // Média de ruído da superfície [-1.0 a 1.0]
     float wave = (w1 + w2 + w3) / 3.0; 
     
-    // Converte a onda para um padrão afiado nas cristas (estilo espelho)
-    wave = 1.0 - abs(wave);
-    wave = pow(wave, 3.0); 
+    // Brilho muito mais intenso nas cristas (Specular faux)
+    float specular = pow(wave, 12.0) * 0.6;
     
     vec4 waterColor = fragColor;
     
-    // Deixa as cristas iluminadas com um leve Tonal Ciano e espuma brilhante
-    waterColor.rgb += wave * vec3(0.15, 0.45, 0.65);
+    waterColor.rgb += wave * vec3(0.1, 0.5, 0.8);
+    waterColor.rgb += specular;
+    waterColor.rgb -= (1.0 - wave) * 0.05;
     
-    // Adiciona escurecimento nas calhas (Vales)
-    waterColor.rgb -= (1.0 - wave) * 0.1;
-    
-    // Mantemos intacto o canal Alpha vindo do CGO / CPU (Ex: 180 = 70% opaco)
-    finalColor = vec4(waterColor.rgb, fragColor.a);
+    // FOG CALCULATION
+    vec3 fogColor = vec3(0.12, 0.12, 0.16); // Cor escura do céu/vazio
+    float fogDensity = 0.005;
+    float fogFactor = exp(-pow(fragDist * fogDensity, 2.0));
+    fogFactor = clamp(fogFactor, 0.0, 1.0);
+
+    vec3 finalRGB = mix(fogColor, waterColor.rgb, fogFactor);
+    finalColor = vec4(finalRGB, fragColor.a * 0.8 * fogFactor);
 }
 `
 
@@ -114,6 +121,9 @@ type Renderer struct {
 	WaterShader  rl.Shader
 	WaterLocTime int32
 
+	// Sistema de Clima (Fase 8)
+	Weather *ParticleSystem
+
 	// Fila de modelos para purga (evita stutter)
 	purgeQueue []util.DFCoord
 }
@@ -130,6 +140,8 @@ func NewRenderer() *Renderer {
 		r.WaterShader = rl.LoadShaderFromMemory(waterVertexShader, waterFragmentShader)
 		r.WaterLocTime = rl.GetShaderLocation(r.WaterShader, "time")
 	}
+
+	r.Weather = NewParticleSystem(2000)
 
 	return r
 }
@@ -276,6 +288,7 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 	// ====== PASS 2: GEOMETRIA TRANSLÚCIDA (ÁGUA E MAGMA) ======
 	// Somente após TODO o terreno sólido estar na tela, chamamos o Pass BlendAlpha
 	// para que a água possa "mesclar" visualmente sua cor com a pedra no fundo.
+	// ====== PASS 2: GEOMETRIA TRANSLÚCIDA (ÁGUA E MAGMA) ======
 	rl.BeginBlendMode(rl.BlendAlpha)
 	for _, bm := range r.Models {
 		if !bm.Active {
@@ -286,6 +299,12 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 		}
 	}
 	rl.EndBlendMode()
+
+	// ====== PASS 3: EFEITOS CLIMÁTICOS (NEVE/CHUVA) ======
+	if r.Weather != nil {
+		r.Weather.Update(rl.GetFrameTime(), camPos)
+		r.Weather.Draw()
+	}
 }
 
 // Purge desativado para Unlimited Vision

@@ -65,6 +65,15 @@ type App struct {
 	LoadingTotalBlocks     int  // Total de blocos esperados na carga inicial
 	LoadingProcessedBlocks int  // Total já processados e enviados para GPU
 	FullScanActive         bool // Flag para download total do mundo
+
+	// Estado do Mundo (DFHack)
+	WorldName       string
+	WorldYear       int32
+	WorldSeason     string
+	WorldDay        int32
+	WorldMonth      string
+	WorldPopulation int
+	lastWorldUpdate float64
 }
 
 // New cria uma nova instância da aplicação.
@@ -99,6 +108,7 @@ func (a *App) Run() {
 	}
 
 	rl.SetTargetFPS(a.Config.TargetFPS)
+	rl.SetExitKey(0) // Desativa o fechamento da janela ao apertar ESC (Fase 10)
 
 	// Inicializar sistema de câmera
 	a.Cam = camera.New()
@@ -153,10 +163,13 @@ func (a *App) update() {
 		}
 		a.handleAutoSave() // Salvamento periódico (SQLite)
 		a.updateDFSync()
+		a.updateWorldStatus()
 		a.updateCamera()
 		a.updateInput()
 		a.updateMap()
 		a.processMesherResults()
+	case StatePaused:
+		a.updateInput() // Permite detectar ESC para despausar
 	}
 }
 
@@ -189,7 +202,8 @@ func (a *App) updateDFSync() {
 					centerX := view.ViewPosX + view.ViewSizeX/2
 					centerY := view.ViewPosY + view.ViewSizeY/2
 
-					for _, u := range units.CreatureList {
+					for i := range units.CreatureList {
+						u := &units.CreatureList[i]
 						// Ignora unidades no céu
 						if u.PosZ > 150 {
 							continue
@@ -391,7 +405,6 @@ func (a *App) connectDFHack() {
 
 				for i := range units.CreatureList {
 					u := &units.CreatureList[i]
-					log.Printf("  -> Unidade ID=%d em Z=%d (X=%d Y=%d) Válida:%v", u.ID, u.PosZ, u.PosX, u.PosY, u.IsValid)
 
 					// Ignora unidades em níveis de céu
 					if u.PosZ > 200 {
@@ -628,6 +641,63 @@ func (a *App) processMesherResults() {
 	}
 }
 
+// updateWorldStatus sincroniza informações globais do mundo DF.
+func (a *App) updateWorldStatus() {
+	if a.dfClient == nil || !a.dfClient.IsConnected() {
+		return
+	}
+
+	now := rl.GetTime()
+	if now-a.lastWorldUpdate < 10.0 {
+		return
+	}
+	a.lastWorldUpdate = now
+
+	// 1. Obter Tempo do Mundo
+	world, err := a.dfClient.GetWorldMapCenter()
+	if err == nil {
+		a.WorldYear = world.CurYear
+		a.WorldName = world.NameEn
+
+		tick := world.CurYearTick
+		monthIdx := tick / 33600
+		day := (tick%33600)/1200 + 1
+		a.WorldDay = day
+
+		months := []string{"Granito", "Slate", "Felsite", "Hematita", "Malaquita", "Galena", "Calcário", "Arenito", "Madeira", "Moonstone", "Opal", "Obsidiana"}
+		seasons := []string{"Primavera", "Verão", "Outono", "Inverno"}
+
+		if monthIdx >= 0 && monthIdx < 12 {
+			a.WorldMonth = months[monthIdx]
+			a.WorldSeason = seasons[monthIdx/3]
+		}
+
+		// Automação de Clima: Inverno = Neve, Primavera = Chuva, Outros = Limpo
+		if a.renderer != nil && a.renderer.Weather != nil {
+			switch a.WorldSeason {
+			case "Inverno":
+				a.renderer.Weather.Type = render.WeatherSnow
+			case "Primavera":
+				a.renderer.Weather.Type = render.WeatherRain
+			default:
+				a.renderer.Weather.Type = render.WeatherNone
+			}
+		}
+	}
+
+	// 2. Obter População
+	units, err := a.dfClient.GetUnitList()
+	if err == nil {
+		count := 0
+		for _, u := range units.CreatureList {
+			if u.IsValid {
+				count++
+			}
+		}
+		a.WorldPopulation = count
+	}
+}
+
 // updateCamera atualiza a câmera baseado no input.
 func (a *App) updateCamera() {
 	dt := rl.GetFrameTime()
@@ -714,9 +784,29 @@ func (a *App) updateInput() {
 		a.Config.WireframeMode = !a.Config.WireframeMode
 	}
 
+	// Toggle weather with F7
+	if rl.IsKeyPressed(rl.KeyF7) {
+		if a.renderer != nil && a.renderer.Weather != nil {
+			newType := (int(a.renderer.Weather.Type) + 1) % 3
+			a.renderer.Weather.Type = render.WeatherType(newType)
+			log.Printf("[App] Clima alterado para: %v", a.renderer.Weather.Type)
+		}
+	}
+
 	// Fullscreen toggle
 	if rl.IsKeyPressed(rl.KeyF11) {
 		rl.ToggleFullscreen()
+	}
+
+	// ESC: Alternar Pausa/Menu (Fase 10)
+	if rl.IsKeyPressed(rl.KeyEscape) {
+		if a.State == StateViewing {
+			a.State = StatePaused
+			log.Println("[App] Jogo Pausado")
+		} else if a.State == StatePaused {
+			a.State = StateViewing
+			log.Println("[App] Retomando Jogo")
+		}
 	}
 }
 
@@ -730,6 +820,10 @@ func (a *App) draw() {
 	} else {
 		a.drawScene()
 		a.drawHUD()
+
+		if a.State == StatePaused {
+			a.drawPauseMenu()
+		}
 	}
 
 	rl.EndDrawing()
@@ -841,8 +935,9 @@ func (a *App) drawHUD() {
 		return
 	}
 
-	// Fundo semi-transparente para o debug
-	rl.DrawRectangle(5, 5, 320, 180, rl.NewColor(0, 0, 0, 150))
+	// Fundo semi-transparente para o debug (Aumentado para Fase 9)
+	rl.DrawRectangle(5, 5, 340, 240, rl.NewColor(0, 0, 0, 180))
+	rl.DrawRectangleLines(5, 5, 340, 240, rl.NewColor(50, 50, 50, 255))
 
 	// FPS
 	fps := rl.GetFPS()
@@ -852,52 +947,148 @@ func (a *App) drawHUD() {
 	} else if fps < 50 {
 		fpsColor = rl.Yellow
 	}
-	rl.DrawText(fmt.Sprintf("FPS: %d", fps), 10, 10, 20, fpsColor)
+	rl.DrawText(fmt.Sprintf("FPS: %d", fps), 15, 15, 20, fpsColor)
 
-	// Informações da câmera
-	rl.DrawText(fmt.Sprintf("Câmera: (%.1f, %.1f, %.1f) Zoom: %.1f",
-		a.Cam.RLCamera.Position.X, a.Cam.RLCamera.Position.Y, a.Cam.RLCamera.Position.Z, a.Cam.CurrentZoom),
-		10, 35, 16, rl.White)
+	// Estado do Clima (Novo na Fase 8)
+	weatherStr := "Dia Limpo ☀️"
+	weatherColor := rl.SkyBlue
+	if a.renderer != nil && a.renderer.Weather != nil {
+		switch a.renderer.Weather.Type {
+		case render.WeatherRain:
+			weatherStr = "Chuva 🌧️"
+			weatherColor = rl.Blue
+		case render.WeatherSnow:
+			weatherStr = "Neve ❄️"
+			weatherColor = rl.White
+		}
+	}
+	rl.DrawText(weatherStr, 220, 15, 20, weatherColor)
 
-	// Nível Z atual
+	// Divisor
+	rl.DrawLine(15, 40, 325, 40, rl.NewColor(100, 100, 100, 100))
+
+	// Informações de Localização
+	rl.DrawText("LOCALIZAÇÃO", 15, 50, 12, rl.Gray)
+
+	dfCoord := util.WorldToDFCoord(a.Cam.CurrentLookAt)
+	dfCoord.Z = a.mapCenter.Z
+	rl.DrawText(fmt.Sprintf("Coord DF: (%d, %d, %d)", dfCoord.X, dfCoord.Y, dfCoord.Z), 15, 65, 16, rl.White)
+
 	dfViewZ := int32(0)
-	if a.dfClient != nil && a.dfClient.MapInfo != nil {
+	syncStatus := "Offline"
+	if a.dfClient != nil && a.dfClient.IsConnected() {
+		syncStatus = "Conectado"
 		view, _ := a.dfClient.GetViewInfo()
 		if view != nil {
 			dfViewZ = view.ViewPosZ
 		}
 	}
+	rl.DrawText(fmt.Sprintf("Z-Level: %d (DF: %d) [%s]", a.mapCenter.Z, dfViewZ, syncStatus), 15, 85, 14, rl.LightGray)
 
-	rl.DrawText(fmt.Sprintf("Z Visual: %d | Z DFHack: %d (Sync: %s)", a.mapCenter.Z, dfViewZ, a.dfClient.IsConnectedString()),
-		10, 55, 16, rl.White)
+	// Divisor
+	rl.DrawLine(15, 105, 325, 105, rl.NewColor(100, 100, 100, 100))
 
-	// Coordenada DF do centro
-	dfCoord := util.WorldToDFCoord(a.Cam.CurrentLookAt)
-	dfCoord.Z = a.mapCenter.Z
-	rl.DrawText(fmt.Sprintf("DF Coord: (%d, %d, %d)", dfCoord.X, dfCoord.Y, dfCoord.Z),
-		10, 75, 16, rl.White)
-
-	// Controles
-	rl.DrawText("Controles:", 10, 105, 16, rl.NewColor(200, 200, 200, 255))
-	rl.DrawText("WASD/Setas: Mover | Scroll: Zoom | F11: Fullscreen", 10, 125, 14, rl.NewColor(170, 170, 170, 255))
-
-	// Feedback Visual do Wireframe (F4)
-	wireframeStatus := "[OFF]"
-	wireframeColor := rl.NewColor(170, 170, 170, 255)
-	if a.Config.WireframeMode {
-		wireframeStatus = "[ON]"
-		wireframeColor = rl.Orange
+	// Info do Mundo (Novo na Fase 9)
+	worldStr := fmt.Sprintf("%d, %s %d - %s", a.WorldYear, a.WorldMonth, a.WorldDay, a.WorldSeason)
+	if a.WorldName != "" {
+		rl.DrawText(a.WorldName, 15, 115, 14, rl.Gold)
 	}
+	rl.DrawText(worldStr, 15, 130, 14, rl.LightGray)
+	rl.DrawText(fmt.Sprintf("População: %d criaturas", a.WorldPopulation), 15, 145, 14, rl.LightGray)
 
-	rl.DrawText(fmt.Sprintf("Q/E: Nível Z | G: Grid | F3: Debug | F4: Wireframe %s", wireframeStatus), 10, 143, 14, wireframeColor)
-	rl.DrawText("F5: Salvar Mundo (Manual) | F6: Forçar Download Total", 10, 161, 14, rl.NewColor(150, 200, 150, 255))
+	// Divisor
+	rl.DrawLine(15, 165, 325, 165, rl.NewColor(100, 100, 100, 100))
 
-	// Título no topo
+	// Atalhos Rápidos
+	rl.DrawText("CONTROLES", 15, 175, 12, rl.Gray)
+	rl.DrawText("Q/E: Nível Z | Scroll: Zoom | WASD: Mover", 15, 190, 14, rl.LightGray)
+
+	wireframeExtra := ""
+	if a.Config.WireframeMode {
+		wireframeExtra = " [WIREFRAME ON]"
+	}
+	rl.DrawText(fmt.Sprintf("F7: Clima | F11: Tela Cheia | F3: HUD%s", wireframeExtra), 15, 210, 14, rl.SkyBlue)
+
+	// Título no canto inferior direito
 	title := "FortressVision v0.1.0 - Alpha"
 	titleWidth := rl.MeasureText(title, 18)
 	rl.DrawText(title,
-		int32(rl.GetScreenWidth())-titleWidth-10, 10,
-		18, rl.NewColor(200, 200, 200, 200))
+		int32(rl.GetScreenWidth())-titleWidth-20, int32(rl.GetScreenHeight())-30,
+		18, rl.NewColor(200, 200, 200, 150))
+}
+
+// drawPauseMenu desenha o menu de escape centralizado.
+func (a *App) drawPauseMenu() {
+	screenWidth := int32(rl.GetScreenWidth())
+	screenHeight := int32(rl.GetScreenHeight())
+
+	// 1. Fundo escurecido (Dimmer)
+	rl.DrawRectangle(0, 0, screenWidth, screenHeight, rl.NewColor(0, 0, 0, 150))
+
+	// 2. Painel Central
+	panelWidth := int32(400)
+	panelHeight := int32(300)
+	panelX := (screenWidth - panelWidth) / 2
+	panelY := (screenHeight - panelHeight) / 2
+
+	rl.DrawRectangle(panelX, panelY, panelWidth, panelHeight, rl.NewColor(30, 30, 35, 255))
+	rl.DrawRectangleLines(panelX, panelY, panelWidth, panelHeight, rl.White)
+
+	// Título do Menu
+	menuTitle := "MENU DE PAUSA"
+	titleWidth := rl.MeasureText(menuTitle, 24)
+	rl.DrawText(menuTitle, panelX+(panelWidth-titleWidth)/2, panelY+30, 24, rl.Gold)
+
+	// 3. Botões
+	buttonX := panelX + 50
+	buttonWidth := panelWidth - 100
+	buttonHeight := int32(40)
+
+	// Botão: RETOMAR
+	if a.drawButton(buttonX, panelY+90, buttonWidth, buttonHeight, "RETOMAR (ESC)", rl.Green) {
+		a.State = StateViewing
+	}
+
+	// Botão: CONFIGURAÇÕES (Placeholder/Info)
+	if a.drawButton(buttonX, panelY+145, buttonWidth, buttonHeight, "OPÇÕES (F3/F4/F7)", rl.Gray) {
+		// Por enquanto exibe apenas info, mas poderia abrir submenu
+	}
+
+	// Botão: SAIR
+	if a.drawButton(buttonX, panelY+200, buttonWidth, buttonHeight, "SAIR DO JOGO", rl.Red) {
+		// Para fechar via código no Raylib/Go, precisamos sinalizar o loop principal
+		// mas aqui podemos apenas chamar o cleanup e sair
+		a.shutdown()
+		log.Println("[App] Encerrando aplicação pelo menu.")
+		runtime.Goexit() // Uma forma de "parar" forçado se necessário, mas WindowShouldClose é melhor.
+		// Vamos usar uma flag ou apenas forçar o fechamento da janela
+		rl.CloseWindow()
+	}
+}
+
+// drawButton desenha um botão genérico com hover e retorna true se clicado.
+func (a *App) drawButton(x, y, w, h int32, text string, color rl.Color) bool {
+	mousePos := rl.GetMousePosition()
+	isHover := mousePos.X >= float32(x) && mousePos.X <= float32(x+w) &&
+		mousePos.Y >= float32(y) && mousePos.Y <= float32(y+h)
+
+	drawColor := color
+	if isHover {
+		drawColor.R += 30
+		drawColor.G += 30
+		drawColor.B += 30
+		rl.SetMouseCursor(rl.MouseCursorPointingHand)
+	} else {
+		rl.SetMouseCursor(rl.MouseCursorDefault)
+	}
+
+	rl.DrawRectangle(x, y, w, h, rl.NewColor(50, 50, 50, 255))
+	rl.DrawRectangleLines(x, y, w, h, drawColor)
+
+	textWidth := rl.MeasureText(text, 18)
+	rl.DrawText(text, x+(w-textWidth)/2, y+(h-18)/2, 18, rl.White)
+
+	return isHover && rl.IsMouseButtonPressed(rl.MouseLeftButton)
 }
 
 // shutdown realiza a limpeza de recursos.

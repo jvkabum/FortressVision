@@ -197,7 +197,7 @@ func runGreedyMesherX(req Request, terrainBuffer *MeshBuffer, liquidBuffer *Mesh
 				worldCoord := util.NewDFCoord(baseX, baseY, int32(currentZ))
 				tile := req.Data.GetTile(worldCoord)
 
-				if tile == nil || tile.Shape() == dfproto.ShapeEmpty || tile.Shape() == dfproto.ShapeNone {
+				if tile == nil || tile.Hidden || tile.Shape() == dfproto.ShapeEmpty || tile.Shape() == dfproto.ShapeNone {
 					flushRun()
 					continue
 				}
@@ -243,9 +243,21 @@ func runGreedyMesherX(req Request, terrainBuffer *MeshBuffer, liquidBuffer *Mesh
 					continue
 				}
 
-				if shape == dfproto.ShapeFortification {
+				if shape == dfproto.ShapeTreeShape || shape == dfproto.ShapeTrunkBranch {
 					flushRun()
-					m.addFortification(worldCoord, color, terrainBuffer, req.Data)
+					m.addTreeTrunk(worldCoord, color, terrainBuffer, req.Data)
+					continue
+				}
+
+				if shape == dfproto.ShapeBranch || shape == dfproto.ShapeTwig {
+					flushRun()
+					m.addTreeLeaves(worldCoord, color, terrainBuffer, req.Data)
+					continue
+				}
+
+				if shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
+					flushRun()
+					m.addShrub(worldCoord, color, terrainBuffer, req.Data)
 					continue
 				}
 
@@ -614,4 +626,64 @@ func (m *BlockMesher) addFortification(coord util.DFCoord, color [4]uint8, buffe
 		[3]float32{x + w, y + 0.4, z},
 		[3]float32{0, 1, 0}, color,
 	)
+}
+
+func (m *BlockMesher) addTreeTrunk(coord util.DFCoord, color [4]uint8, buffer *MeshBuffer, data *mapdata.MapDataStore) {
+	pos := util.DFToWorldPos(coord)
+	x, y, z := pos.X, pos.Y, pos.Z
+
+	// Cor de madeira mais escura para o tronco
+	trunkColor := [4]uint8{uint8(float32(color[0]) * 0.8), uint8(float32(color[1]) * 0.8), uint8(float32(color[2]) * 0.8), 255}
+
+	// Simplificamos o tronco como um paralelepípedo mais fino (0.4x0.4)
+	// para não parecer apenas um bloco sólido
+	o := float32(0.3) // Offset para centralizar
+	tw, td := float32(0.4), float32(0.4)
+
+	// Face Norte (+Z)
+	buffer.AddFaceAOStandard([3]float32{x + o, y, z - o}, trunkColor, [3]float32{x + o + tw, y, z - o}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o}, trunkColor, [3]float32{x + o, y + 1.0, z - o}, trunkColor, [3]float32{0, 0, 1})
+	// Face Sul (-Z)
+	buffer.AddFaceAOStandard([3]float32{x + o, y, z - o - td}, trunkColor, [3]float32{x + o, y + 1.0, z - o - td}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o - td}, trunkColor, [3]float32{x + o + tw, y, z - o - td}, trunkColor, [3]float32{0, 0, -1})
+	// Face Oeste (-X)
+	buffer.AddFaceAOStandard([3]float32{x + o, y, z - o}, trunkColor, [3]float32{x + o, y + 1.0, z - o}, trunkColor, [3]float32{x + o, y + 1.0, z - o - td}, trunkColor, [3]float32{x + o, y, z - o - td}, trunkColor, [3]float32{-1, 0, 0})
+	// Face Leste (+X)
+	buffer.AddFaceAOStandard([3]float32{x + o + tw, y, z - o}, trunkColor, [3]float32{x + o + tw, y, z - o - td}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o - td}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o}, trunkColor, [3]float32{1, 0, 0})
+
+	// Topo e Baixo se necessário (geralmente cobertos por outros troncos ou folhas)
+	buffer.AddFaceAOStandard([3]float32{x + o, y + 1.0, z - o}, trunkColor, [3]float32{x + o, y + 1.0, z - o - td}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o - td}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o}, trunkColor, [3]float32{0, 1, 0})
+}
+
+func (m *BlockMesher) addTreeLeaves(coord util.DFCoord, color [4]uint8, buffer *MeshBuffer, data *mapdata.MapDataStore) {
+	pos := util.DFToWorldPos(coord)
+	x, y, z := pos.X, pos.Y, pos.Z
+
+	// Para folhas, usamos um bloco levemente menor (0.8) e centralizado para dar aspecto de "nuget" de folhas
+	o := float32(0.1)
+	s := float32(0.8)
+
+	// Cor esverdeada para folhas (DF pode mandar cores variadas, vamos garantir o alpha)
+	leafColor := color
+	leafColor[3] = 255
+
+	// 6 Faces CCW
+	buffer.AddFaceAOStandard([3]float32{x + o, y + o, z - o}, leafColor, [3]float32{x + o + s, y + o, z - o}, leafColor, [3]float32{x + o + s, y + o + s, z - o}, leafColor, [3]float32{x + o, y + o + s, z - o}, leafColor, [3]float32{0, 0, 1})
+	buffer.AddFaceAOStandard([3]float32{x + o, y + o, z - o - s}, leafColor, [3]float32{x + o, y + o + s, z - o - s}, leafColor, [3]float32{x + o + s, y + o + s, z - o - s}, leafColor, [3]float32{x + o + s, y + o, z - o - s}, leafColor, [3]float32{0, 0, -1})
+	buffer.AddFaceAOStandard([3]float32{x + o, y + o, z - o}, leafColor, [3]float32{x + o, y + o + s, z - o}, leafColor, [3]float32{x + o, y + o + s, z - o - s}, leafColor, [3]float32{x + o, y + o, z - o - s}, leafColor, [3]float32{-1, 0, 0})
+	buffer.AddFaceAOStandard([3]float32{x + o + s, y + o, z - o}, leafColor, [3]float32{x + o + s, y + o, z - o - s}, leafColor, [3]float32{x + o + s, y + o + s, z - o - s}, leafColor, [3]float32{x + o + s, y + o + s, z - o}, leafColor, [3]float32{1, 0, 0})
+	buffer.AddFaceAOStandard([3]float32{x + o, y + o + s, z - o}, leafColor, [3]float32{x + o, y + o + s, z - o - s}, leafColor, [3]float32{x + o + s, y + o + s, z - o - s}, leafColor, [3]float32{x + o + s, y + o + s, z - o}, leafColor, [3]float32{0, 1, 0})
+	buffer.AddFaceAOStandard([3]float32{x + o, y + o, z - o}, leafColor, [3]float32{x + o + s, y + o, z - o}, leafColor, [3]float32{x + o + s, y + o, z - o - s}, leafColor, [3]float32{x + o, y + o, z - o - s}, leafColor, [3]float32{0, -1, 0})
+}
+
+func (m *BlockMesher) addShrub(coord util.DFCoord, color [4]uint8, buffer *MeshBuffer, data *mapdata.MapDataStore) {
+	pos := util.DFToWorldPos(coord)
+	x, y, z := pos.X, pos.Y, pos.Z
+
+	// Arbustos são pequenos "X" (cross-quads) como em jogos retro
+	c := color
+	c[3] = 255
+
+	// Diagonal 1
+	buffer.AddFace([3]float32{x, y, z}, [3]float32{x + 1, y, z - 1}, [3]float32{x + 1, y + 0.7, z - 1}, [3]float32{x, y + 0.7, z}, [3]float32{0, 1, 0}, c)
+	// Diagonal 2
+	buffer.AddFace([3]float32{x + 1, y, z}, [3]float32{x, y, z - 1}, [3]float32{x, y + 0.7, z - 1}, [3]float32{x + 1, y + 0.7, z}, [3]float32{0, 1, 0}, c)
 }

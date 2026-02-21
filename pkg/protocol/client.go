@@ -26,13 +26,14 @@ const (
 
 // Assinaturas de métodos conhecidos (para Bind correto)
 var MethodSignatures = map[string][2]string{
-	"GetTiletypeList": {"dfproto.EmptyMessage", "RemoteFortressReader.TiletypeList"},
-	"GetViewInfo":     {"dfproto.EmptyMessage", "RemoteFortressReader.ViewInfo"},
-	"GetBlockList":    {"RemoteFortressReader.BlockRequest", "RemoteFortressReader.BlockList"},
-	"GetMaterialList": {"dfproto.EmptyMessage", "RemoteFortressReader.MaterialList"},
-	"GetUnitList":     {"dfproto.EmptyMessage", "RemoteFortressReader.UnitList"},
-	"CheckHashes":     {"dfproto.EmptyMessage", "dfproto.EmptyMessage"},
-	"GetMapInfo":      {"dfproto.EmptyMessage", "RemoteFortressReader.MapInfo"},
+	"GetTiletypeList":   {"dfproto.EmptyMessage", "RemoteFortressReader.TiletypeList"},
+	"GetViewInfo":       {"dfproto.EmptyMessage", "RemoteFortressReader.ViewInfo"},
+	"GetBlockList":      {"RemoteFortressReader.BlockRequest", "RemoteFortressReader.BlockList"},
+	"GetMaterialList":   {"dfproto.EmptyMessage", "RemoteFortressReader.MaterialList"},
+	"GetUnitList":       {"dfproto.EmptyMessage", "RemoteFortressReader.UnitList"},
+	"CheckHashes":       {"dfproto.EmptyMessage", "dfproto.EmptyMessage"},
+	"GetMapInfo":        {"dfproto.EmptyMessage", "RemoteFortressReader.MapInfo"},
+	"GetWorldMapCenter": {"dfproto.EmptyMessage", "RemoteFortressReader.WorldMap"},
 }
 
 // Client gerencia a conexão com o DFHack.

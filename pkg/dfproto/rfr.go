@@ -1061,3 +1061,85 @@ func (dc *DigCommand) Marshal() ([]byte, error) {
 	e.EncodeVarintForce(4, int64(dc.PosZ))
 	return e.Bytes(), nil
 }
+
+// WorldMap - informações globais do mundo
+type WorldMap struct {
+	WorldWidth  int32
+	WorldHeight int32
+	Name        string
+	NameEn      string
+	CenterX     int32
+	CenterY     int32
+	CenterZ     int32
+	CurYear     int32
+	CurYearTick int32
+}
+
+func (w *WorldMap) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			w.WorldWidth = int32(v)
+		case 2:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			w.WorldHeight = int32(v)
+		case 3:
+			w.Name, err = d.ReadString()
+			if err != nil {
+				return err
+			}
+		case 4:
+			w.NameEn, err = d.ReadString()
+			if err != nil {
+				return err
+			}
+		case 17:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			w.CenterX = int32(v)
+		case 18:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			w.CenterY = int32(v)
+		case 19:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			w.CenterZ = int32(v)
+		case 20:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			w.CurYear = int32(v)
+		case 21:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			w.CurYearTick = int32(v)
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

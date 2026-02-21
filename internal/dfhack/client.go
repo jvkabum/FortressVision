@@ -141,6 +141,19 @@ func (c *Client) GetViewInfo() (*dfproto.ViewInfo, error) {
 	return resp, nil
 }
 
+// GetWorldMapCenter obtém informações sobre o centro do mundo e tempo.
+func (c *Client) GetWorldMapCenter() (*dfproto.WorldMap, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	req := &dfproto.EmptyMessage{}
+	resp := &dfproto.WorldMap{}
+	if err := c.rpc.Call("GetWorldMapCenter", pluginName, req, resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 // GetUnitList obtém a lista de criaturas/unidades.
 func (c *Client) GetUnitList() (*dfproto.UnitList, error) {
 	c.mu.Lock()
