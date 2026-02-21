@@ -6,6 +6,7 @@ import (
 	"FortressVision/internal/util"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/go-gl/mathgl/mgl32"
 )
 
 // Mode define o tipo de projeção estritamente.
@@ -95,7 +96,13 @@ func (c *CameraController) Update(dt float32) {
 		factor = 1.0
 	}
 
-	c.CurrentLookAt = rl.Vector3Lerp(c.CurrentLookAt, c.TargetLookAt, factor)
+	// Conversão rl.Vector3 -> mgl32.Vec3 para interpolação VectorLerp segura
+	curVec := mgl32.Vec3{c.CurrentLookAt.X, c.CurrentLookAt.Y, c.CurrentLookAt.Z}
+	tgtVec := mgl32.Vec3{c.TargetLookAt.X, c.TargetLookAt.Y, c.TargetLookAt.Z}
+
+	lerpedVec := curVec.Add(tgtVec.Sub(curVec).Mul(factor)) // Lerp manual MGL32
+
+	c.CurrentLookAt = rl.Vector3{X: lerpedVec.X(), Y: lerpedVec.Y(), Z: lerpedVec.Z()}
 	c.CurrentZoom = util.Lerp(c.CurrentZoom, c.TargetZoom, factor)
 
 	c.UpdateWait(dt)
@@ -123,7 +130,7 @@ func (c *CameraController) UpdateWait(dt float32) {
 		c.RLCamera.Projection = rl.CameraPerspective
 	}
 
-	// Calcula offset baseado nos ângulos
+	// Calcula offset baseado nos ângulos (usando matemática mais robusta se necessário futuramente, mas mantendo a conversão esférica simples)
 	// AngleY = Rotação em torno do eixo Y (Azimute)
 	// AngleX = Elevação (Latitude)
 	cosX := float32(math.Cos(float64(c.TargetAngleX)))
@@ -189,38 +196,46 @@ func (c *CameraController) HandleInput(dt float32) bool {
 		}
 	}
 
-	// Movimento WASD (Relativo à câmera)
-	// Precisamos calcular os vetores Forward e Right projetados no plano XZ (chão)
-	forward := rl.Vector3Subtract(c.TargetLookAt, c.RLCamera.Position)
-	forward.Y = 0
-	forward = rl.Vector3Normalize(forward)
+	// Movimento WASD (Relativo à câmera) transformado para usar mgl32
+	camPos := mgl32.Vec3{c.RLCamera.Position.X, c.RLCamera.Position.Y, c.RLCamera.Position.Z}
+	targetPos := mgl32.Vec3{c.TargetLookAt.X, c.TargetLookAt.Y, c.TargetLookAt.Z}
 
-	right := rl.Vector3CrossProduct(forward, rl.Vector3{X: 0, Y: 1, Z: 0})
-	right = rl.Vector3Normalize(right)
+	// Precisamos calcular os vetores Forward e Right projetados no plano XZ (chão)
+	forward := targetPos.Sub(camPos)
+	forward[1] = 0 // forward.Y = 0
+	forward = forward.Normalize()
+
+	upVec := mgl32.Vec3{0, 1, 0}
+	right := forward.Cross(upVec).Normalize()
 
 	// Velocidade baseada no zoom (como no Armok Vision)
 	// Quanto mais alto, mais rápido.
 	currentSpeed := c.MoveSpeed * (c.CurrentZoom / 50.0) * dt
 
-	moveMove := rl.Vector3Zero()
+	moveMove := mgl32.Vec3{0, 0, 0}
 
 	if rl.IsKeyDown(rl.KeyW) {
-		moveMove = rl.Vector3Add(moveMove, forward)
+		moveMove = moveMove.Add(forward)
 	}
 	if rl.IsKeyDown(rl.KeyS) {
-		moveMove = rl.Vector3Subtract(moveMove, forward)
+		moveMove = moveMove.Sub(forward)
 	}
 	if rl.IsKeyDown(rl.KeyD) {
-		moveMove = rl.Vector3Add(moveMove, right)
+		moveMove = moveMove.Add(right)
 	}
 	if rl.IsKeyDown(rl.KeyA) {
-		moveMove = rl.Vector3Subtract(moveMove, right)
+		moveMove = moveMove.Sub(right)
 	}
 
-	if rl.Vector3Length(moveMove) > 0 {
-		moveMove = rl.Vector3Normalize(moveMove)
-		moveMove = rl.Vector3Scale(moveMove, currentSpeed)
-		c.TargetLookAt = rl.Vector3Add(c.TargetLookAt, moveMove)
+	if moveMove.Len() > 0 {
+		moveMove = moveMove.Normalize().Mul(currentSpeed)
+		targetPos = targetPos.Add(moveMove)
+
+		c.TargetLookAt = rl.Vector3{
+			X: targetPos.X(),
+			Y: targetPos.Y(),
+			Z: targetPos.Z(),
+		}
 		moved = true
 	}
 

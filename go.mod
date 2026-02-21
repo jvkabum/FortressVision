@@ -6,6 +6,7 @@ require github.com/gen2brain/raylib-go/raylib v0.55.1
 
 require (
 	github.com/ebitengine/purego v0.7.1 // indirect
+	github.com/go-gl/mathgl v1.2.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/mattn/go-sqlite3 v1.14.22 // indirect
