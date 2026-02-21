@@ -213,7 +213,8 @@ func (r *Renderer) loadTextures() {
 
 func (r *Renderer) loadModels() {
 	modelFiles := map[string]string{
-		"shrub": "assets/models/shrub.glb",
+		// Carregando apenas vegetação por enquanto (testado e funcional)
+		"shrub": "assets/models/BUSH.obj",
 	}
 	for name, path := range modelFiles {
 		model := rl.LoadModel(path)
