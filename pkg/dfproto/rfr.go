@@ -492,7 +492,6 @@ func (m *MaterialList) Unmarshal(data []byte) error {
 	return nil
 }
 
-// MapBlock - bloco 16x16x1 do mapa
 type MapBlock struct {
 	MapX               int32
 	MapY               int32
@@ -507,6 +506,10 @@ type MapBlock struct {
 	LayerMaterials     []MatPair
 	VeinMaterials      []MatPair
 	Flows              []FlowInfo
+	TreePercent        []int32
+	TreeX              []int32
+	TreeY              []int32
+	TreeZ              []int32
 }
 
 func (m *MapBlock) Unmarshal(data []byte) error {
@@ -657,6 +660,70 @@ func (m *MapBlock) Unmarshal(data []byte) error {
 				return err
 			}
 			m.Flows = append(m.Flows, flow)
+		case 20: // tree_percent
+			if wireType == protowire.WireLengthDelimited {
+				vals, err := d.ReadPackedVarint()
+				if err != nil {
+					return err
+				}
+				for _, v := range vals {
+					m.TreePercent = append(m.TreePercent, int32(v))
+				}
+			} else {
+				v, err := d.ReadVarint()
+				if err != nil {
+					return err
+				}
+				m.TreePercent = append(m.TreePercent, int32(v))
+			}
+		case 21: // tree_x
+			if wireType == protowire.WireLengthDelimited {
+				vals, err := d.ReadPackedVarint()
+				if err != nil {
+					return err
+				}
+				for _, v := range vals {
+					m.TreeX = append(m.TreeX, int32(v))
+				}
+			} else {
+				v, err := d.ReadVarint()
+				if err != nil {
+					return err
+				}
+				m.TreeX = append(m.TreeX, int32(v))
+			}
+		case 22: // tree_y
+			if wireType == protowire.WireLengthDelimited {
+				vals, err := d.ReadPackedVarint()
+				if err != nil {
+					return err
+				}
+				for _, v := range vals {
+					m.TreeY = append(m.TreeY, int32(v))
+				}
+			} else {
+				v, err := d.ReadVarint()
+				if err != nil {
+					return err
+				}
+				m.TreeY = append(m.TreeY, int32(v))
+			}
+		case 23: // tree_z
+			if wireType == protowire.WireLengthDelimited {
+				vals, err := d.ReadPackedVarint()
+				if err != nil {
+					return err
+				}
+				for _, v := range vals {
+					m.TreeZ = append(m.TreeZ, int32(v))
+				}
+			} else {
+				v, err := d.ReadVarint()
+				if err != nil {
+					return err
+				}
+				m.TreeZ = append(m.TreeZ, int32(v))
+			}
 		default:
 			if err := d.SkipField(wireType); err != nil {
 				return err

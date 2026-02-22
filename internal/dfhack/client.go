@@ -19,6 +19,7 @@ type Client struct {
 	// Cache de dados estáticos
 	TiletypeList *dfproto.TiletypeList
 	MaterialList *dfproto.MaterialList
+	PlantRawList *dfproto.PlantRawList
 	MapInfo      *dfproto.MapInfo
 }
 
@@ -91,6 +92,15 @@ func (c *Client) FetchStaticData() error {
 	fmt.Printf("  → Tamanho: %dx%dx%d blocos\n",
 		c.MapInfo.BlockSizeX, c.MapInfo.BlockSizeY, c.MapInfo.BlockSizeZ)
 
+	// PlantRawList (definições de árvores e plantas)
+	c.PlantRawList, err = c.GetPlantRaws()
+	if err != nil {
+		// Log mas não falha o boot se der erro nas plantas
+		fmt.Printf(" [!] Erro ao carregar PlantRaws: %v\n", err)
+	} else {
+		fmt.Printf("  → %d espécies de plantas carregadas\n", len(c.PlantRawList.PlantRaws))
+	}
+
 	return nil
 }
 
@@ -123,6 +133,16 @@ func (c *Client) GetMapInfo() (*dfproto.MapInfo, error) {
 	req := &dfproto.EmptyMessage{}
 	resp := &dfproto.MapInfo{}
 	if err := c.rpc.Call("GetMapInfo", pluginName, req, resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// GetPlantRaws obtém a lista de definições de plantas do jogo.
+func (c *Client) GetPlantRaws() (*dfproto.PlantRawList, error) {
+	req := &dfproto.EmptyMessage{}
+	resp := &dfproto.PlantRawList{}
+	if err := c.rpc.Call("GetPlantRaws", pluginName, req, resp); err != nil {
 		return nil, err
 	}
 	return resp, nil

@@ -583,20 +583,39 @@ func (m *BlockMesher) addFortification(coord util.DFCoord, color [4]uint8, buffe
 func (m *BlockMesher) addTreeTrunk(coord util.DFCoord, tile *mapdata.Tile, color [4]uint8, res *Result) {
 	pos := util.DFToWorldPos(coord)
 
-	// Rotação determinística baseada na coordenada
-	rotation := float32((coord.X*17 + coord.Y*31 + coord.Z*13) % 360)
+	// Rotacionar apontando para o centro da árvore usando PositionOnTree
+	var rotation float32
+	if tile.PositionOnTree.X != 0 || tile.PositionOnTree.Y != 0 {
+		dirX := float64(-tile.PositionOnTree.X)
+		dirY := float64(tile.PositionOnTree.Y)
+		rotation = float32(math.Atan2(dirX, dirY) * (180.0 / math.Pi))
+	} else {
+		// Rotação determinística baseada na coordenada
+		rotation = float32((coord.X*17 + coord.Y*31 + coord.Z*13) % 360)
+	}
 
-	// Usamos o modelo TreeTrunkPillar para troncos normais ou TREE para fungiwood
+	// Usamos o modelo tree_trunk para troncos normais ou mushroom para fungiwood
 	modelName := "tree_trunk"
 	if tile.MaterialCategory() == dfproto.TilematMushroom {
 		modelName = "mushroom" // Fungos gigantes usam o modelo de cogumelo
+	}
+
+	scale := float32(1.0)
+	// Ajustamos a escala com base na espessura do tronco (0 a 100%)
+	if tile.TrunkPercent > 0 {
+		scale = float32(tile.TrunkPercent) / 100.0
+		if scale < 0.3 {
+			scale = 0.3 // evita troncos muito finos/invisíveis
+		}
+	} else if tile.Shape() == dfproto.ShapeTrunkBranch {
+		scale = 0.8
 	}
 
 	res.ModelInstances = append(res.ModelInstances, ModelInstance{
 		ModelName:   modelName,
 		TextureName: m.MatStore.GetTextureName(tile.MaterialCategory()),
 		Position:    [3]float32{pos.X + 0.5, pos.Y, pos.Z - 0.5},
-		Scale:       1.0,
+		Scale:       scale,
 		Rotation:    rotation,
 		Color:       color,
 	})
@@ -604,7 +623,16 @@ func (m *BlockMesher) addTreeTrunk(coord util.DFCoord, tile *mapdata.Tile, color
 
 func (m *BlockMesher) addTreeLeaves(coord util.DFCoord, tile *mapdata.Tile, color [4]uint8, res *Result) {
 	pos := util.DFToWorldPos(coord)
-	rotation := float32((coord.X*13 + coord.Y*17 + coord.Z*31) % 360)
+
+	var rotation float32
+	if tile.PositionOnTree.X != 0 || tile.PositionOnTree.Y != 0 {
+		dirX := float64(-tile.PositionOnTree.X)
+		dirY := float64(tile.PositionOnTree.Y)
+		rotation = float32(math.Atan2(dirX, dirY) * (180.0 / math.Pi))
+	} else {
+		// Diferenciar ligeiramente a semente de rotação em relação ao tronco
+		rotation = float32((coord.X*13 + coord.Y*17 + coord.Z*31) % 360)
+	}
 
 	// Galhos e folhagens agora usam modelos 3D mais orgânicos
 	modelName := "tree_branches"
@@ -616,7 +644,7 @@ func (m *BlockMesher) addTreeLeaves(coord util.DFCoord, tile *mapdata.Tile, colo
 		ModelName:   modelName,
 		TextureName: m.MatStore.GetTextureName(tile.MaterialCategory()),
 		Position:    [3]float32{pos.X + 0.5, pos.Y, pos.Z - 0.5},
-		Scale:       0.8, // Ramos são um pouco menores que o tronco
+		Scale:       0.8, // Ramos são um pouco menores que o tronco principal
 		Rotation:    rotation,
 		Color:       color,
 	})

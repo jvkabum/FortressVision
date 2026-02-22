@@ -300,7 +300,7 @@ func (r *Renderer) loadModels() {
 	entries := []modelEntry{
 		{"shrub", "assets/models/shrub.glb"},
 		{"tree_trunk", "assets/models/TREE.obj"},
-		{"tree_branches", "assets/models/Twigs.obj"},
+		{"tree_branches", "assets/models/shrub.glb"},
 		{"mushroom", "assets/models/SAPLING.obj"},
 	}
 

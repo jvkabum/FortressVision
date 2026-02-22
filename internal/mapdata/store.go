@@ -212,6 +212,19 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) {
 				checkChangeBool("Hidden", &tile.Hidden, block.Hidden[idx])
 			}
 
+			// Dados de árvores (Tronco e Galhos)
+			if len(block.TreePercent) > int(idx) {
+				newVal := uint8(block.TreePercent[idx])
+				if tile.TrunkPercent != newVal {
+					tile.TrunkPercent = newVal
+					chunkChanged = true
+				}
+			}
+			if len(block.TreeX) > int(idx) && len(block.TreeY) > int(idx) && len(block.TreeZ) > int(idx) {
+				treePos := util.NewDFCoord(block.TreeX[idx], block.TreeY[idx], block.TreeZ[idx])
+				checkChangeCoord("PositionOnTree", &tile.PositionOnTree, treePos)
+			}
+
 			// Procura por fluxo na posição global
 			flowDir, hasFlow := flowMap[worldCoord]
 			if hasFlow {
