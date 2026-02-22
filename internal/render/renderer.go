@@ -522,7 +522,7 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 	// Renderiza tudo o que estiver carregado na GPU
 
 	// ====== PASS 1: GEOMETRIA OPACA (TERRENO, PAREDES) ======
-	// Importante para garantir que o Z-Buffer oclua objetos corretamente antes da água por cima.
+	// Importante para garantir que o Z-Buffer oclua objetos corretamente antes da vegetação e água.
 	for _, bm := range r.Models {
 		if !bm.Active {
 			continue
@@ -537,7 +537,16 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 				rl.DrawModel(m, rl.Vector3{X: 0, Y: 0, Z: 0}, 1.0, rl.White)
 			}
 		}
-		// Desenha instâncias de modelos 3D (arbustos, árvores, etc)
+	}
+
+	// ====== PASS 1.5: VEGETAÇÃO (ARBUSTOS, ÁRVORES) ======
+	// Desenhada APÓS todo o terreno, com depth write OFF para evitar Z-fighting
+	// entre polígonos sobrepostos de folhas. O depth TEST continua ativo.
+	rl.DisableDepthMask()
+	for _, bm := range r.Models {
+		if !bm.Active || len(bm.Instances) == 0 {
+			continue
+		}
 		for _, inst := range bm.Instances {
 			if model3d, ok := r.Models3D[inst.ModelName]; ok {
 				pos := rl.Vector3{X: inst.Position[0], Y: inst.Position[1], Z: inst.Position[2]}
@@ -567,10 +576,8 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 			}
 		}
 	}
+	rl.EnableDepthMask()
 
-	// ====== PASS 2: GEOMETRIA TRANSLÚCIDA (ÁGUA E MAGMA) ======
-	// Somente após TODO o terreno sólido estar na tela, chamamos o Pass BlendAlpha
-	// para que a água possa "mesclar" visualmente sua cor com a pedra no fundo.
 	// ====== PASS 2: GEOMETRIA TRANSLÚCIDA (ÁGUA E MAGMA) ======
 	rl.BeginBlendMode(rl.BlendAlpha)
 	for _, bm := range r.Models {

@@ -30,6 +30,7 @@ var MethodSignatures = map[string][2]string{
 	"GetViewInfo":       {"dfproto.EmptyMessage", "RemoteFortressReader.ViewInfo"},
 	"GetBlockList":      {"RemoteFortressReader.BlockRequest", "RemoteFortressReader.BlockList"},
 	"GetMaterialList":   {"dfproto.EmptyMessage", "RemoteFortressReader.MaterialList"},
+	"GetPlantList":      {"RemoteFortressReader.BlockRequest", "RemoteFortressReader.PlantList"},
 	"GetUnitList":       {"dfproto.EmptyMessage", "RemoteFortressReader.UnitList"},
 	"CheckHashes":       {"dfproto.EmptyMessage", "dfproto.EmptyMessage"},
 	"GetMapInfo":        {"dfproto.EmptyMessage", "RemoteFortressReader.MapInfo"},

@@ -268,6 +268,16 @@ func runGreedyMesherX(req Request, getBuffer func(string) *MeshBuffer, liquidBuf
 
 				if shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
 					flushRun()
+					// Gerar chão (piso fino) sob o arbusto para não deixar buraco
+					floorPos := util.DFToWorldPos(worldCoord)
+					floorTexName := m.MatStore.GetTextureName(tile.MaterialCategory())
+					floorBuffer := getBuffer(floorTexName)
+					floorColor := [4]uint8{color[0], color[1], color[2], color[3]}
+					m.addCubeGreedy(floorPos, 1.0, 0.1, 1.0, floorColor,
+						true, m.shouldDrawFace(tile, util.DirDown),
+						m.shouldDrawFace(tile, util.DirNorth), m.shouldDrawFace(tile, util.DirSouth),
+						m.shouldDrawFace(tile, util.DirWest), m.shouldDrawFace(tile, util.DirEast),
+						floorBuffer, worldCoord, req.Data)
 					m.addShrub(worldCoord, tile, color, res)
 					continue
 				}
@@ -693,7 +703,7 @@ func (m *BlockMesher) addShrub(coord util.DFCoord, tile *mapdata.Tile, color [4]
 	res.ModelInstances = append(res.ModelInstances, ModelInstance{
 		ModelName:   "shrub",
 		TextureName: m.MatStore.GetTextureName(tile.MaterialCategory()),
-		Position:    [3]float32{pos.X + 0.5, pos.Y + 0.1, pos.Z - 0.5},
+		Position:    [3]float32{pos.X + 0.5, pos.Y + 0.15, pos.Z - 0.5},
 		Scale:       0.4,
 		Rotation:    rotation,
 		Color:       color,

@@ -93,7 +93,7 @@ func (c *Client) FetchStaticData() error {
 		c.MapInfo.BlockSizeX, c.MapInfo.BlockSizeY, c.MapInfo.BlockSizeZ)
 
 	// PlantRawList (definições de árvores e plantas)
-	c.PlantRawList, err = c.GetPlantRaws()
+	c.PlantRawList, err = c.GetPlantList()
 	if err != nil {
 		// Log mas não falha o boot se der erro nas plantas
 		fmt.Printf(" [!] Erro ao carregar PlantRaws: %v\n", err)
@@ -138,11 +138,11 @@ func (c *Client) GetMapInfo() (*dfproto.MapInfo, error) {
 	return resp, nil
 }
 
-// GetPlantRaws obtém a lista de definições de plantas do jogo.
-func (c *Client) GetPlantRaws() (*dfproto.PlantRawList, error) {
-	req := &dfproto.EmptyMessage{}
+// GetPlantList obtém a lista de definições de plantas do jogo.
+func (c *Client) GetPlantList() (*dfproto.PlantRawList, error) {
+	req := &dfproto.BlockRequest{}
 	resp := &dfproto.PlantRawList{}
-	if err := c.rpc.Call("GetPlantRaws", pluginName, req, resp); err != nil {
+	if err := c.rpc.Call("GetPlantList", pluginName, req, resp); err != nil {
 		return nil, err
 	}
 	return resp, nil
