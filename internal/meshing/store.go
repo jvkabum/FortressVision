@@ -49,10 +49,19 @@ func (s *ResultStore) Clear() {
 
 // Clone realiza uma cópia profunda de um Result.
 func (r Result) Clone() Result {
-	return Result{
-		Origin:   r.Origin,
-		Terreno:  r.Terreno.Clone(),
-		Liquidos: r.Liquidos.Clone(),
-		MTime:    r.MTime,
+	newRes := Result{
+		Origin:             r.Origin,
+		MTime:              r.MTime,
+		Terreno:            r.Terreno.Clone(),
+		Liquidos:           r.Liquidos.Clone(),
+		MaterialGeometries: make(map[string]GeometryData),
+		ModelInstances:     make([]ModelInstance, len(r.ModelInstances)),
 	}
+
+	for k, v := range r.MaterialGeometries {
+		newRes.MaterialGeometries[k] = v.Clone()
+	}
+	copy(newRes.ModelInstances, r.ModelInstances)
+
+	return newRes
 }

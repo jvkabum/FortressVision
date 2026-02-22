@@ -30,6 +30,13 @@ type WorldMetadata struct {
 	Value string
 }
 
+// MaterialModel armazena a cor de um material específico persistido
+type MaterialModel struct {
+	MatType  int32 `gorm:"primaryKey;autoIncrement:false"`
+	MatIndex int32 `gorm:"primaryKey;autoIncrement:false"`
+	R, G, B  uint8
+}
+
 const CurrentFormatVersion = 2
 
 // OpenInitialize abre (ou cria) o banco de dados SQLite para o mundo e roda migrações.
@@ -49,7 +56,7 @@ func (s *MapDataStore) OpenInitialize(worldName string) error {
 	}
 
 	// Migração automática das tabelas
-	if err := db.AutoMigrate(&ChunkModel{}, &WorldMetadata{}); err != nil {
+	if err := db.AutoMigrate(&ChunkModel{}, &WorldMetadata{}, &MaterialModel{}); err != nil {
 		return fmt.Errorf("falha na migração do banco: %w", err)
 	}
 

@@ -104,16 +104,35 @@ void main()
 }
 `
 
-const terrainFragmentShader = `
+const plantVertexShader = `
 #version 330
-in vec2 fragTexCoord;
-in vec4 fragColor;
-uniform sampler2D texture0;
-out vec4 finalColor;
+in vec3 vertexPosition;
+in vec2 vertexTexCoord;
+in vec3 vertexNormal;
+in vec4 vertexColor;
+uniform mat4 mvp;
+uniform float time;
+
+out vec2 fragTexCoord;
+out vec4 fragColor;
+out vec3 fragNormal;
+out float fragHeight;
+
 void main() {
-    vec4 texelColor = texture(texture0, fragTexCoord);
-    if (texelColor.a < 0.1) discard; // Alpha Cutout para plantas
-    finalColor = texelColor * fragColor;
+    fragTexCoord = vertexTexCoord;
+    fragColor = vertexColor;
+    fragNormal = vertexNormal;
+    fragHeight = vertexPosition.y;
+    
+    vec3 pos = vertexPosition;
+    // Animação de vento: balanço horizontal baseado na altura (Y)
+    float windStrength = 0.15;
+    float freq = 2.0;
+    float move = sin(time * freq + pos.x * 0.5 + pos.z * 0.5) * windStrength * pos.y;
+    pos.x += move;
+    pos.z += move * 0.3;
+
+    gl_Position = mvp * vec4(pos, 1.0);
 }
 `
 
@@ -121,14 +140,64 @@ const terrainVertexShader = `
 #version 330
 in vec3 vertexPosition;
 in vec2 vertexTexCoord;
+in vec3 vertexNormal;
 in vec4 vertexColor;
+
 uniform mat4 mvp;
+
 out vec2 fragTexCoord;
 out vec4 fragColor;
+out vec3 fragNormal;
+out float fragHeight;
+
 void main() {
     fragTexCoord = vertexTexCoord;
     fragColor = vertexColor;
+    fragNormal = vertexNormal;
+    fragHeight = vertexPosition.y;
     gl_Position = mvp * vec4(vertexPosition, 1.0);
+}
+`
+
+const terrainFragmentShader = `
+#version 330
+in vec2 fragTexCoord;
+in vec4 fragColor;
+in vec3 fragNormal;
+in float fragHeight;
+
+uniform sampler2D texture0;
+uniform float time;
+uniform float snowAmount; // 0.0 a 1.0
+
+out vec4 finalColor;
+
+// Função de ruído simples para "Ground Splatting" visual
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+void main() {
+    vec4 texelColor = texture(texture0, fragTexCoord);
+    if (texelColor.a < 0.1) discard; 
+
+    // Adiciona uma leve variação de cor baseada no ruído (Grit/Splatting visual)
+    float n = hash(floor(fragTexCoord * 10.0));
+    vec4 mixedColor = texelColor;
+    mixedColor.rgb *= (0.9 + 0.2 * n);
+
+    // Efeito de Neve (Baseado na Normal e Uniforme)
+    // Se a normal aponta para cima (Y > 0.7) e snowAmount > 0
+    float snowFactor = clamp(fragNormal.y, 0.0, 1.0);
+    snowFactor = pow(snowFactor, 4.0) * snowAmount;
+    
+    // Adiciona variação de ruído à neve para não ficar plana
+    float snowNoise = hash(fragTexCoord * 5.0 + vec2(time * 0.01));
+    snowFactor *= (0.8 + 0.4 * snowNoise);
+    
+    mixedColor.rgb = mix(mixedColor.rgb, vec3(0.9, 0.95, 1.0), snowFactor);
+
+    finalColor = mixedColor * fragColor;
 }
 `
 
@@ -149,10 +218,16 @@ type Renderer struct {
 	mu     sync.RWMutex
 	Models map[util.DFCoord]*BlockModel
 	// Shaders
-	MainShader rl.Shader
+	WaterShader   rl.Shader
+	PlantShader   rl.Shader
+	TerrainShader rl.Shader
 
-	WaterShader  rl.Shader
-	WaterLocTime int32
+	// Uniforms
+	timeLoc        int32
+	waterTimeLoc   int32
+	plantTimeLoc   int32
+	terrainTimeLoc int32
+	snowAmountLoc  int32
 
 	// Texturas Premium
 	Textures map[string]rl.Texture2D
@@ -178,15 +253,20 @@ func NewRenderer() *Renderer {
 
 	// Tenta carregar os Shaders Customizados
 	if rl.IsWindowReady() {
-		r.MainShader = rl.LoadShaderFromMemory(terrainVertexShader, terrainFragmentShader)
+		r.TerrainShader = rl.LoadShaderFromMemory(terrainVertexShader, terrainFragmentShader)
+		r.PlantShader = rl.LoadShaderFromMemory(plantVertexShader, terrainFragmentShader) // Reusa o fragment shader
 		r.WaterShader = rl.LoadShaderFromMemory(waterVertexShader, waterFragmentShader)
-		r.WaterLocTime = rl.GetShaderLocation(r.WaterShader, "time")
+
+		r.terrainTimeLoc = rl.GetShaderLocation(r.TerrainShader, "time")
+		r.snowAmountLoc = rl.GetShaderLocation(r.TerrainShader, "snowAmount")
+		r.plantTimeLoc = rl.GetShaderLocation(r.PlantShader, "time")
+		r.waterTimeLoc = rl.GetShaderLocation(r.WaterShader, "time")
 
 		// Carregar Texturas Premium
 		r.loadTextures()
 
 		// Carregar Modelos 3D
-		r.loadModels()
+		// r.loadModels()
 	}
 
 	r.Weather = NewParticleSystem(2000)
@@ -213,10 +293,13 @@ func (r *Renderer) loadTextures() {
 
 func (r *Renderer) loadModels() {
 	modelFiles := map[string]string{
-		// Carregando apenas vegetação por enquanto (testado e funcional)
-		"shrub": "assets/models/BUSH.obj",
+		"shrub":         "assets/models/BUSH.obj",
+		"tree_trunk":    "assets/models/TREE.obj",
+		"tree_branches": "assets/models/Branches.obj",
+		"mushroom":      "assets/models/SAPLING.obj", // Usando SAPLING como base para mushroom por enquanto
 	}
 
+	/* // Desativado temporariamente para debugar o crash 0xc0000005 no LoadModel
 	// Adicionar as 26 variantes de rampa
 	for i := 1; i <= 26; i++ {
 		name := fmt.Sprintf("ramp_%d", i)
@@ -237,14 +320,16 @@ func (r *Renderer) loadModels() {
 		}
 		modelFiles[name] = "assets/models/ramps/" + fileName
 	}
+	*/
 
 	for name, path := range modelFiles {
+		log.Printf("[Renderer] Tentando carregar modelo: %s...", path)
 		model := rl.LoadModel(path)
 		if model.MeshCount > 0 {
 			r.Models3D[name] = model
-			log.Printf("[Renderer] Modelo 3D carregado: %s (%d meshes)", path, model.MeshCount)
+			log.Printf("[Renderer] Modelo 3D carregado com sucesso: %s (%d meshes)", path, model.MeshCount)
 		} else {
-			log.Printf("[Renderer] FALHA ao carregar modelo 3D: %s", path)
+			log.Printf("[Renderer] AVISO: Modelo carregado sem malhas: %s", path)
 		}
 	}
 }
@@ -300,7 +385,12 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 	if len(res.Terreno.Vertices) > 0 {
 		mesh := r.geometryToMesh(res.Terreno)
 		rl.UploadMesh(&mesh, false)
+		r.freeMeshRAM(&mesh) // Libera RAM após upload para VRAM
 		bm.Model = rl.LoadModelFromMesh(mesh)
+		if bm.Model.MaterialCount > 0 {
+			materials := unsafe.Slice(bm.Model.Materials, bm.Model.MaterialCount)
+			materials[0].Shader = r.TerrainShader
+		}
 	}
 
 	// 2. Upload de geometria por material (Com textura)
@@ -308,13 +398,15 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		if len(geo.Vertices) > 0 {
 			mesh := r.geometryToMesh(geo)
 			rl.UploadMesh(&mesh, false)
+			r.freeMeshRAM(&mesh) // Libera RAM após upload para VRAM
 			model := rl.LoadModelFromMesh(mesh)
 
-			// Aplicar textura e shader se existir
-			if tex, ok := r.Textures[matName]; ok {
-				if model.MaterialCount > 0 {
-					materials := unsafe.Slice(model.Materials, model.MaterialCount)
-					materials[0].Shader = r.MainShader
+			// Aplicar shader SEMPRE
+			if model.MaterialCount > 0 {
+				materials := unsafe.Slice(model.Materials, model.MaterialCount)
+				materials[0].Shader = r.TerrainShader
+				// Aplicar textura se existir
+				if tex, ok := r.Textures[matName]; ok {
 					rl.SetMaterialTexture(&materials[0], rl.MapDiffuse, tex)
 				}
 			}
@@ -322,9 +414,11 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		}
 	}
 
+	// 3. Upload de líquidos
 	if len(res.Liquidos.Vertices) > 0 {
 		mesh := r.geometryToMesh(res.Liquidos)
 		rl.UploadMesh(&mesh, false)
+		r.freeMeshRAM(&mesh) // Libera RAM após upload para VRAM
 		bm.LiquidModel = rl.LoadModelFromMesh(mesh)
 		bm.HasLiquid = true
 
@@ -347,15 +441,21 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 }
 
 func (r *Renderer) geometryToMesh(data meshing.GeometryData) rl.Mesh {
-	mesh := rl.Mesh{}
+	var mesh rl.Mesh
 
 	vCount := int32(len(data.Vertices) / 3)
 	mesh.VertexCount = vCount
 	mesh.TriangleCount = vCount / 3
 
-	// IMPORTANTE para a estabilidade no Windows:
-	// Alocamos memória no lado do C (C.malloc) para que o Raylib possa gerenciar
-	// e liberar os buffers sem interferência do GC do Go. Isso elimina o crash 0xc0000374.
+	// Limpamos/Inicializamos ponteiros Explicitamente para evitar Garbage no CGO
+	mesh.Vertices = nil
+	mesh.Normals = nil
+	mesh.Colors = nil
+	mesh.Texcoords = nil
+	mesh.Indices = nil
+	mesh.AnimVertices = nil
+	mesh.AnimNormals = nil
+	mesh.Tangents = nil
 
 	if len(data.Vertices) > 0 {
 		mesh.Vertices = (*float32)(r.copyToC(unsafe.Pointer(&data.Vertices[0]), len(data.Vertices)*4))
@@ -375,15 +475,41 @@ func (r *Renderer) geometryToMesh(data meshing.GeometryData) rl.Mesh {
 
 // copyToC aloca memória C e copia os dados.
 func (r *Renderer) copyToC(data unsafe.Pointer, size int) unsafe.Pointer {
-	if size == 0 {
+	if size <= 0 || data == nil {
 		return nil
 	}
+	// Usamos MemAlloc da Raylib para garantir compatibilidade de heap se possível,
+	// mas como raylib-go não expõe, usamos C.malloc e limpamos MANUALMENTE.
 	ptr := C.malloc(C.size_t(size))
+	if ptr == nil {
+		log.Printf("[CGO] FALHA crítica de alocação de memória (%d bytes)", size)
+		return nil
+	}
 	// Copiamos os dados de Go para C
 	cSlice := unsafe.Slice((*byte)(ptr), size)
 	goSlice := unsafe.Slice((*byte)(data), size)
 	copy(cSlice, goSlice)
 	return ptr
+}
+
+// freeMeshRAM libera a memória principal (C) associada a uma malha após o upload para a GPU.
+func (r *Renderer) freeMeshRAM(mesh *rl.Mesh) {
+	if mesh.Vertices != nil {
+		C.free(unsafe.Pointer(mesh.Vertices))
+		mesh.Vertices = nil
+	}
+	if mesh.Normals != nil {
+		C.free(unsafe.Pointer(mesh.Normals))
+		mesh.Normals = nil
+	}
+	if mesh.Colors != nil {
+		C.free(unsafe.Pointer(mesh.Colors))
+		mesh.Colors = nil
+	}
+	if mesh.Texcoords != nil {
+		C.free(unsafe.Pointer(mesh.Texcoords))
+		mesh.Texcoords = nil
+	}
 }
 
 // Draw renderiza os blocos que estão dentro do raio de visão da câmera.
@@ -395,7 +521,15 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 	// Update da variavel global de tempo nos shaders
 	timeVal := float32(rl.GetTime())
 	if r.WaterShader.ID != 0 {
-		rl.SetShaderValue(r.WaterShader, r.WaterLocTime, []float32{timeVal}, rl.ShaderUniformFloat)
+		rl.SetShaderValue(r.WaterShader, r.waterTimeLoc, []float32{timeVal}, rl.ShaderUniformFloat)
+	}
+	if r.PlantShader.ID != 0 {
+		rl.SetShaderValue(r.PlantShader, r.plantTimeLoc, []float32{timeVal}, rl.ShaderUniformFloat)
+	}
+	if r.TerrainShader.ID != 0 {
+		rl.SetShaderValue(r.TerrainShader, r.terrainTimeLoc, []float32{timeVal}, rl.ShaderUniformFloat)
+		// Snow Amount (Poderia vir do world state, mas vamos fixar para teste por enquanto)
+		rl.SetShaderValue(r.TerrainShader, r.snowAmountLoc, []float32{0.8}, rl.ShaderUniformFloat)
 	}
 
 	// Raio padrão para níveis verticais distantes
@@ -420,13 +554,33 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 				rl.DrawModel(m, rl.Vector3{X: 0, Y: 0, Z: 0}, 1.0, rl.White)
 			}
 		}
-
 		// Desenha instâncias de modelos 3D (arbustos, árvores, etc)
 		for _, inst := range bm.Instances {
 			if model3d, ok := r.Models3D[inst.ModelName]; ok {
 				pos := rl.Vector3{X: inst.Position[0], Y: inst.Position[1], Z: inst.Position[2]}
 				tintColor := rl.NewColor(inst.Color[0], inst.Color[1], inst.Color[2], 255)
-				rl.DrawModel(model3d, pos, inst.Scale, tintColor)
+
+				// Aplica a textura e o shader ao material
+				if model3d.MaterialCount > 0 {
+					materials := unsafe.Slice(model3d.Materials, model3d.MaterialCount)
+
+					// Escolhe o shader correto: PlantShader para vegetação, TerrainShader para rampas/outros
+					shader := r.TerrainShader
+					if inst.ModelName == "shrub" || inst.ModelName == "tree_trunk" || inst.ModelName == "tree_branches" || inst.ModelName == "mushroom" {
+						shader = r.PlantShader
+					}
+
+					materials[0].Shader = shader
+
+					if inst.TextureName != "" {
+						if tex, ok := r.Textures[inst.TextureName]; ok {
+							rl.SetMaterialTexture(&materials[0], rl.MapDiffuse, tex)
+						}
+					}
+				}
+
+				// O DrawModelEx aceita uma rotação (eixo Y), escala e cor (tint).
+				rl.DrawModelEx(model3d, pos, rl.Vector3{X: 0, Y: 1, Z: 0}, inst.Rotation, rl.Vector3{X: inst.Scale, Y: inst.Scale, Z: inst.Scale}, tintColor)
 			}
 		}
 	}

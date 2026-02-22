@@ -2,17 +2,25 @@ package mapdata
 
 import (
 	"FortressVision/pkg/dfproto"
+	"log"
+	"sync"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"gorm.io/gorm"
 )
 
 // MaterialStore gerencia as cores e propriedades visuais dos materiais.
 type MaterialStore struct {
+	mu sync.RWMutex
+
 	// Cache de cores por par de material (MatType, MatIndex)
 	Colors map[dfproto.MatPair]rl.Color
 
 	// Mapeamento de texturas carregadas no Renderer (armazenamos apenas os nomes/IDs aqui)
 	TextureMap map[dfproto.TiletypeMaterial]string
+
+	// Referência ao banco de dados para persistência
+	DB *gorm.DB
 }
 
 func NewMaterialStore() *MaterialStore {
@@ -49,50 +57,107 @@ func (s *MaterialStore) GetTextureName(mat dfproto.TiletypeMaterial) string {
 
 // GetTileColor retorna a cor para um tile específico.
 func (s *MaterialStore) GetTileColor(tile *Tile) rl.Color {
-	// 1. Tentar cor do material específico (se houver no cache)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// 1. Tentar cor do material específico (se houver no cache enviada pelo DFHack)
 	if color, ok := s.Colors[tile.Material]; ok {
 		return color
 	}
 
-	// 2. Fallback por categoria de material do Tiletype
-	// Precisamos saber a categoria do material do tiletype dele
-	// (Isso exige que o Tile tenha acesso aos Tiletypes)
-
+	// 2. Fallback baseado no MaterialCategory e cores padrão do DF
+	// Isso usa a tabela DFColorList portada do Armok Vision.
+	var colorToken string
 	switch tile.MaterialCategory() {
 	case dfproto.TilematStone:
-		return rl.NewColor(120, 120, 120, 255)
+		colorToken = "GRAY"
 	case dfproto.TilematSoil:
-		return rl.NewColor(100, 70, 45, 255) // Brownish
+		colorToken = "DARK_TAN"
 	case dfproto.TilematGrass, dfproto.TilematGrassDark, dfproto.TilematGrassDead, dfproto.TilematGrassDry:
-		return rl.NewColor(60, 100, 40, 255) // Greener
+		colorToken = "GREEN"
 	case dfproto.TilematTreeMaterial, dfproto.TilematPlant, dfproto.TilematMushroom:
-		return rl.NewColor(110, 80, 50, 255)
+		colorToken = "BROWN"
 	case dfproto.TilematMineral:
-		return rl.NewColor(180, 180, 180, 255)
+		colorToken = "SILVER"
 	case dfproto.TilematLava, dfproto.TilematMagma:
-		return rl.NewColor(220, 50, 0, 255)
+		colorToken = "RED"
 	case dfproto.TilematFrozenLiquid:
-		return rl.NewColor(180, 230, 255, 255)
+		colorToken = "PALE_BLUE"
 	case dfproto.TilematHBM, dfproto.TilematConstruction:
-		return rl.NewColor(190, 190, 210, 255)
+		colorToken = "WHITE"
+	default:
+		colorToken = "GRAY"
 	}
 
-	// Se não for nada conhecido, mas for parede, assume pedra
-	if tile.IsWall() {
-		return rl.NewColor(128, 128, 128, 255)
+	r, g, b, ok := GetDFColor(colorToken)
+	if ok {
+		return rl.NewColor(r, g, b, 255)
 	}
 
-	return rl.NewColor(150, 150, 150, 255) // Default grey
+	return rl.NewColor(150, 150, 150, 255) // Fallback absoluto
 }
 
-// UpdateMaterials popula o cache com as cores reais vindas do DFHack.
+// LoadFromDB carrega todos os materiais salvos no SQLite para o cache.
+func (s *MaterialStore) LoadFromDB() error {
+	if s.DB == nil {
+		return nil
+	}
+
+	var models []MaterialModel
+	if err := s.DB.Find(&models).Error; err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, m := range models {
+		pair := dfproto.MatPair{
+			MatType:  m.MatType,
+			MatIndex: m.MatIndex,
+		}
+		s.Colors[pair] = rl.NewColor(m.R, m.G, m.B, 255)
+	}
+	log.Printf("[MaterialStore] %d materiais carregados do SQLite.", len(models))
+	return nil
+}
+
+// UpdateMaterials popula o cache com as cores reais vindas do DFHack e persiste no banco.
 func (s *MaterialStore) UpdateMaterials(list *dfproto.MaterialList) {
+	if list == nil || len(list.MaterialList) == 0 {
+		return
+	}
+
+	s.mu.Lock()
+	var models []MaterialModel
 	for _, mat := range list.MaterialList {
-		s.Colors[mat.MatPair] = rl.NewColor(
+		// No dfproto v1, MatPair é um struct por valor
+		pair := mat.MatPair
+		color := rl.NewColor(
 			uint8(mat.StateColor.Red),
 			uint8(mat.StateColor.Green),
 			uint8(mat.StateColor.Blue),
 			255,
 		)
+		s.Colors[pair] = color
+
+		if s.DB != nil {
+			models = append(models, MaterialModel{
+				MatType:  pair.MatType,
+				MatIndex: pair.MatIndex,
+				R:        color.R,
+				G:        color.G,
+				B:        color.B,
+			})
+		}
+	}
+	s.mu.Unlock()
+
+	// Salva no banco de dados em lotes (Batch Insert/Upsert)
+	if s.DB != nil && len(models) > 0 {
+		log.Printf("[MaterialStore] Salvando %d novos materiais no banco...", len(models))
+		err := s.DB.Save(&models).Error
+		if err != nil {
+			log.Printf("[MaterialStore] Erro ao persistir materiais: %v", err)
+		}
 	}
 }

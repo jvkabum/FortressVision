@@ -1,6 +1,7 @@
 package app
 
 import (
+	"FortressVision/internal/util"
 	"fmt"
 	"log"
 	"time"
@@ -78,6 +79,20 @@ func (s *MapScanner) scanLoop() {
 				for y := center.Y - radius; y < center.Y+radius; y += 16 {
 					minX, maxX := x, x+15
 					minY, maxY := y, y+15
+					// CRUCIAL: Alinhar ao grid de 16x16 para bater com as chaves do banco de dados/cache
+					origin := util.DFCoord{X: minX, Y: minY, Z: z}.BlockCoord()
+
+					// Verifica se o bloco já existe no cache (SQL ou visita anterior)
+					s.app.mapStore.Mu.RLock()
+					_, exists := s.app.mapStore.Chunks[origin]
+					s.app.mapStore.Mu.RUnlock()
+
+					// Se o bloco já existe na memória (populada pelo SQL no boot ou por visita anterior),
+					// evitamos pedir ao DFHack e reportamos o uso do cache local.
+					if exists {
+						log.Printf("[Scanner] SQL-Cache Hit: %s (Reutilizando dados do Banco)", origin)
+						continue
+					}
 
 					list, err := s.app.dfClient.GetBlockList(minX, minY, z, maxX, maxY, z, 256)
 					if err != nil {

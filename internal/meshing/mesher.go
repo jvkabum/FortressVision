@@ -52,10 +52,12 @@ type Request struct {
 
 // ModelInstance representa uma instância de um modelo 3D no mundo.
 type ModelInstance struct {
-	ModelName string     // Nome do modelo (ex: "shrub")
-	Position  [3]float32 // Posição no mundo
-	Scale     float32    // Escala
-	Color     [4]uint8   // Cor/tint
+	ModelName   string     // Nome do modelo (ex: "shrub")
+	TextureName string     // Nome da textura (ex: "stone", "grass")
+	Position    [3]float32 // Posição no mundo
+	Scale       float32    // Escala
+	Rotation    float32    // Rotação em graus (eixo Y)
+	Color       [4]uint8   // Cor/tint
 }
 
 // Result contém os dados de geometria gerados para um bloco.

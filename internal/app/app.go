@@ -102,6 +102,7 @@ func (a *App) Run() {
 	// Inicializar janela raylib
 	rl.SetConfigFlags(rl.FlagMsaa4xHint | rl.FlagWindowResizable)
 	rl.InitWindow(a.Config.WindowWidth, a.Config.WindowHeight, a.Config.WindowTitle)
+	rl.SetTraceLogLevel(rl.LogWarning) // Reduz ruído no terminal
 
 	if a.Config.Fullscreen {
 		rl.ToggleFullscreen()
@@ -329,8 +330,11 @@ func (a *App) connectDFHack() {
 		if err := a.mapStore.Load(worldName); err != nil {
 			log.Printf("[App] Erro ao carregar save: %v", err)
 		} else {
-			// Marcar todos os chunks carregados para o renderer re-enviar se necessário
-			// Na verdade, o Mesher vai detectar que MTime > 0 e que o Renderer não tem o modelo.
+			// Conecta o MaterialStore ao banco de dados do mapa
+			a.matStore.DB = a.mapStore.DB
+			if err := a.matStore.LoadFromDB(); err != nil {
+				log.Printf("[App] Erro ao carregar materiais do banco: %v", err)
+			}
 		}
 	}
 
@@ -352,6 +356,8 @@ func (a *App) connectDFHack() {
 				MTime:    mtime,
 			})
 		})
+
+		log.Printf("[SQL] %d blocos carregados da persistência", total)
 
 		a.LoadingTotalBlocks = total
 		a.Loading = false
@@ -577,7 +583,7 @@ func (a *App) updateMap() {
 			}
 
 			if enqueuedCount > 0 {
-				log.Printf("[Mesher] %d novos blocos enfileirados", enqueuedCount)
+				log.Printf("[Mesher] %d novos blocos enfileirados (via DFHack)", enqueuedCount)
 				if a.Loading && a.LoadingTotalBlocks == 0 {
 					a.LoadingTotalBlocks = enqueuedCount
 					a.LoadingProcessedBlocks = 0

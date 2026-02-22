@@ -300,6 +300,20 @@ func (s *MapDataStore) QueueAllStoredChunks(enqueueFunc func(origin util.DFCoord
 	var chunks []ChunkModel
 	s.DB.Select("x", "y", "z", "m_time").Find(&chunks)
 
+	s.Mu.Lock()
+	for _, model := range chunks {
+		origin := util.NewDFCoord(model.X, model.Y, model.Z)
+		// Registra o chunk na memória como uma "casca" (shell)
+		// Isso informa ao Scanner que o dado existe no SQL, evitando re-download.
+		if _, exists := s.Chunks[origin]; !exists {
+			s.Chunks[origin] = &Chunk{
+				Origin: origin,
+				MTime:  model.MTime,
+			}
+		}
+	}
+	s.Mu.Unlock()
+
 	count := len(chunks)
 	log.Printf("[Persistence] Enfileirando %d blocos carregados do SQLite local.", count)
 

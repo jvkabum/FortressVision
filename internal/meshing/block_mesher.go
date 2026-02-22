@@ -6,6 +6,7 @@ import (
 	"FortressVision/pkg/dfproto"
 	"fmt"
 	"log" // Added based on the provided Code Edit
+	"math"
 	"sync"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -219,16 +220,14 @@ func runGreedyMesherX(req Request, getBuffer func(string) *MeshBuffer, liquidBuf
 				rlColor := m.MatStore.GetTileColor(tile)
 				color := [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}
 
-				// Verifica quebra de fita (Cor ou formato diferente, ou necessidades de culling lateral diferentes)
-				// Na nossa engine simplificada, quebramos fita se a face Oeste ou Leste mudar de visibilidade.
+				// Verifica quebra de fita (Cor, formato ou MaterialCategory diferente)
 				canMerge := true
 				if runLength > 0 {
-					if shape != currentRunShape || color != currentRunColor {
+					if shape != currentRunShape || color != currentRunColor || tile.MaterialCategory() != runTile.MaterialCategory() {
 						canMerge = false
 					} else {
 						// Para fundir blocos na mesma fita, TODAS as faces (Top, Bottom, West, East)
 						// visíveis devem bater, exceto o eixo do movimento (North/South).
-						// Se a fita anda em Y (Norte para Sul), o Teto de um tem q ser = o Teto do outro.
 						if m.shouldDrawFace(tile, util.DirWest) != m.shouldDrawFace(runTile, util.DirWest) ||
 							m.shouldDrawFace(tile, util.DirEast) != m.shouldDrawFace(runTile, util.DirEast) ||
 							m.shouldDrawFace(tile, util.DirUp) != m.shouldDrawFace(runTile, util.DirUp) ||
@@ -257,21 +256,19 @@ func runGreedyMesherX(req Request, getBuffer func(string) *MeshBuffer, liquidBuf
 
 				if shape == dfproto.ShapeTreeShape || shape == dfproto.ShapeTrunkBranch {
 					flushRun()
-					texName := m.MatStore.GetTextureName(tile.MaterialCategory())
-					m.addTreeTrunk(worldCoord, color, getBuffer(texName), req.Data)
+					m.addTreeTrunk(worldCoord, tile, color, res)
 					continue
 				}
 
 				if shape == dfproto.ShapeBranch || shape == dfproto.ShapeTwig {
 					flushRun()
-					texName := m.MatStore.GetTextureName(tile.MaterialCategory())
-					m.addTreeLeaves(worldCoord, color, getBuffer(texName), req.Data)
+					m.addTreeLeaves(worldCoord, tile, color, res)
 					continue
 				}
 
 				if shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
 					flushRun()
-					m.addShrub(worldCoord, color, res)
+					m.addShrub(worldCoord, tile, color, res)
 					continue
 				}
 
@@ -449,12 +446,12 @@ func (m *BlockMesher) addRamp(coord util.DFCoord, tile *mapdata.Tile, color [4]u
 
 	modelName := fmt.Sprintf("ramp_%d", rampType)
 
-	// Emite a instância do modelo 3D
 	res.ModelInstances = append(res.ModelInstances, ModelInstance{
-		ModelName: modelName,
-		Position:  [3]float32{pos.X + 0.5, pos.Y, pos.Z - 0.5},
-		Scale:     1.0,
-		Color:     color,
+		ModelName:   modelName,
+		TextureName: m.MatStore.GetTextureName(tile.MaterialCategory()),
+		Position:    [3]float32{pos.X + 0.5, pos.Y, pos.Z - 0.5},
+		Scale:       1.0,
+		Color:       color,
 	})
 }
 
@@ -583,57 +580,94 @@ func (m *BlockMesher) addFortification(coord util.DFCoord, color [4]uint8, buffe
 	)
 }
 
-func (m *BlockMesher) addTreeTrunk(coord util.DFCoord, color [4]uint8, buffer *MeshBuffer, data *mapdata.MapDataStore) {
-	pos := util.DFToWorldPos(coord)
-	x, y, z := pos.X, pos.Y, pos.Z
-
-	trunkColor := [4]uint8{uint8(float32(color[0]) * 0.8), uint8(float32(color[1]) * 0.8), uint8(float32(color[2]) * 0.8), 255}
-	o := float32(0.3)
-	tw, td := float32(0.4), float32(0.4)
-
-	// Norte
-	buffer.AddFaceUVStandard([3]float32{x + o, y, z - o}, [2]float32{x + o, -y}, trunkColor, [3]float32{x + o + tw, y, z - o}, [2]float32{x + o + tw, -y}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o}, [2]float32{x + o + tw, -(y + 1.0)}, trunkColor, [3]float32{x + o, y + 1.0, z - o}, [2]float32{x + o, -(y + 1.0)}, trunkColor, [3]float32{0, 0, 1})
-	// Sul
-	buffer.AddFaceUVStandard([3]float32{x + o, y, z - o - td}, [2]float32{x + o, -y}, trunkColor, [3]float32{x + o, y + 1.0, z - o - td}, [2]float32{x + o, -(y + 1.0)}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o - td}, [2]float32{x + o + tw, -(y + 1.0)}, trunkColor, [3]float32{x + o + tw, y, z - o - td}, [2]float32{x + o + tw, -y}, trunkColor, [3]float32{0, 0, -1})
-	// Oeste
-	buffer.AddFaceUVStandard([3]float32{x + o, y, z - o}, [2]float32{-z, -y}, trunkColor, [3]float32{x + o, y + 1.0, z - o}, [2]float32{-z, -(y + 1.0)}, trunkColor, [3]float32{x + o, y + 1.0, z - o - td}, [2]float32{-(z - td), -(y + 1.0)}, trunkColor, [3]float32{x + o, y, z - o - td}, [2]float32{-(z - td), -y}, trunkColor, [3]float32{-1, 0, 0})
-	// Leste
-	buffer.AddFaceUVStandard([3]float32{x + o + tw, y, z - o}, [2]float32{-z, -y}, trunkColor, [3]float32{x + o + tw, y, z - o - td}, [2]float32{-(z - td), -y}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o - td}, [2]float32{-(z - td), -(y + 1.0)}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o}, [2]float32{-z, -(y + 1.0)}, trunkColor, [3]float32{1, 0, 0})
-	// Topo
-	buffer.AddFaceUVStandard([3]float32{x + o, y + 1.0, z - o}, [2]float32{x + o, -z}, trunkColor, [3]float32{x + o, y + 1.0, z - o - td}, [2]float32{x + o, -(z - td)}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o - td}, [2]float32{x + o + tw, -(z - td)}, trunkColor, [3]float32{x + o + tw, y + 1.0, z - o}, [2]float32{x + o + tw, -z}, trunkColor, [3]float32{0, 1, 0})
-}
-
-func (m *BlockMesher) addTreeLeaves(coord util.DFCoord, color [4]uint8, buffer *MeshBuffer, data *mapdata.MapDataStore) {
-	pos := util.DFToWorldPos(coord)
-	x, y, z := pos.X, pos.Y, pos.Z
-
-	o := float32(0.1)
-	s := float32(0.8)
-	leafColor := color
-	leafColor[3] = 255
-
-	// Norte
-	buffer.AddFaceUVStandard([3]float32{x + o, y + o, z - o}, [2]float32{x, -y}, leafColor, [3]float32{x + o + s, y + o, z - o}, [2]float32{x + s, -y}, leafColor, [3]float32{x + o + s, y + o + s, z - o}, [2]float32{x + s, -(y + s)}, leafColor, [3]float32{x + o, y + o + s, z - o}, [2]float32{x, -(y + s)}, leafColor, [3]float32{0, 0, 1})
-	// Sul
-	buffer.AddFaceUVStandard([3]float32{x + o, y + o, z - o - s}, [2]float32{x, -y}, leafColor, [3]float32{x + o, y + o + s, z - o - s}, [2]float32{x, -(y + s)}, leafColor, [3]float32{x + o + s, y + o + s, z - o - s}, [2]float32{x + s, -(y + s)}, leafColor, [3]float32{x + o + s, y + o, z - o - s}, [2]float32{x + s, -y}, leafColor, [3]float32{0, 0, -1})
-	// Oeste
-	buffer.AddFaceUVStandard([3]float32{x + o, y + o, z - o}, [2]float32{-z, -y}, leafColor, [3]float32{x + o, y + o + s, z - o}, [2]float32{-z, -(y + s)}, leafColor, [3]float32{x + o, y + o + s, z - o - s}, [2]float32{-(z - s), -(y + s)}, leafColor, [3]float32{x + o, y + o, z - o - s}, [2]float32{-(z - s), -y}, leafColor, [3]float32{-1, 0, 0})
-	// Leste
-	buffer.AddFaceUVStandard([3]float32{x + o + s, y + o, z - o}, [2]float32{-z, -y}, leafColor, [3]float32{x + o + s, y + o, z - o - s}, [2]float32{-(z - s), -y}, leafColor, [3]float32{x + o + s, y + o + s, z - o - s}, [2]float32{-(z - s), -(y + s)}, leafColor, [3]float32{x + o + s, y + o + s, z - o}, [2]float32{-z, -(y + s)}, leafColor, [3]float32{1, 0, 0})
-	// Topo
-	buffer.AddFaceUVStandard([3]float32{x + o, y + o + s, z - o}, [2]float32{x, -z}, leafColor, [3]float32{x + o, y + o + s, z - o - s}, [2]float32{x, -(z - s)}, leafColor, [3]float32{x + o + s, y + o + s, z - o - s}, [2]float32{x + s, -(z - s)}, leafColor, [3]float32{x + o + s, y + o + s, z - o}, [2]float32{x + s, -z}, leafColor, [3]float32{0, 1, 0})
-	// Baixo
-	buffer.AddFaceUVStandard([3]float32{x + o, y + o, z - o}, [2]float32{x, -z}, leafColor, [3]float32{x + o + s, y + o, z - o}, [2]float32{x + s, -z}, leafColor, [3]float32{x + o + s, y + o, z - o - s}, [2]float32{x + s, -(z - s)}, leafColor, [3]float32{x + o, y + o, z - o - s}, [2]float32{x, -(z - s)}, leafColor, [3]float32{0, -1, 0})
-}
-
-func (m *BlockMesher) addShrub(coord util.DFCoord, color [4]uint8, res *Result) {
+func (m *BlockMesher) addTreeTrunk(coord util.DFCoord, tile *mapdata.Tile, color [4]uint8, res *Result) {
 	pos := util.DFToWorldPos(coord)
 
-	// Em vez de gerar geometria, emitimos uma instância de modelo 3D
+	// Rotação determinística baseada na coordenada
+	rotation := float32((coord.X*17 + coord.Y*31 + coord.Z*13) % 360)
+
+	// Usamos o modelo TreeTrunkPillar para troncos normais ou TREE para fungiwood
+	modelName := "tree_trunk"
+	if tile.MaterialCategory() == dfproto.TilematMushroom {
+		modelName = "mushroom" // Fungos gigantes usam o modelo de cogumelo
+	}
+
 	res.ModelInstances = append(res.ModelInstances, ModelInstance{
-		ModelName: "shrub",
-		Position:  [3]float32{pos.X + 0.5, pos.Y + 0.1, pos.Z - 0.5}, // Centro do tile, acima do chão
-		Scale:     0.4,
-		Color:     color,
+		ModelName:   modelName,
+		TextureName: m.MatStore.GetTextureName(tile.MaterialCategory()),
+		Position:    [3]float32{pos.X + 0.5, pos.Y, pos.Z - 0.5},
+		Scale:       1.0,
+		Rotation:    rotation,
+		Color:       color,
+	})
+}
+
+func (m *BlockMesher) addTreeLeaves(coord util.DFCoord, tile *mapdata.Tile, color [4]uint8, res *Result) {
+	pos := util.DFToWorldPos(coord)
+	rotation := float32((coord.X*13 + coord.Y*17 + coord.Z*31) % 360)
+
+	// Galhos e folhagens agora usam modelos 3D mais orgânicos
+	modelName := "tree_branches"
+	if tile.MaterialCategory() == dfproto.TilematMushroom {
+		modelName = "mushroom"
+	}
+
+	res.ModelInstances = append(res.ModelInstances, ModelInstance{
+		ModelName:   modelName,
+		TextureName: m.MatStore.GetTextureName(tile.MaterialCategory()),
+		Position:    [3]float32{pos.X + 0.5, pos.Y, pos.Z - 0.5},
+		Scale:       0.8, // Ramos são um pouco menores que o tronco
+		Rotation:    rotation,
+		Color:       color,
+	})
+}
+
+func (m *BlockMesher) calculateAwayFromWallRotation(tile *mapdata.Tile) float32 {
+	var vx, vz float32
+
+	// No Raylib (+Z) é Norte, (-Z) é Sul, (-X) é Oeste, (+X) é Leste
+	if n := tile.GetNeighbor(util.DirNorth); n != nil && (n.Shape() == dfproto.ShapeWall || n.Shape() == dfproto.ShapeFortification) {
+		vz -= 1.0 // Parede ao Norte -> Empurra para o Sul
+	}
+	if n := tile.GetNeighbor(util.DirSouth); n != nil && (n.Shape() == dfproto.ShapeWall || n.Shape() == dfproto.ShapeFortification) {
+		vz += 1.0 // Parede ao Sul -> Empurra para o Norte
+	}
+	if n := tile.GetNeighbor(util.DirWest); n != nil && (n.Shape() == dfproto.ShapeWall || n.Shape() == dfproto.ShapeFortification) {
+		vx += 1.0 // Parede a Oeste -> Empurra para Leste
+	}
+	if n := tile.GetNeighbor(util.DirEast); n != nil && (n.Shape() == dfproto.ShapeWall || n.Shape() == dfproto.ShapeFortification) {
+		vx -= 1.0 // Parede a Leste -> Empurra para Oeste
+	}
+
+	if vx == 0 && vz == 0 {
+		return -1 // Sem paredes próximas
+	}
+
+	// Converte vetor de empuxo em ângulo
+	return float32(math.Atan2(float64(vx), float64(vz))) * (180.0 / math.Pi)
+}
+
+func (m *BlockMesher) addShrub(coord util.DFCoord, tile *mapdata.Tile, color [4]uint8, res *Result) {
+	pos := util.DFToWorldPos(coord)
+
+	// 1. Tentar rotação "AwayFromWall" para arbustos adjacentes a paredes
+	rotation := m.calculateAwayFromWallRotation(tile)
+
+	// 2. Se não houver parede, usar aleatório determinístico (baseado na coord)
+	if rotation == -1 {
+		rotation = float32((coord.X*31 + coord.Y*13 + coord.Z*17) % 360)
+	} else {
+		// Adiciona uma pequena variação aleatória (-15 a +15 graus) para não ficar robótico
+		variation := float32((coord.X*7+coord.Y*11)%31) - 15
+		rotation += variation
+	}
+
+	res.ModelInstances = append(res.ModelInstances, ModelInstance{
+		ModelName:   "shrub",
+		TextureName: m.MatStore.GetTextureName(tile.MaterialCategory()),
+		Position:    [3]float32{pos.X + 0.5, pos.Y + 0.1, pos.Z - 0.5},
+		Scale:       0.4,
+		Rotation:    rotation,
+		Color:       color,
 	})
 }
