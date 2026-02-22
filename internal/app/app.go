@@ -132,8 +132,8 @@ func (a *App) Run() {
 	}
 
 	log.Printf("[App] Iniciando Mesher com %d workers (CPU Cores: %d)", workers, runtime.NumCPU())
-	a.mesher = meshing.NewBlockMesher(workers, a.matStore, a.resultStore)
 	a.renderer = render.NewRenderer()
+	a.mesher = meshing.NewBlockMesher(workers, a.matStore, a.resultStore)
 	a.scanner = NewMapScanner(a)
 
 	// Iniciar threads de background

@@ -266,7 +266,7 @@ func NewRenderer() *Renderer {
 		r.loadTextures()
 
 		// Carregar Modelos 3D
-		// r.loadModels()
+		r.loadModels()
 	}
 
 	r.Weather = NewParticleSystem(2000)
@@ -292,44 +292,27 @@ func (r *Renderer) loadTextures() {
 }
 
 func (r *Renderer) loadModels() {
-	modelFiles := map[string]string{
-		"shrub":         "assets/models/BUSH.obj",
-		"tree_trunk":    "assets/models/TREE.obj",
-		"tree_branches": "assets/models/Branches.obj",
-		"mushroom":      "assets/models/SAPLING.obj", // Usando SAPLING como base para mushroom por enquanto
+	type modelEntry struct {
+		name string
+		path string
 	}
 
-	/* // Desativado temporariamente para debugar o crash 0xc0000005 no LoadModel
-	// Adicionar as 26 variantes de rampa
-	for i := 1; i <= 26; i++ {
-		name := fmt.Sprintf("ramp_%d", i)
-		var fileName string
-		switch {
-		case i <= 5:
-			fileName = fmt.Sprintf("RAMP_%d.obj", i)
-		case i >= 6 && i <= 13:
-			fileName = fmt.Sprintf("RAMP_%d_sharp.obj", i)
-		case i == 14:
-			fileName = "RAMP_14_sharp.obj"
-		case i == 15:
-			fileName = "RAMP_15_sharp.obj"
-		case i == 16 || i == 17:
-			fileName = fmt.Sprintf("RAMP_%d.obj", i)
-		default: // 18-26
-			fileName = fmt.Sprintf("RAMP_%d_sharp.obj", i)
-		}
-		modelFiles[name] = "assets/models/ramps/" + fileName
+	entries := []modelEntry{
+		{"shrub", "assets/models/shrub.glb"},
+		{"tree_trunk", "assets/models/TREE.obj"},
+		{"tree_branches", "assets/models/Twigs.obj"},
+		{"mushroom", "assets/models/SAPLING.obj"},
 	}
-	*/
 
-	for name, path := range modelFiles {
-		log.Printf("[Renderer] Tentando carregar modelo: %s...", path)
-		model := rl.LoadModel(path)
+	for _, entry := range entries {
+		log.Printf("[Renderer] CARGA: Tentando '%s' de '%s'...", entry.name, entry.path)
+
+		model := rl.LoadModel(entry.path)
 		if model.MeshCount > 0 {
-			r.Models3D[name] = model
-			log.Printf("[Renderer] Modelo 3D carregado com sucesso: %s (%d meshes)", path, model.MeshCount)
+			r.Models3D[entry.name] = model
+			log.Printf("[Renderer] SUCESSO: '%s' carregado", entry.name)
 		} else {
-			log.Printf("[Renderer] AVISO: Modelo carregado sem malhas: %s", path)
+			log.Printf("[Renderer] AVISO: '%s' falhou (sem meshes)", entry.name)
 		}
 	}
 }
