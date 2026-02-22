@@ -31,34 +31,49 @@ uniform float time;
 out vec2 fragTexCoord;
 out vec4 fragColor;
 out vec3 fragNormal;
-out float fragDist;
+out vec3 fragWorldPos;
+
+// Gerstner Wave: retorna deslocamento (XYZ) e normal parcial
+vec3 gerstnerWave(vec2 pos, vec2 dir, float steepness, float wavelength, float t) {
+    float k = 6.2831853 / wavelength;
+    float c = sqrt(9.8 / k);
+    float a = steepness / k;
+    float phase = k * (dot(dir, pos) - c * t);
+    return vec3(
+        dir.x * a * cos(phase),
+        a * sin(phase),
+        dir.y * a * cos(phase)
+    );
+}
 
 void main()
 {
-    // O TexCoord carrega a direção de fluxo: X (TexCoord.x), Y (TexCoord.y)
     vec2 flowDir = vertexTexCoord;
-
-    // Deslocamento animado pelo tempo
     float speed = 2.0;
     vec2 offset = flowDir * time * speed;
-    
-    // O UV final baseia-se na coord do mundo + fluxo
     fragTexCoord = vertexPosition.xz + offset;
-    
     fragColor = vertexColor;
-    fragNormal = vertexNormal;
 
-    vec3 animatedPos = vertexPosition;
-    // Pequena ondulação se escoando
-    if (length(flowDir) > 0.1) {
-    	animatedPos.y += sin(time * 3.0 + vertexPosition.x) * 0.05 * length(flowDir);
-	}
+    vec3 pos = vertexPosition;
 
-    // Distância para o Fog (no espaço da view)
-    vec4 viewPos = mvp * vec4(animatedPos, 1.0);
-    fragDist = length(viewPos.xyz);
+    // 3 camadas de ondas Gerstner com direções diferentes
+    float flowMag = length(flowDir);
+    float waveIntensity = max(flowMag, 0.3); // Mesmo água parada tem leve ondulação
 
-    gl_Position = viewPos;
+    pos += gerstnerWave(pos.xz, normalize(vec2(1.0, 0.6)),  0.15 * waveIntensity, 3.0, time) * 0.6;
+    pos += gerstnerWave(pos.xz, normalize(vec2(-0.4, 1.0)), 0.10 * waveIntensity, 2.0, time * 1.3) * 0.4;
+    pos += gerstnerWave(pos.xz, normalize(vec2(0.7, -0.5)), 0.08 * waveIntensity, 1.5, time * 0.8) * 0.3;
+
+    // Recalcular normal aproximada via derivadas das ondas
+    float eps = 0.1;
+    vec3 pX = pos + gerstnerWave(pos.xz + vec2(eps, 0.0), normalize(vec2(1.0, 0.6)), 0.15, 3.0, time) * 0.1;
+    vec3 pZ = pos + gerstnerWave(pos.xz + vec2(0.0, eps), normalize(vec2(1.0, 0.6)), 0.15, 3.0, time) * 0.1;
+    vec3 tangentX = vec3(eps, pX.y - pos.y, 0.0);
+    vec3 tangentZ = vec3(0.0, pZ.y - pos.y, eps);
+    fragNormal = normalize(cross(tangentZ, tangentX));
+
+    fragWorldPos = pos;
+    gl_Position = mvp * vec4(pos, 1.0);
 }
 `
 
@@ -68,39 +83,96 @@ const waterFragmentShader = `
 in vec2 fragTexCoord;
 in vec4 fragColor;
 in vec3 fragNormal;
-in float fragDist;
+in vec3 fragWorldPos;
+
+uniform float time;
+uniform vec3 camPos;
 
 out vec4 finalColor;
 
+// Hash para ruído procedural
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
 void main()
 {
-    // Escala para as ondas
-    vec2 uv = fragTexCoord * 2.5;
-    
-    // Múltiplas ondas senoidais cruzadas
-    float w1 = sin(uv.x + uv.y);
-    float w2 = sin(uv.x * 0.7 - uv.y * 1.3);
-    float w3 = cos(uv.x * 1.5 + uv.y * 0.8);
-    
-    float wave = (w1 + w2 + w3) / 3.0; 
-    
-    // Brilho muito mais intenso nas cristas (Specular faux)
-    float specular = pow(wave, 12.0) * 0.6;
-    
-    vec4 waterColor = fragColor;
-    
-    waterColor.rgb += wave * vec3(0.1, 0.5, 0.8);
-    waterColor.rgb += specular;
-    waterColor.rgb -= (1.0 - wave) * 0.05;
-    
-    // FOG CALCULATION
-    vec3 fogColor = vec3(0.12, 0.12, 0.16); // Cor escura do céu/vazio
+    // ===== CORES BASE =====
+    vec3 shallowColor = vec3(0.15, 0.65, 0.65); // Turquesa claro
+    vec3 deepColor    = vec3(0.02, 0.12, 0.30); // Azul escuro profundo
+
+    // A profundidade está codificada no alpha do vértice (0.0 = raso, 1.0 = profundo)
+    float depth = fragColor.a;
+    vec3 baseColor = mix(shallowColor, deepColor, depth * 0.7);
+
+    // ===== ONDAS MULTI-CAMADA =====
+    vec2 uv = fragTexCoord;
+    float w1 = sin(uv.x * 3.0 + uv.y * 2.0 + time * 1.5) * 0.5 + 0.5;
+    float w2 = sin(uv.x * 1.7 - uv.y * 2.3 + time * 1.1) * 0.5 + 0.5;
+    float w3 = sin(uv.x * 4.0 + uv.y * 1.5 + time * 2.0) * 0.5 + 0.5;
+    float wave = (w1 + w2 + w3) / 3.0;
+
+    // Variação de cor baseada nas ondas
+    baseColor += wave * vec3(0.05, 0.15, 0.20);
+    baseColor -= (1.0 - wave) * vec3(0.02, 0.05, 0.08);
+
+    // ===== ESPUMA NAS BORDAS =====
+    // Espuma aparece em água mais rasa (depth baixo) e nas cristas das ondas
+    float foamNoise = noise(uv * 8.0 + time * 0.5);
+    float foamEdge = smoothstep(0.0, 0.4, 1.0 - depth); // Mais forte em água rasa
+    float foamCrest = smoothstep(0.65, 0.85, wave);       // Cristas das ondas
+    float foam = max(foamEdge, foamCrest) * foamNoise;
+    foam = smoothstep(0.3, 0.7, foam);
+    baseColor = mix(baseColor, vec3(0.85, 0.92, 0.95), foam * 0.6);
+
+    // ===== CAÚSTICAS =====
+    vec2 caustUV = fragWorldPos.xz * 1.5;
+    float c1 = sin(caustUV.x * 3.0 + time + sin(caustUV.y * 2.0 + time * 0.7));
+    float c2 = sin(caustUV.y * 3.5 - time * 0.8 + cos(caustUV.x * 2.5 + time));
+    float caustic = pow(abs(c1 * c2), 2.0) * 0.15;
+    baseColor += caustic * vec3(0.3, 0.6, 0.8);
+
+    // ===== FRESNEL (Reflexão/Transparência por ângulo) =====
+    vec3 viewDir = normalize(camPos - fragWorldPos);
+    vec3 normal = normalize(fragNormal);
+    float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), 3.0);
+    fresnel = clamp(fresnel, 0.0, 1.0);
+
+    // Reflexão fake do "céu" (gradiente claro)
+    vec3 skyReflection = vec3(0.45, 0.65, 0.85);
+    baseColor = mix(baseColor, skyReflection, fresnel * 0.4);
+
+    // ===== SPECULAR (Blinn-Phong) =====
+    vec3 lightDir = normalize(vec3(0.5, 0.8, 0.3)); // Direção do "sol"
+    vec3 halfVec = normalize(lightDir + viewDir);
+    float spec = pow(max(dot(normal, halfVec), 0.0), 64.0);
+    baseColor += spec * vec3(1.0, 0.95, 0.8) * 0.5;
+
+    // ===== FOG =====
+    float dist = length(camPos - fragWorldPos);
+    vec3 fogColor = vec3(0.12, 0.12, 0.16);
     float fogDensity = 0.005;
-    float fogFactor = exp(-pow(fragDist * fogDensity, 2.0));
+    float fogFactor = exp(-pow(dist * fogDensity, 2.0));
     fogFactor = clamp(fogFactor, 0.0, 1.0);
 
-    vec3 finalRGB = mix(fogColor, waterColor.rgb, fogFactor);
-    finalColor = vec4(finalRGB, fragColor.a * 0.8 * fogFactor);
+    vec3 finalRGB = mix(fogColor, baseColor, fogFactor);
+
+    // Transparência: mais opaco no fundo, mais transparente nas bordas rasas
+    float alpha = mix(0.55, 0.85, depth) * fogFactor;
+    alpha = max(alpha, foam * 0.7); // Espuma é mais opaca
+
+    finalColor = vec4(finalRGB, alpha);
 }
 `
 
@@ -225,6 +297,7 @@ type Renderer struct {
 	// Uniforms
 	timeLoc        int32
 	waterTimeLoc   int32
+	waterCamPosLoc int32
 	plantTimeLoc   int32
 	terrainTimeLoc int32
 	snowAmountLoc  int32
@@ -261,6 +334,7 @@ func NewRenderer() *Renderer {
 		r.snowAmountLoc = rl.GetShaderLocation(r.TerrainShader, "snowAmount")
 		r.plantTimeLoc = rl.GetShaderLocation(r.PlantShader, "time")
 		r.waterTimeLoc = rl.GetShaderLocation(r.WaterShader, "time")
+		r.waterCamPosLoc = rl.GetShaderLocation(r.WaterShader, "camPos")
 
 		// Carregar Texturas Premium
 		r.loadTextures()
@@ -505,6 +579,7 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 	timeVal := float32(rl.GetTime())
 	if r.WaterShader.ID != 0 {
 		rl.SetShaderValue(r.WaterShader, r.waterTimeLoc, []float32{timeVal}, rl.ShaderUniformFloat)
+		rl.SetShaderValue(r.WaterShader, r.waterCamPosLoc, []float32{camPos.X, camPos.Y, camPos.Z}, rl.ShaderUniformVec3)
 	}
 	if r.PlantShader.ID != 0 {
 		rl.SetShaderValue(r.PlantShader, r.plantTimeLoc, []float32{timeVal}, rl.ShaderUniformFloat)

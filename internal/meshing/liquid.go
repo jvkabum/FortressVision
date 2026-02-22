@@ -8,8 +8,11 @@ import (
 // GenerateLiquidGeometry gera a malha para água ou magma em um tile.
 func GenerateLiquidGeometry(tile *mapdata.Tile, buffer *MeshBuffer) {
 	if tile.WaterLevel > 0 {
-		addLiquidPlane(tile, tile.WaterLevel, [4]uint8{20, 130, 220, 160}, buffer)
+		// Encode level (1-7) into Alpha (0-255) for the shader to use as depth info
+		alpha := uint8(float32(tile.WaterLevel) / 7.0 * 255)
+		addLiquidPlane(tile, tile.WaterLevel, [4]uint8{20, 130, 220, alpha}, buffer)
 	} else if tile.MagmaLevel > 0 {
+		// Magma também pode usar o alpha para efeitos, embora seja mais opaco
 		addLiquidPlane(tile, tile.MagmaLevel, [4]uint8{255, 50, 0, 255}, buffer)
 	}
 }

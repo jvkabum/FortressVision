@@ -463,7 +463,7 @@ func (a *App) handleAutoSave() {
 	if currentTime-a.lastAutoSaveTime >= 60.0 {
 		a.lastAutoSaveTime = currentTime
 
-		if a.dfClient != nil && a.dfClient.IsConnected() {
+		if a.dfClient != nil && a.dfClient.IsConnected() && a.dfClient.MapInfo != nil {
 			worldName := a.dfClient.MapInfo.WorldNameEn
 			if worldName == "" {
 				worldName = a.dfClient.MapInfo.WorldName
