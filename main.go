@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"log"
+	"os"
 	"runtime"
 
 	"FortressVision/internal/app"
@@ -21,6 +22,13 @@ func main() {
 	width := flag.Int("width", 0, "Largura da janela")
 	height := flag.Int("height", 0, "Altura da janela")
 	flag.Parse()
+
+	// Configurar Log em Arquivo
+	f, err := os.OpenFile("debug_fv.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err == nil {
+		log.SetOutput(f)
+		log.Println("--- INICIANDO FORTRESS VISION ---")
+	}
 
 	log.SetFlags(log.Ltime | log.Lshortfile)
 	log.Println("╔══════════════════════════════════════╗")
