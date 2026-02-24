@@ -512,17 +512,19 @@ func (a *App) updateMap() {
 	go func(centerPos util.DFCoord) {
 		defer func() { a.isUpdatingMap = false }()
 
-		// DFHack RemoteFortressReader exige coordenadas em BLOCOS (1 bloco = 16x16 tiles)
-		// O Scanner (Background) lida com o mapa todo. O "updateMap" atualiza só uma bolha muito estreita
-		// (água caindo, anão construindo pareder na visão Imediata) para a CPU focar em animar.
-		radiusInBlocks := int32(2) // Reduzido drasticamente para 2 (32x32 tiles de atualização dinâmica)
-		minX := (centerPos.X / 16) - radiusInBlocks
-		maxX := (centerPos.X / 16) + radiusInBlocks
-		minY := (centerPos.Y / 16) - radiusInBlocks
-		maxY := (centerPos.Y / 16) + radiusInBlocks
+		// Busca TODOS os blocos do Z-Level atual (controlado por Q/E).
+		// Usa as dimensões completas do mapa para cobrir toda a extensão XY.
+		var mapMaxX, mapMaxY int32
+		if a.dfClient != nil && a.dfClient.MapInfo != nil {
+			mapMaxX = a.dfClient.MapInfo.BlockSizeX
+			mapMaxY = a.dfClient.MapInfo.BlockSizeY
+		} else {
+			mapMaxX = 12 // Fallback
+			mapMaxY = 12
+		}
 
-		// Limitando Z para uma fatia fininha "perto da câmera" em vez de puxar 30 andares por frame.
-		minZ := centerPos.Z - 3
+		// Z: busca apenas o nível atual e 1 acima (para tetos/vegetação)
+		minZ := centerPos.Z
 		maxZ := centerPos.Z + 1
 
 		if a.dfClient != nil && a.dfClient.MapInfo != nil {
@@ -530,18 +532,14 @@ func (a *App) updateMap() {
 				maxZ = a.dfClient.MapInfo.BlockSizeZ - 1
 			}
 		}
-
-		if minX < 0 {
-			minX = 0
-		}
-		if minY < 0 {
-			minY = 0
+		if minZ < 0 {
+			minZ = 0
 		}
 
 		list, err := a.dfClient.GetBlockList(
-			minX, minY, minZ,
-			maxX, maxY, maxZ,
-			1000,
+			0, 0, minZ,
+			mapMaxX, mapMaxY, maxZ,
+			10000,
 		)
 		if err != nil {
 			log.Printf("[App] Erro ao buscar blocos: %v", err)
