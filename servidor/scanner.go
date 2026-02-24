@@ -5,6 +5,7 @@ import (
 	"FortressVision/shared/mapdata"
 	"FortressVision/shared/util"
 	"log"
+	"sync"
 	"time"
 )
 
@@ -12,6 +13,9 @@ type ServerScanner struct {
 	dfClient *dfhack.Client
 	store    *mapdata.MapDataStore
 	hub      *Hub
+
+	// Evita escanear o mesmo Z-Level repetidas vezes simultaneamente
+	zLevelLocks sync.Map
 }
 
 func NewServerScanner(df *dfhack.Client, s *mapdata.MapDataStore, h *Hub) *ServerScanner {
@@ -58,6 +62,8 @@ func (s *ServerScanner) scanLoop() {
 			// Verifica se o foco do jogador mudou drasticamente a cada camada
 			if currentZ := s.dfClient.GetInterestZ(); util.Abs(currentZ-interestZ) > 3 {
 				log.Printf("[Scanner] Foco mudou (Z:%d -> Z:%d). Reiniciando varredura.", interestZ, currentZ)
+				// Dispara o cache preemptivo massivo do novo andar em background
+				go s.ScanZLevelBackground(currentZ)
 				break // Sai do loop de camadas para pegar o novo centro
 			}
 
@@ -136,4 +142,54 @@ func (s *ServerScanner) StartFullScan() {
 		}
 		log.Println("[Scanner] Download total concluído no servidor!")
 	}()
+}
+
+// ScanZLevelBackground faz a varredura silenciosa e completa de um nível Z inteiro.
+// Evita processamentos duplicados do mesmo nível ao mesmo tempo.
+func (s *ServerScanner) ScanZLevelBackground(z int32) {
+	// Verifica se já não estamos escaneando este Z
+	if _, loaded := s.zLevelLocks.LoadOrStore(z, true); loaded {
+		return
+	}
+	defer s.zLevelLocks.Delete(z) // Libera o lock ao final
+
+	for !s.dfClient.IsConnected() {
+		time.Sleep(500 * time.Millisecond)
+		return // Aborta se perder conexão ao invés de ficar preso
+	}
+
+	info := s.dfClient.MapInfo
+	if info == nil {
+		return
+	}
+
+	log.Printf("[Scanner-Cache] Iniciando cache massivo preemptivo do andar Z=%d...", z)
+	totalX, totalY := info.BlockSizeX, info.BlockSizeY
+	blocksCached := 0
+
+	for x := int32(0); x < totalX; x += 128 {
+		for y := int32(0); y < totalY; y += 128 {
+			maxX, maxY := x+127, y+127
+			if maxX >= totalX {
+				maxX = totalX - 1
+			}
+			if maxY >= totalY {
+				maxY = totalY - 1
+			}
+
+			// Pede lotes de até 10.000 blocos por iteracao
+			list, err := s.dfClient.GetBlockList(x, y, z, maxX, maxY, z, 10000)
+			if err == nil {
+				for _, block := range list.MapBlocks {
+					change := s.store.StoreSingleBlock(&block)
+					if change != mapdata.NoChange {
+						blocksCached++
+					}
+				}
+			}
+			// Pequeno respiro para não asfixiar a thread de RPC principal
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	log.Printf("[Scanner-Cache] Andar Z=%d finalizado. %d blocos pré-aquecidos silenciosamente no servidor.", z, blocksCached)
 }
