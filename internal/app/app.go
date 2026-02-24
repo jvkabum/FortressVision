@@ -660,6 +660,11 @@ func (a *App) updateWorldStatus() {
 	// 1. Obter Tempo do Mundo
 	world, err := a.dfClient.GetWorldMapCenter()
 	if err == nil {
+		// Log temporário de debug no console
+		if a.frameCount%600 == 0 {
+			log.Printf("[DEBUG] MapInfo.BlockPosZ: %d, WorldMap.CenterZ: %d",
+				a.dfClient.MapInfo.BlockPosZ, world.CenterZ)
+		}
 		a.WorldYear = world.CurYear
 		a.WorldName = world.NameEn
 
@@ -974,9 +979,21 @@ func (a *App) drawHUD() {
 	// Informações de Localização
 	rl.DrawText("LOCALIZAÇÃO", 15, 50, 12, rl.Gray)
 
+	offsetZ := int32(0)
+	if a.dfClient != nil && a.dfClient.MapInfo != nil {
+		// A "Elevação" do Dwarf Fortress é o Z absoluto do DFHack menos o offset regional (BlockPosZ).
+		// Foto de validação: Z(14) - BPosZ(-25) = 39. Batida perfeita.
+		offsetZ = a.dfClient.MapInfo.BlockPosZ
+	}
+
 	dfCoord := util.WorldToDFCoord(a.Cam.CurrentLookAt)
 	dfCoord.Z = a.mapCenter.Z
-	rl.DrawText(fmt.Sprintf("Coord DF: (%d, %d, %d)", dfCoord.X, dfCoord.Y, dfCoord.Z), 15, 65, 16, rl.White)
+
+	displayX := dfCoord.X
+	displayY := dfCoord.Y
+	displayZ := dfCoord.Z - offsetZ
+
+	rl.DrawText(fmt.Sprintf("Coord DF: (%d, %d, %d)", displayX, displayY, displayZ), 15, 65, 16, rl.White)
 
 	dfViewZ := int32(0)
 	syncStatus := "Offline"
@@ -987,7 +1004,9 @@ func (a *App) drawHUD() {
 			dfViewZ = view.ViewPosZ
 		}
 	}
-	rl.DrawText(fmt.Sprintf("Z-Level: %d (DF: %d) [%s]", a.mapCenter.Z, dfViewZ, syncStatus), 15, 85, 14, rl.LightGray)
+	displayViewZ := dfViewZ - offsetZ
+
+	rl.DrawText(fmt.Sprintf("Elevação: %d (DF: %d) [%s]", displayZ, displayViewZ, syncStatus), 15, 85, 14, rl.LightGray)
 
 	// Divisor
 	rl.DrawLine(15, 105, 325, 105, rl.NewColor(100, 100, 100, 100))
