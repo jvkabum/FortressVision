@@ -373,8 +373,10 @@ func (r *Renderer) loadModels() {
 
 	entries := []modelEntry{
 		{"shrub", "assets/models/shrub.glb"},
-		{"tree_trunk", "assets/models/TREE.obj"},
-		{"tree_branches", "assets/models/shrub.glb"},
+		{"tree_trunk", "assets/models/TreeTrunkPillar.obj"},
+		{"tree_branches", "assets/models/TreeBranches.obj"},
+		{"tree_twigs", "assets/models/TreeTwigs.obj"},
+		{"branches", "assets/models/Branches.obj"},
 		{"mushroom", "assets/models/SAPLING.obj"},
 	}
 
@@ -582,7 +584,7 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 		rl.SetShaderValue(r.WaterShader, r.waterCamPosLoc, []float32{camPos.X, camPos.Y, camPos.Z}, rl.ShaderUniformVec3)
 	}
 	if r.PlantShader.ID != 0 {
-		rl.SetShaderValue(r.PlantShader, r.plantTimeLoc, []float32{timeVal}, rl.ShaderUniformFloat)
+		rl.SetShaderValue(r.PlantShader, r.plantTimeLoc, []float32{0.0}, rl.ShaderUniformFloat)
 	}
 	if r.TerrainShader.ID != 0 {
 		rl.SetShaderValue(r.TerrainShader, r.terrainTimeLoc, []float32{timeVal}, rl.ShaderUniformFloat)
@@ -590,18 +592,21 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 		rl.SetShaderValue(r.TerrainShader, r.snowAmountLoc, []float32{0.8}, rl.ShaderUniformFloat)
 	}
 
-	// Raio padrão para níveis verticais distantes
-	const cullingRadiusSq = 80 * 80
+	// Raio de visão generoso (120 unidades = ~120 tiles de distância)
+	// Isso evita o efeito de "neblina preta" mas protege a CPU de milhares de draw calls inúteis.
+	const viewRadiusSq = 120.0 * 120.0
 
-	// DISTANCE CULLING: REMOVIDO para Visão Ilimitada
-	// Renderiza tudo o que estiver carregado na GPU
-
-	// ====== PASS 1: GEOMETRIA OPACA (TERRENO, PAREDES) ======
-	// Importante para garantir que o Z-Buffer oclua objetos corretamente antes da vegetação e água.
 	for _, bm := range r.Models {
 		if !bm.Active {
 			continue
 		}
+
+		// DISTANCE CULLING: Só desenha se estiver perto do raio de visão ou se for o Z-level atual
+		distSq := util.DistSq(camPos, rl.Vector3{X: float32(bm.Origin.X), Y: camPos.Y, Z: float32(-bm.Origin.Y)})
+		if bm.Origin.Z != focusZ && distSq > viewRadiusSq {
+			continue
+		}
+
 		// Desenha modelo padrão
 		if bm.Model.MeshCount > 0 {
 			rl.DrawModel(bm.Model, rl.Vector3{X: 0, Y: 0, Z: 0}, 1.0, rl.White)
@@ -622,10 +627,20 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 		if !bm.Active || len(bm.Instances) == 0 {
 			continue
 		}
+
+		// Mesma verificação de distância para instâncias (árvores/folhas)
+		distSq := util.DistSq(camPos, rl.Vector3{X: float32(bm.Origin.X), Y: camPos.Y, Z: float32(-bm.Origin.Y)})
+		if bm.Origin.Z != focusZ && distSq > viewRadiusSq {
+			continue
+		}
+
 		for _, inst := range bm.Instances {
 			if model3d, ok := r.Models3D[inst.ModelName]; ok {
 				pos := rl.Vector3{X: inst.Position[0], Y: inst.Position[1], Z: inst.Position[2]}
 				tintColor := rl.NewColor(inst.Color[0], inst.Color[1], inst.Color[2], 255)
+
+				// Otimização: Skip se a instância estiver longe demais individualmente
+				// (Opcional, o culling por bloco acima já resolve 90% do problema)
 
 				// Aplica a textura e o shader ao material
 				if model3d.MaterialCount > 0 {
@@ -633,7 +648,7 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 
 					// Escolhe o shader correto: PlantShader para vegetação, TerrainShader para rampas/outros
 					shader := r.TerrainShader
-					if inst.ModelName == "shrub" || inst.ModelName == "tree_trunk" || inst.ModelName == "tree_branches" || inst.ModelName == "mushroom" {
+					if inst.ModelName == "shrub" || inst.ModelName == "tree_trunk" || inst.ModelName == "tree_branches" || inst.ModelName == "tree_twigs" || inst.ModelName == "branches" || inst.ModelName == "mushroom" {
 						shader = r.PlantShader
 					}
 

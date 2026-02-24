@@ -254,15 +254,38 @@ func runGreedyMesherX(req Request, getBuffer func(string) *MeshBuffer, liquidBuf
 					continue
 				}
 
-				if shape == dfproto.ShapeTreeShape || shape == dfproto.ShapeTrunkBranch {
-					flushRun()
-					m.addTreeTrunk(worldCoord, tile, color, res)
+				// === ÁRVORES (Replicando Armok Vision) ===
+				// TREE_SHAPE = cubo sólido (tronco grosso, como parede). Entra no greedy mesher normalmente.
+				if shape == dfproto.ShapeTreeShape {
+					// Não faz flush, deixa o greedy mesher fundir com outros TREE_SHAPE adjacentes
+					if runStartY == -1 {
+						runStartY = yy
+						currentRunShape = shape
+						currentRunColor = color
+						runTile = tile
+					}
+					runLength++
 					continue
 				}
 
-				if shape == dfproto.ShapeBranch || shape == dfproto.ShapeTwig {
+				// TRUNK_BRANCH = piso fino (base do galho) + model 3D de tronco pequeno
+				if shape == dfproto.ShapeTrunkBranch {
 					flushRun()
-					m.addTreeLeaves(worldCoord, tile, color, res)
+					m.addTrunkBranch(worldCoord, tile, color, getBuffer, res, req.Data)
+					continue
+				}
+
+				// BRANCH = piso fino + modelo de galho do Armok
+				if shape == dfproto.ShapeBranch {
+					flushRun()
+					m.addBranch(worldCoord, tile, color, getBuffer, res, req.Data)
+					continue
+				}
+
+				// TWIG = piso finíssimo + modelo de raminho do Armok
+				if shape == dfproto.ShapeTwig {
+					flushRun()
+					m.addTwig(worldCoord, tile, color, getBuffer, res, req.Data)
 					continue
 				}
 
@@ -590,71 +613,111 @@ func (m *BlockMesher) addFortification(coord util.DFCoord, color [4]uint8, buffe
 	)
 }
 
-func (m *BlockMesher) addTreeTrunk(coord util.DFCoord, tile *mapdata.Tile, color [4]uint8, res *Result) {
+// addTrunkBranch renderiza TRUNK_BRANCH: piso fino (base sólida) + model de tronco pequeno.
+// No Armok Vision, TRUNK_BRANCH é tratado como floor + growth layers.
+func (m *BlockMesher) addTrunkBranch(coord util.DFCoord, tile *mapdata.Tile, color [4]uint8, getBuffer func(string) *MeshBuffer, res *Result, data *mapdata.MapDataStore) {
 	pos := util.DFToWorldPos(coord)
+	texName := m.MatStore.GetTextureName(tile.MaterialCategory())
+	buf := getBuffer(texName)
 
-	// Rotacionar apontando para o centro da árvore usando PositionOnTree
+	// Piso fino como base do galho-tronco (h=0.15)
+	m.addCubeGreedy(pos, 1.0, 0.15, 1.0, color,
+		true, m.shouldDrawFace(tile, util.DirDown),
+		m.shouldDrawFace(tile, util.DirNorth), m.shouldDrawFace(tile, util.DirSouth),
+		m.shouldDrawFace(tile, util.DirWest), m.shouldDrawFace(tile, util.DirEast),
+		buf, coord, data)
+
+	// Model 3D de tronco pequeno sobre o piso
 	var rotation float32
 	if tile.PositionOnTree.X != 0 || tile.PositionOnTree.Y != 0 {
 		dirX := float64(-tile.PositionOnTree.X)
 		dirY := float64(tile.PositionOnTree.Y)
 		rotation = float32(math.Atan2(dirX, dirY) * (180.0 / math.Pi))
 	} else {
-		// Rotação determinística baseada na coordenada
 		rotation = float32((coord.X*17 + coord.Y*31 + coord.Z*13) % 360)
 	}
 
-	// Usamos o modelo tree_trunk para troncos normais ou mushroom para fungiwood
 	modelName := "tree_trunk"
 	if tile.MaterialCategory() == dfproto.TilematMushroom {
-		modelName = "mushroom" // Fungos gigantes usam o modelo de cogumelo
+		modelName = "mushroom"
 	}
 
-	scale := float32(1.0)
-	// Ajustamos a escala com base na espessura do tronco (0 a 100%)
+	scale := float32(1.0) // Modelos do Armok já são 1x1x1
 	if tile.TrunkPercent > 0 {
 		scale = float32(tile.TrunkPercent) / 100.0
-		if scale < 0.3 {
-			scale = 0.3 // evita troncos muito finos/invisíveis
-		}
-	} else if tile.Shape() == dfproto.ShapeTrunkBranch {
-		scale = 0.8
 	}
 
 	res.ModelInstances = append(res.ModelInstances, ModelInstance{
 		ModelName:   modelName,
 		TextureName: m.MatStore.GetTextureName(tile.MaterialCategory()),
-		Position:    [3]float32{pos.X + 0.5, pos.Y, pos.Z - 0.5},
+		Position:    [3]float32{pos.X + 0.5, pos.Y + 0.15, pos.Z - 0.5},
 		Scale:       scale,
 		Rotation:    rotation,
 		Color:       color,
 	})
 }
 
-func (m *BlockMesher) addTreeLeaves(coord util.DFCoord, tile *mapdata.Tile, color [4]uint8, res *Result) {
+// addBranch renderiza BRANCH: piso fino horizontal + modelo TreeBranches.obj
+func (m *BlockMesher) addBranch(coord util.DFCoord, tile *mapdata.Tile, color [4]uint8, getBuffer func(string) *MeshBuffer, res *Result, data *mapdata.MapDataStore) {
 	pos := util.DFToWorldPos(coord)
+	texName := m.MatStore.GetTextureName(tile.MaterialCategory())
+	buf := getBuffer(texName)
 
+	// Piso fino representando o galho horizontal (h=0.08)
+	m.addCubeGreedy(pos, 1.0, 0.08, 1.0, color,
+		true, m.shouldDrawFace(tile, util.DirDown),
+		m.shouldDrawFace(tile, util.DirNorth), m.shouldDrawFace(tile, util.DirSouth),
+		m.shouldDrawFace(tile, util.DirWest), m.shouldDrawFace(tile, util.DirEast),
+		buf, coord, data)
+
+	// Adicionar modelo de galho do Armok
 	var rotation float32
 	if tile.PositionOnTree.X != 0 || tile.PositionOnTree.Y != 0 {
 		dirX := float64(-tile.PositionOnTree.X)
 		dirY := float64(tile.PositionOnTree.Y)
 		rotation = float32(math.Atan2(dirX, dirY) * (180.0 / math.Pi))
 	} else {
-		// Diferenciar ligeiramente a semente de rotação em relação ao tronco
-		rotation = float32((coord.X*13 + coord.Y*17 + coord.Z*31) % 360)
-	}
-
-	// Galhos e folhagens agora usam modelos 3D mais orgânicos
-	modelName := "tree_branches"
-	if tile.MaterialCategory() == dfproto.TilematMushroom {
-		modelName = "mushroom"
+		rotation = float32((coord.X*17 + coord.Y*31 + coord.Z*13) % 360)
 	}
 
 	res.ModelInstances = append(res.ModelInstances, ModelInstance{
-		ModelName:   modelName,
+		ModelName:   "tree_branches",
 		TextureName: m.MatStore.GetTextureName(tile.MaterialCategory()),
-		Position:    [3]float32{pos.X + 0.5, pos.Y, pos.Z - 0.5},
-		Scale:       0.8, // Ramos são um pouco menores que o tronco principal
+		Position:    [3]float32{pos.X + 0.5, pos.Y + 0.08, pos.Z - 0.5},
+		Scale:       1.0,
+		Rotation:    rotation,
+		Color:       color,
+	})
+}
+
+// addTwig renderiza TWIG: piso finíssimo + modelo TreeTwigs.obj
+func (m *BlockMesher) addTwig(coord util.DFCoord, tile *mapdata.Tile, color [4]uint8, getBuffer func(string) *MeshBuffer, res *Result, data *mapdata.MapDataStore) {
+	pos := util.DFToWorldPos(coord)
+	texName := m.MatStore.GetTextureName(tile.MaterialCategory())
+	buf := getBuffer(texName)
+
+	// Piso finíssimo como base (h=0.04)
+	m.addCubeGreedy(pos, 1.0, 0.04, 1.0, color,
+		true, m.shouldDrawFace(tile, util.DirDown),
+		m.shouldDrawFace(tile, util.DirNorth), m.shouldDrawFace(tile, util.DirSouth),
+		m.shouldDrawFace(tile, util.DirWest), m.shouldDrawFace(tile, util.DirEast),
+		buf, coord, data)
+
+	// Modelo de raminhos com folhas
+	var rotation float32
+	if tile.PositionOnTree.X != 0 || tile.PositionOnTree.Y != 0 {
+		dirX := float64(-tile.PositionOnTree.X)
+		dirY := float64(tile.PositionOnTree.Y)
+		rotation = float32(math.Atan2(dirX, dirY) * (180.0 / math.Pi))
+	} else {
+		rotation = float32((coord.X*13 + coord.Y*17 + coord.Z*31) % 360)
+	}
+
+	res.ModelInstances = append(res.ModelInstances, ModelInstance{
+		ModelName:   "tree_twigs",
+		TextureName: m.MatStore.GetTextureName(tile.MaterialCategory()),
+		Position:    [3]float32{pos.X + 0.5, pos.Y + 0.04, pos.Z - 0.5},
+		Scale:       1.0,
 		Rotation:    rotation,
 		Color:       color,
 	})

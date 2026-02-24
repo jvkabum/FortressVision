@@ -482,8 +482,8 @@ func (a *App) updateMap() {
 		return
 	}
 
-	// throttle: requisita a cada 60 frames (1s a 60fps) para manter o FPS estável
-	if a.frameCount%60 != 0 {
+	// throttle: requisita a cada 300 frames (5s a 60fps) para evitar re-meshing massivo do mapa inteiro
+	if a.frameCount%300 != 0 {
 		return
 	}
 
