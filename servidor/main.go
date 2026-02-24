@@ -281,11 +281,11 @@ func handleClientMessage(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Client
 
 		// Buscar chunks no store e enviar
 		log.Printf("[WS] Iniciando streaming de região para cliente...")
-		go streamRegionToClient(hub, conn, store, req)
+		go streamRegionToClient(hub, conn, dfClient, store, req)
 	}
 }
 
-func streamRegionToClient(hub *Hub, conn *websocket.Conn, store *mapdata.MapDataStore, req fvnet.ClientRequestRegion) {
+func streamRegionToClient(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Client, store *mapdata.MapDataStore, req fvnet.ClientRequestRegion) {
 	// Definir limites
 	minX := req.CenterX - req.Radius
 	maxX := req.CenterX + req.Radius
@@ -307,7 +307,24 @@ func streamRegionToClient(hub *Hub, conn *websocket.Conn, store *mapdata.MapData
 				var err error
 				chunk, err = store.LoadChunk(origin)
 				if err != nil {
-					continue
+					// Fallback On-Demand: Tenta buscar os blocos faltantes diretamente na memória do DFHack
+					if dfClient != nil && dfClient.IsConnected() {
+						list, rpcErr := dfClient.GetBlockList(origin.X, origin.Y, origin.Z, origin.X+15, origin.Y+15, origin.Z, 300)
+						if rpcErr == nil && list != nil {
+							for _, block := range list.MapBlocks {
+								store.StoreSingleBlock(&block) // Salva no banco e insere no cache (Chunks map)
+							}
+							// Tenta pegar o chunk novamente após o processamento
+							store.Mu.RLock()
+							chunk, exists = store.Chunks[origin]
+							store.Mu.RUnlock()
+						}
+					}
+
+					// Se continuou não existindo (ex: fora dos limites do mapa ou vazio), segue em frente
+					if !exists {
+						continue
+					}
 				}
 			}
 
