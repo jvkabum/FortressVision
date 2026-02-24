@@ -258,7 +258,12 @@ func (a *App) updateMap() {
 	}
 
 	// throttle: requisita a cada 120 frames (2s a 60fps)
-	if a.frameCount%120 != 0 {
+	// throttle: requisita a cada 60 frames (1s a 60fps) durante o loading, ou 120 frames normal
+	checkInterval := 120
+	if a.Loading {
+		checkInterval = 30 // Mais rápido durante o loading
+	}
+	if a.frameCount%checkInterval != 0 {
 		return
 	}
 
@@ -268,6 +273,14 @@ func (a *App) updateMap() {
 
 	// Solicita região ao servidor
 	radius := int32(64) // Raio de cobertura
+
+	// Inicializa o total esperado para a tela de carregamento (apenas na primeira vez)
+	if a.Loading && a.LoadingTotalBlocks == 0 {
+		blocksPerSide := (radius * 2) / 16
+		a.LoadingTotalBlocks = int(blocksPerSide * blocksPerSide)
+		log.Printf("[App] Esperando %d blocos para concluir sincronização inicial", a.LoadingTotalBlocks)
+	}
+
 	a.netClient.RequestRegion(center, radius)
 }
 
@@ -308,12 +321,14 @@ func (a *App) processMesherResults() {
 						a.LoadingProcessedBlocks, a.LoadingTotalBlocks, a.LoadingProgress*100)
 				}
 
-				// Só encerra o loading quando processarmos quase tudo (95%)
-				// Ou se o usuário apertar SPACE (tratado no updateInput)
-				if a.LoadingTotalBlocks > 0 && float32(a.LoadingProcessedBlocks)/float32(a.LoadingTotalBlocks) >= 0.95 {
+				// Só encerra o loading quando processarmos o suficiente (40% ou pelo menos 10 blocos e 3s)
+				loadThreshold := float32(0.40)
+				timeSinceSync := rl.GetTime() - startTime // simplistic proxy
+
+				if a.LoadingTotalBlocks > 0 && (float32(a.LoadingProcessedBlocks)/float32(a.LoadingTotalBlocks) >= loadThreshold || (a.LoadingProcessedBlocks >= 10 && timeSinceSync > 3.0)) {
 					a.Loading = false
 					a.LoadingProgress = 1.0
-					log.Println("Loading concluído automaticamente! Iniciando renderização.")
+					log.Printf("[App] Loading concluído! (%d blocos processados). Iniciando renderização.", a.LoadingProcessedBlocks)
 				}
 			}
 		default:

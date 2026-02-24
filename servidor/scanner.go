@@ -90,6 +90,7 @@ func (s *ServerScanner) scanLoop() {
 					}
 					time.Sleep(50 * time.Millisecond)
 				}
+				log.Printf("[Scanner] Camada Z %d varrida em torno da visão.", z)
 			}
 			time.Sleep(200 * time.Millisecond)
 		}
