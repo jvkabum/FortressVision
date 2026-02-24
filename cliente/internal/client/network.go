@@ -2,6 +2,7 @@ package client
 
 import (
 	"FortressVision/shared/mapdata"
+	"FortressVision/shared/pkg/dfproto"
 	"FortressVision/shared/proto/fvnet"
 	"FortressVision/shared/util"
 	"bytes"
@@ -158,6 +159,30 @@ func (c *NetworkClient) handleMessage(env *fvnet.Envelope) {
 		}
 	case fvnet.Envelope_PONG:
 		// Ping/Pong handled
+	case fvnet.Envelope_VEGETATION_UPDATE:
+		var vegMsg fvnet.VegetationUpdateMessage
+		if err := vegMsg.Unmarshal(env.Payload); err == nil {
+			c.processVegetation(&vegMsg)
+		}
+	}
+}
+
+func (c *NetworkClient) processVegetation(msg *fvnet.VegetationUpdateMessage) {
+	origin := util.DFCoord{X: msg.ChunkX, Y: msg.ChunkY, Z: msg.ChunkZ}
+
+	var plants []dfproto.PlantDetail
+	for _, p := range msg.Plants {
+		plants = append(plants, dfproto.PlantDetail{
+			Pos:      dfproto.Coord{X: p.X, Y: p.Y, Z: 0},
+			Material: dfproto.MatPair{MatType: p.MatType, MatIndex: p.MatIndex},
+		})
+	}
+
+	c.store.StorePlants(msg.ChunkX, msg.ChunkY, msg.ChunkZ, plants)
+
+	// Invalida o mesh para re-renderizar o crescimento
+	if c.OnMapChunk != nil {
+		c.OnMapChunk(origin)
 	}
 }
 

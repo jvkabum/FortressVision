@@ -7,11 +7,12 @@
 package fvnet
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -31,6 +32,7 @@ const (
 	Envelope_CLIENT_REQUEST_REGION Envelope_Type = 4
 	Envelope_SERVER_STATUS         Envelope_Type = 5
 	Envelope_WORLD_STATUS          Envelope_Type = 6
+	Envelope_VEGETATION_UPDATE     Envelope_Type = 7
 )
 
 // Enum value maps for Envelope_Type.
@@ -43,6 +45,7 @@ var (
 		4: "CLIENT_REQUEST_REGION",
 		5: "SERVER_STATUS",
 		6: "WORLD_STATUS",
+		7: "VEGETATION_UPDATE",
 	}
 	Envelope_Type_value = map[string]int32{
 		"PING":                  0,
@@ -52,6 +55,7 @@ var (
 		"CLIENT_REQUEST_REGION": 4,
 		"SERVER_STATUS":         5,
 		"WORLD_STATUS":          6,
+		"VEGETATION_UPDATE":     7,
 	}
 )
 

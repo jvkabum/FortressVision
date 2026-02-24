@@ -6,6 +6,7 @@
   "target_fps": 60,
   "dfhack_host": "localhost",
   "dfhack_port": 5000,
+  "server_url": "ws://localhost:8080/ws",
   "draw_distance": 10,
   "view_levels": 5,
   "mesher_threads": 4,

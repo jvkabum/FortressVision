@@ -77,7 +77,16 @@ func (s *ServerScanner) scanLoop() {
 					}
 
 					for _, block := range list.MapBlocks {
-						s.store.StoreSingleBlock(&block)
+						change := s.store.StoreSingleBlock(&block)
+						if change == mapdata.TerrainChange {
+							// Se o terreno mudou, o cliente precisará do chunk novo no próximo request
+							// Por enquanto não temos broadcast de chunk completo para evitar lag
+						} else if change == mapdata.VegetationChange {
+							// Se APENAS a vegetação mudou, envia atualização leve e imediata
+							chunkOrigin := util.NewDFCoord(block.MapX, block.MapY, block.MapZ).BlockCoord()
+							chunk := s.store.Chunks[chunkOrigin]
+							s.hub.BroadcastVegetation(block.MapX, block.MapY, block.MapZ, chunk.Plants)
+						}
 					}
 					time.Sleep(50 * time.Millisecond)
 				}

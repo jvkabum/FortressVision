@@ -4,8 +4,8 @@ import (
 	"log"
 	"sync"
 
-	"FortressVision/shared/util"
 	"FortressVision/shared/pkg/dfproto"
+	"FortressVision/shared/util"
 
 	"gorm.io/gorm"
 )
@@ -28,12 +28,22 @@ type MapDataStore struct {
 	DB *gorm.DB
 }
 
+// ChangeType representa o tipo de mudança detectada em um bloco
+type ChangeType int
+
+const (
+	NoChange         ChangeType = 0
+	TerrainChange    ChangeType = 1
+	VegetationChange ChangeType = 2
+)
+
 // Chunk representa um bloco 16x16x1 de tiles.
 type Chunk struct {
 	Origin  util.DFCoord
 	Tiles   [16][16]*Tile
-	MTime   int64 // Contador de modificações / versão
-	IsDirty bool  // Indica que o chunk foi alterado e precisa salvar
+	Plants  []dfproto.PlantDetail // Cache de plantas (shrubs/saplings) para atualizações leves
+	MTime   int64                 // Contador de modificações / versão
+	IsDirty bool                  // Indica que o chunk foi alterado e precisa salvar
 }
 
 // NewMapDataStore cria um novo repositório de dados do mapa.
@@ -94,13 +104,29 @@ func (s *MapDataStore) StoreBlocks(list *dfproto.BlockList) {
 	}
 }
 
-// StoreSingleBlock processa um único bloco (16x16).
-func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) {
+// StoreSingleBlock converte um bloco do Raw Proto e armazena/atualiza no store.
+// Retorna o tipo de mudança detectada (NoChange, TerrainChange ou VegetationChange).
+func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
 
+	origin := util.NewDFCoord(block.MapX, block.MapY, block.MapZ).BlockCoord()
+	chunk, ok := s.Chunks[origin]
+	if !ok {
+		chunk = &Chunk{Origin: origin}
+		for y := 0; y < 16; y++ {
+			for x := 0; x < 16; x++ {
+				chunk.Tiles[x][y] = &Tile{}
+			}
+		}
+		s.Chunks[origin] = chunk
+		chunk.IsDirty = true // Primeiro carregamento sempre marca como dirty
+		// log.Printf("[Store] Chunk criado em RAM: %v", origin)
+	}
+
 	// Flag para indicar se houve mudança real nos dados deste chunk
 	chunkChanged := false
+	vegChanged := false
 
 	// Pré-processa os fluxos (Flows) para busca rápida por coordenada
 	flowMap := make(map[util.DFCoord]util.DFCoord)
@@ -236,14 +262,80 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) {
 		}
 	}
 
+	// Coleta dados de vegetação (saplings e shrubs) para o cache do chunk
+	var currentPlants []dfproto.PlantDetail
+	chunkOrigin := util.NewDFCoord(block.MapX, block.MapY, block.MapZ).BlockCoord()
+	chunk = s.Chunks[chunkOrigin]
+
+	for yy := int32(0); yy < 16; yy++ {
+		for xx := int32(0); xx < 16; xx++ {
+			tile := chunk.Tiles[xx][yy]
+			if tile != nil {
+				shape := tile.Shape()
+				if shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
+					currentPlants = append(currentPlants, dfproto.PlantDetail{
+						Pos:      dfproto.Coord{X: xx, Y: yy, Z: 0}, // Coordenada local
+						Material: tile.Material,
+					})
+				}
+			}
+		}
+	}
+
+	// Compara com o cache anterior para detectar mudanças de vegetação
+	if len(chunk.Plants) != len(currentPlants) {
+		chunk.Plants = currentPlants
+		vegChanged = true
+	} else {
+		for i := range currentPlants {
+			if chunk.Plants[i].Pos != currentPlants[i].Pos ||
+				chunk.Plants[i].Material != currentPlants[i].Material {
+				chunk.Plants = currentPlants
+				vegChanged = true
+				break
+			}
+		}
+	}
+
 	// Só incrementa a versão do chunk se algo realmente mudou
-	if chunkChanged {
-		chunkOrigin := util.NewDFCoord(block.MapX, block.MapY, block.MapZ).BlockCoord()
-		chunk := s.Chunks[chunkOrigin]
+	if chunkChanged || vegChanged {
 		chunk.MTime++
 		if !chunk.IsDirty {
 			chunk.IsDirty = true
-			// log.Printf("[Store] Chunk %v marcado como Dirty", chunkOrigin)
+		}
+	}
+
+	if chunkChanged {
+		return TerrainChange
+	}
+	if vegChanged {
+		return VegetationChange
+	}
+	return NoChange
+}
+
+// StorePlants processa atualizações específicas de vegetação enviadas via rede.
+func (s *MapDataStore) StorePlants(chunkX, chunkY, chunkZ int32, plants []dfproto.PlantDetail) {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+
+	origin := util.NewDFCoord(chunkX, chunkY, chunkZ)
+	chunk, ok := s.Chunks[origin]
+	if !ok {
+		return
+	}
+
+	chunk.Plants = plants
+	chunk.MTime++
+	chunk.IsDirty = true
+
+	// Atualiza os materiais nos tiles para refletir o crescimento/mudança
+	for _, p := range plants {
+		if p.Pos.X >= 0 && p.Pos.X < 16 && p.Pos.Y >= 0 && p.Pos.Y < 16 {
+			tile := chunk.Tiles[p.Pos.X][p.Pos.Y]
+			if tile != nil {
+				tile.Material = p.Material
+			}
 		}
 	}
 }

@@ -14,9 +14,23 @@ message Envelope {
         CLIENT_REQUEST_REGION = 4;
         SERVER_STATUS = 5;
         WORLD_STATUS = 6;
+        VEGETATION_UPDATE = 7;
     }
     Type type = 1;
     bytes payload = 2;
+}
+
+message VegetationUpdateMessage {
+    int32 chunk_x = 1;
+    int32 chunk_y = 2;
+    int32 chunk_z = 3;
+    message PlantDetail {
+        int32 x = 1;
+        int32 y = 2;
+        int32 mat_type = 3;
+        int32 mat_index = 4;
+    }
+    repeated PlantDetail plants = 4;
 }
 
 // ... (MapChunkMessage e ClientRequestRegion continuam iguais)

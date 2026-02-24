@@ -492,6 +492,45 @@ func (m *MaterialList) Unmarshal(data []byte) error {
 	return nil
 }
 
+// PlantDetail representa uma planta individual (shrub, sapling) no mapa
+type PlantDetail struct {
+	Pos      Coord
+	Material MatPair
+}
+
+func (p *PlantDetail) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			if err := p.Pos.Unmarshal(subData); err != nil {
+				return err
+			}
+		case 2:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			if err := p.Material.Unmarshal(subData); err != nil {
+				return err
+			}
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 type MapBlock struct {
 	MapX               int32
 	MapY               int32
@@ -510,6 +549,7 @@ type MapBlock struct {
 	TreeX              []int32
 	TreeY              []int32
 	TreeZ              []int32
+	Plants             []PlantDetail
 }
 
 func (m *MapBlock) Unmarshal(data []byte) error {
@@ -724,6 +764,16 @@ func (m *MapBlock) Unmarshal(data []byte) error {
 				}
 				m.TreeZ = append(m.TreeZ, int32(v))
 			}
+		case 12: // Plants (Campo customizado para FortressVision)
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var p PlantDetail
+			if err := p.Unmarshal(subData); err != nil {
+				return err
+			}
+			m.Plants = append(m.Plants, p)
 		default:
 			if err := d.SkipField(wireType); err != nil {
 				return err

@@ -11,6 +11,7 @@ import (
 
 	"FortressVision/servidor/internal/dfhack"
 	"FortressVision/shared/mapdata"
+	"FortressVision/shared/pkg/dfproto"
 	"FortressVision/shared/proto/fvnet"
 	"FortressVision/shared/util"
 
@@ -71,6 +72,48 @@ func (h *Hub) run() {
 			h.mu.Unlock()
 		}
 	}
+}
+
+// BroadcastMapChunk envia um chunk completo para todos os clientes
+func (h *Hub) BroadcastMapChunk(chunkX, chunkY, chunkZ int32, voxelData []byte) {
+	msg := &fvnet.MapChunkMessage{
+		ChunkX:    chunkX,
+		ChunkY:    chunkY,
+		ChunkZ:    chunkZ,
+		VoxelData: voxelData,
+	}
+	payload, _ := proto.Marshal(msg)
+	envelope := &fvnet.Envelope{
+		Type:    fvnet.Envelope_MAP_CHUNK,
+		Payload: payload,
+	}
+	data, _ := proto.Marshal(envelope)
+	h.broadcast <- data
+}
+
+// BroadcastVegetation envia apenas os deltas de vegetação de um chunk
+func (h *Hub) BroadcastVegetation(chunkX, chunkY, chunkZ int32, plants []dfproto.PlantDetail) {
+	msg := &fvnet.VegetationUpdateMessage{
+		ChunkX: chunkX,
+		ChunkY: chunkY,
+		ChunkZ: chunkZ,
+	}
+	for _, p := range plants {
+		msg.Plants = append(msg.Plants, fvnet.PlantDetail{
+			X:        p.Pos.X,
+			Y:        p.Pos.Y,
+			MatType:  p.Material.MatType,
+			MatIndex: p.Material.MatIndex,
+		})
+	}
+
+	payload := msg.Marshal() // Usando marshal customizado de vegetation.go
+	envelope := &fvnet.Envelope{
+		Type:    fvnet.Envelope_VEGETATION_UPDATE,
+		Payload: payload,
+	}
+	data, _ := proto.Marshal(envelope)
+	h.broadcast <- data
 }
 
 func main() {
