@@ -27,6 +27,8 @@ type NetworkClient struct {
 	OnMapChunk    func(origin util.DFCoord)
 	OnStatus      func(msg string, dfConnected bool)
 	OnWorldStatus func(status *fvnet.WorldStatus)
+	OnTiletypes   func(list *dfproto.TiletypeList)
+	OnMaterials   func(list *dfproto.MaterialList)
 }
 
 func NewNetworkClient(url string, store *mapdata.MapDataStore) *NetworkClient {
@@ -148,6 +150,7 @@ func (c *NetworkClient) handleMessage(env *fvnet.Envelope) {
 	case fvnet.Envelope_MAP_CHUNK:
 		var chunkMsg fvnet.MapChunkMessage
 		if err := proto.Unmarshal(env.Payload, &chunkMsg); err == nil {
+			log.Printf("[Network] Chunk recebido: Z=%d (%d, %d)", chunkMsg.ChunkZ, chunkMsg.ChunkX, chunkMsg.ChunkY)
 			c.processChunk(&chunkMsg)
 		}
 	case fvnet.Envelope_WORLD_STATUS:
@@ -155,6 +158,22 @@ func (c *NetworkClient) handleMessage(env *fvnet.Envelope) {
 		if err := proto.Unmarshal(env.Payload, &worldStatus); err == nil {
 			if c.OnWorldStatus != nil {
 				c.OnWorldStatus(&worldStatus)
+			}
+		}
+	case fvnet.Envelope_TILETYPE_LIST:
+		var list dfproto.TiletypeList
+		if err := list.Unmarshal(env.Payload); err == nil {
+			log.Printf("[Network] Recebidos %d tiletypes do servidor", len(list.TiletypeList))
+			if c.OnTiletypes != nil {
+				c.OnTiletypes(&list)
+			}
+		}
+	case fvnet.Envelope_MATERIAL_LIST:
+		var list dfproto.MaterialList
+		if err := list.Unmarshal(env.Payload); err == nil {
+			log.Printf("[Network] Recebidos %d materiais do servidor", len(list.MaterialList))
+			if c.OnMaterials != nil {
+				c.OnMaterials(&list)
 			}
 		}
 	case fvnet.Envelope_PONG:
@@ -209,9 +228,7 @@ func (c *NetworkClient) processChunk(msg *fvnet.MapChunkMessage) {
 	for x := 0; x < 16; x++ {
 		for y := 0; y < 16; y++ {
 			if t := chunk.Tiles[x][y]; t != nil {
-				// tile.container é privado, mas mapdata pode acessá-lo se estiver no mesmo pacote.
-				// Como estamos em client, precisamos de um helper no mapdata ou tornar o container público/usar um setter.
-				// Por enquanto, vamos assumir que o cliente cuidará da renderização sem precisar do container.
+				t.SetStore(c.store)
 			}
 		}
 	}

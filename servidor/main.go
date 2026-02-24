@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/gob"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -27,7 +29,7 @@ var upgrader = websocket.Upgrader{
 
 // Hub gerencia as conexões WebSocket ativas
 type Hub struct {
-	clients    map[*websocket.Conn]bool
+	clients    map[*websocket.Conn]*sync.Mutex
 	broadcast  chan []byte
 	register   chan *websocket.Conn
 	unregister chan *websocket.Conn
@@ -36,7 +38,7 @@ type Hub struct {
 
 func newHub() *Hub {
 	return &Hub{
-		clients:    make(map[*websocket.Conn]bool),
+		clients:    make(map[*websocket.Conn]*sync.Mutex),
 		broadcast:  make(chan []byte),
 		register:   make(chan *websocket.Conn),
 		unregister: make(chan *websocket.Conn),
@@ -48,30 +50,57 @@ func (h *Hub) run() {
 		select {
 		case client := <-h.register:
 			h.mu.Lock()
-			h.clients[client] = true
+			h.clients[client] = &sync.Mutex{}
 			h.mu.Unlock()
 			log.Printf("Cliente registrado: %s", client.RemoteAddr())
 		case client := <-h.unregister:
 			h.mu.Lock()
-			if _, ok := h.clients[client]; ok {
+			if lock, ok := h.clients[client]; ok {
+				lock.Lock() // Garante que nenhuma escrita ocorra durante o fechamento
 				delete(h.clients, client)
 				client.Close()
+				lock.Unlock()
 				log.Printf("Cliente desregistrado: %s", client.RemoteAddr())
 			}
 			h.mu.Unlock()
 		case message := <-h.broadcast:
 			h.mu.Lock()
-			for client := range h.clients {
+			// Criamos uma cópia local para evitar segurar o lock do hub durante as escritas
+			activeClients := make(map[*websocket.Conn]*sync.Mutex)
+			for c, l := range h.clients {
+				activeClients[c] = l
+			}
+			h.mu.Unlock()
+
+			for client, lock := range activeClients {
+				lock.Lock()
 				err := client.WriteMessage(websocket.BinaryMessage, message)
 				if err != nil {
 					log.Printf("Erro ao enviar para cliente: %v", err)
 					client.Close()
+					h.mu.Lock()
 					delete(h.clients, client)
+					h.mu.Unlock()
 				}
+				lock.Unlock()
 			}
-			h.mu.Unlock()
 		}
 	}
+}
+
+// WriteSafe garante que apenas uma goroutine escreva no WebSocket por vez
+func (h *Hub) WriteSafe(conn *websocket.Conn, messageType int, data []byte) error {
+	h.mu.Lock()
+	lock, ok := h.clients[conn]
+	h.mu.Unlock()
+
+	if !ok {
+		return fmt.Errorf("cliente não encontrado no hub")
+	}
+
+	lock.Lock()
+	defer lock.Unlock()
+	return conn.WriteMessage(messageType, data)
 }
 
 // BroadcastMapChunk envia um chunk completo para todos os clientes
@@ -118,6 +147,16 @@ func (h *Hub) BroadcastVegetation(chunkX, chunkY, chunkZ int32, plants []dfproto
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lshortfile)
+
+	// Configurar Log em Arquivo para depuração de crash
+	if err := os.MkdirAll("servidor/tmp", 0755); err == nil {
+		logFile, err := os.OpenFile("servidor/tmp/server.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err == nil {
+			// MultiWriter para logar no console e no arquivo simultaneamente
+			mw := io.MultiWriter(os.Stdout, logFile)
+			log.SetOutput(mw)
+		}
+	}
 	log.Println("╔══════════════════════════════════════╗")
 	log.Println("║    FortressVision SERVER v0.1.0      ║")
 	log.Println("╚══════════════════════════════════════╝")
@@ -192,7 +231,17 @@ func handleWebSocket(hub *Hub, dfClient *dfhack.Client, store *mapdata.MapDataSt
 		Message:     "Conectado ao Servidor FortressVision",
 		DfConnected: dfClient.IsConnected(),
 	}
-	sendProtoMessage(conn, fvnet.Envelope_SERVER_STATUS, status)
+	hub.SendProtoMessage(conn, fvnet.Envelope_SERVER_STATUS, status)
+
+	// Enviar Dicionários de Tipos (Essencial para o Cliente renderizar)
+	if dfClient.IsConnected() {
+		if dfClient.TiletypeList != nil {
+			hub.SendProtoMessage(conn, fvnet.Envelope_TILETYPE_LIST, dfClient.TiletypeList)
+		}
+		if dfClient.MaterialList != nil {
+			hub.SendProtoMessage(conn, fvnet.Envelope_MATERIAL_LIST, dfClient.MaterialList)
+		}
+	}
 
 	go func() {
 		defer func() {
@@ -213,29 +262,30 @@ func handleWebSocket(hub *Hub, dfClient *dfhack.Client, store *mapdata.MapDataSt
 				continue
 			}
 
-			handleClientMessage(conn, dfClient, store, &envelope)
+			handleClientMessage(hub, conn, dfClient, store, &envelope)
 		}
 	}()
 }
 
-func handleClientMessage(conn *websocket.Conn, dfClient *dfhack.Client, store *mapdata.MapDataStore, env *fvnet.Envelope) {
+func handleClientMessage(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Client, store *mapdata.MapDataStore, env *fvnet.Envelope) {
 	switch env.Type {
 	case fvnet.Envelope_PING:
-		sendProtoMessage(conn, fvnet.Envelope_PONG, nil)
+		hub.SendProtoMessage(conn, fvnet.Envelope_PONG, nil)
 	case fvnet.Envelope_CLIENT_REQUEST_REGION:
 		var req fvnet.ClientRequestRegion
 		if err := proto.Unmarshal(env.Payload, &req); err != nil {
 			log.Printf("Erro ao ler RequestRegion: %v", err)
 			return
 		}
-		log.Printf("Cliente solicitou região: Center(%d, %d, %d) Radius:%d", req.CenterX, req.CenterY, req.CenterZ, req.Radius)
+		log.Printf("[Network] Cliente solicitou região: Center(%d, %d, %d) Radius:%d", req.CenterX, req.CenterY, req.CenterZ, req.Radius)
 
 		// Buscar chunks no store e enviar
-		go streamRegionToClient(conn, store, req)
+		log.Printf("[WS] Iniciando streaming de região para cliente...")
+		go streamRegionToClient(hub, conn, store, req)
 	}
 }
 
-func streamRegionToClient(conn *websocket.Conn, store *mapdata.MapDataStore, req fvnet.ClientRequestRegion) {
+func streamRegionToClient(hub *Hub, conn *websocket.Conn, store *mapdata.MapDataStore, req fvnet.ClientRequestRegion) {
 	// Definir limites
 	minX := req.CenterX - req.Radius
 	maxX := req.CenterX + req.Radius
@@ -243,6 +293,7 @@ func streamRegionToClient(conn *websocket.Conn, store *mapdata.MapDataStore, req
 	maxY := req.CenterY + req.Radius
 	z := req.CenterZ
 
+	chunksSent := 0
 	// Iterar em blocos de 16
 	for x := minX; x <= maxX; x += 16 {
 		for y := minY; y <= maxY; y += 16 {
@@ -253,7 +304,6 @@ func streamRegionToClient(conn *websocket.Conn, store *mapdata.MapDataStore, req
 			store.Mu.RUnlock()
 
 			if !exists {
-				// Tenta carregar do SQLite se o servidor não tiver na RAM
 				var err error
 				chunk, err = store.LoadChunk(origin)
 				if err != nil {
@@ -262,12 +312,10 @@ func streamRegionToClient(conn *websocket.Conn, store *mapdata.MapDataStore, req
 			}
 
 			if chunk != nil {
-				// Serializar chunk.Tiles para bytes usando GOB (mesmo formato do SQLite)
-				// Isso permite que o cliente use o mesmo leitor que o MapDataStore usava
 				var buf bytes.Buffer
 				enc := gob.NewEncoder(&buf)
 				if err := enc.Encode(chunk.Tiles); err != nil {
-					log.Printf("Erro ao codificar tiles para rede: %v", err)
+					log.Printf("[WS] Erro ao codificar tiles para chunk (%d,%d,%d): %v", origin.X, origin.Y, origin.Z, err)
 					continue
 				}
 
@@ -277,10 +325,12 @@ func streamRegionToClient(conn *websocket.Conn, store *mapdata.MapDataStore, req
 					ChunkZ:    origin.Z,
 					VoxelData: buf.Bytes(),
 				}
-				sendProtoMessage(conn, fvnet.Envelope_MAP_CHUNK, msg)
+				hub.SendProtoMessage(conn, fvnet.Envelope_MAP_CHUNK, msg)
+				chunksSent++
 			}
 		}
 	}
+	log.Printf("[WS] Streaming concluído: %d chunks enviados para Z=%d", chunksSent, z)
 }
 
 func broadcastWorldStatus(hub *Hub, dfClient *dfhack.Client) {
@@ -321,40 +371,12 @@ func broadcastWorldStatus(hub *Hub, dfClient *dfhack.Client) {
 			}
 			status.Population = int32(count)
 		}
-
-		// 3. Sincronização de Visão (Z-Sync Inteligente)
+		// 3. Sincronização de Visão (Z-Sync Inteligente Unificado)
+		status.ViewZ = dfClient.GetInterestZ()
 		view, err := dfClient.GetViewInfo()
 		if err == nil {
-			zToUse := view.ViewPosZ
-			centerX := view.ViewPosX + view.ViewSizeX/2
-			centerY := view.ViewPosY + view.ViewSizeY/2
-
-			// Se estiver no céu ou nível muito alto, busca solo via unidades
-			if zToUse > 100 {
-				units, err := dfClient.GetUnitList()
-				if err == nil && len(units.CreatureList) > 0 {
-					var bestUnitZ int32 = -1
-					minDist := 999999.0
-					for _, u := range units.CreatureList {
-						if u.PosZ < 150 { // Foca em anões reais abaixo do céu
-							dx := float64(u.PosX - centerX)
-							dy := float64(u.PosY - centerY)
-							dist := dx*dx + dy*dy
-							if dist < minDist {
-								minDist = dist
-								bestUnitZ = u.PosZ
-							}
-						}
-					}
-					if bestUnitZ != -1 {
-						zToUse = bestUnitZ
-					}
-				}
-			}
-
-			status.ViewX = centerX
-			status.ViewY = centerY
-			status.ViewZ = zToUse
+			status.ViewX = view.ViewPosX + view.ViewSizeX/2
+			status.ViewY = view.ViewPosY + view.ViewSizeY/2
 		}
 
 		// Enviar para todos os clientes
@@ -366,15 +388,19 @@ func broadcastWorldStatus(hub *Hub, dfClient *dfhack.Client) {
 		data, _ := proto.Marshal(envelope)
 		hub.broadcast <- data
 
-		time.Sleep(10 * time.Second)
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 
-func sendProtoMessage(conn *websocket.Conn, msgType fvnet.Envelope_Type, msg proto.Message) {
+func (h *Hub) SendProtoMessage(conn *websocket.Conn, msgType fvnet.Envelope_Type, msg interface{}) {
 	var payload []byte
 	var err error
 	if msg != nil {
-		payload, err = proto.Marshal(msg)
+		if m, ok := msg.(interface{ Marshal() ([]byte, error) }); ok {
+			payload, err = m.Marshal()
+		} else if pm, ok := msg.(proto.Message); ok {
+			payload, err = proto.Marshal(pm)
+		}
 		if err != nil {
 			log.Printf("Erro ao serializar payload: %v", err)
 			return
@@ -392,8 +418,7 @@ func sendProtoMessage(conn *websocket.Conn, msgType fvnet.Envelope_Type, msg pro
 		return
 	}
 
-	err = conn.WriteMessage(websocket.BinaryMessage, data)
-	if err != nil {
+	if err := h.WriteSafe(conn, websocket.BinaryMessage, data); err != nil {
 		log.Printf("Erro ao enviar mensagem: %v", err)
 	}
 }

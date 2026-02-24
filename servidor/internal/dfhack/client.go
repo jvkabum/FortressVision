@@ -237,3 +237,44 @@ func (c *Client) CheckHashes() error {
 	resp := &dfproto.EmptyMessage{}
 	return c.rpc.Call("CheckHashes", pluginName, req, resp)
 }
+
+// GetInterestZ retorna o Z mais relevante baseado na câmera ou unidades próximas.
+func (c *Client) GetInterestZ() int32 {
+	// 1. Tentar pela visualização da câmera
+	view, err := c.GetViewInfo()
+	if err != nil {
+		return 0
+	}
+
+	zToUse := view.ViewPosZ
+	centerX := view.ViewPosX + view.ViewSizeX/2
+	centerY := view.ViewPosY + view.ViewSizeY/2
+
+	// Se estiver no céu ou nível muito alto (típico do DFHack no início), busca solo via unidades
+	if zToUse > 100 {
+		units, err := c.GetUnitList()
+		if err == nil && len(units.CreatureList) > 0 {
+			var bestUnitZ int32 = -1
+			minDist := 999999.0
+			foundVessel := false
+			for _, u := range units.CreatureList {
+				// Prioriza unidades que parecem ser anões ou principais
+				if u.PosZ < 150 {
+					dx := float64(u.PosX - centerX)
+					dy := float64(u.PosY - centerY)
+					dist := dx*dx + dy*dy
+					if dist < minDist {
+						minDist = dist
+						bestUnitZ = u.PosZ
+						foundVessel = true
+					}
+				}
+			}
+			if foundVessel {
+				return bestUnitZ
+			}
+		}
+	}
+
+	return zToUse
+}

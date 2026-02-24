@@ -27,7 +27,7 @@ func (s *ServerScanner) Start() {
 }
 
 func (s *ServerScanner) scanLoop() {
-	log.Println("[Scanner] Iniciando loop de varredura prioritária do Servidor...")
+	log.Println("[Scanner] Iniciando loop de varredura ultra-rápida do Servidor...")
 
 	for {
 		if !s.dfClient.IsConnected() {
@@ -35,66 +35,66 @@ func (s *ServerScanner) scanLoop() {
 			continue
 		}
 
-		info := s.dfClient.MapInfo
-		if info == nil {
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		// Estratégia do usuário: Foco central (0), cima (+100) e baixo (-60)
-		zOffsets := []int32{0}
-		for i := int32(1); i <= 100; i++ {
-			zOffsets = append(zOffsets, i)
-		}
-		for i := int32(1); i <= 30; i++ {
-			zOffsets = append(zOffsets, -i)
-		}
-		for i := int32(31); i <= 60; i++ {
-			zOffsets = append(zOffsets, -i)
-		}
-
-		radius := int32(128)
+		interestZ := s.dfClient.GetInterestZ()
+		radius := int32(192) // Expandido para 384x384 (24x24 blocos)
 		view, err := s.dfClient.GetViewInfo()
 		if err != nil {
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		center := util.DFCoord{X: view.ViewPosX, Y: view.ViewPosY, Z: view.ViewPosZ}
+		// Ordem de prioridade em espiral (0, -1, 1, -2, 2...)
+		zOffsets := []int32{0}
+		for i := int32(1); i <= 80; i++ {
+			zOffsets = append(zOffsets, -i)
+			zOffsets = append(zOffsets, i)
+		}
+
+		center := util.DFCoord{X: view.ViewPosX, Y: view.ViewPosY, Z: interestZ}
 
 		for _, offset := range zOffsets {
 			z := center.Z + offset
-
-			for x := center.X - radius; x < center.X+radius; x += 16 {
-				for y := center.Y - radius; y < center.Y+radius; y += 16 {
-					minX, maxX := x, x+15
-					minY, maxY := y, y+15
-
-					list, err := s.dfClient.GetBlockList(minX, minY, z, maxX, maxY, z, 256)
-					if err != nil {
-						time.Sleep(100 * time.Millisecond)
-						continue
-					}
-
-					for _, block := range list.MapBlocks {
-						change := s.store.StoreSingleBlock(&block)
-						if change == mapdata.TerrainChange {
-							// Se o terreno mudou, o cliente precisará do chunk novo no próximo request
-							// Por enquanto não temos broadcast de chunk completo para evitar lag
-						} else if change == mapdata.VegetationChange {
-							// Se APENAS a vegetação mudou, envia atualização leve e imediata
-							chunkOrigin := util.NewDFCoord(block.MapX, block.MapY, block.MapZ).BlockCoord()
-							chunk := s.store.Chunks[chunkOrigin]
-							s.hub.BroadcastVegetation(block.MapX, block.MapY, block.MapZ, chunk.Plants)
-						}
-					}
-					time.Sleep(50 * time.Millisecond)
-				}
-				log.Printf("[Scanner] Camada Z %d varrida em torno da visão.", z)
+			// log.Printf("[Scanner] Trace: Iniciando varredura da camada Z=%d", z)
+			// Verifica se o foco do jogador mudou drasticamente a cada camada
+			if currentZ := s.dfClient.GetInterestZ(); util.Abs(currentZ-interestZ) > 3 {
+				log.Printf("[Scanner] Foco mudou (Z:%d -> Z:%d). Reiniciando varredura.", interestZ, currentZ)
+				break // Sai do loop de camadas para pegar o novo centro
 			}
-			time.Sleep(200 * time.Millisecond)
+
+			// Busca TODA a camada de interesse em uma única chamada (Alta Performance)
+			minX, maxX := center.X-radius, center.X+radius
+			minY, maxY := center.Y-radius, center.Y+radius
+
+			// Pedimos até 600 blocos (24x24 = 576 blocos)
+			list, err := s.dfClient.GetBlockList(minX, minY, z, maxX, maxY, z, 600)
+			if err != nil {
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
+			blocksUpdated := 0
+			for _, block := range list.MapBlocks {
+				change := s.store.StoreSingleBlock(&block)
+				if change != mapdata.NoChange {
+					blocksUpdated++
+					if change == mapdata.VegetationChange {
+						chunkOrigin := util.NewDFCoord(block.MapX, block.MapY, block.MapZ).BlockCoord()
+						chunk := s.store.Chunks[chunkOrigin]
+						s.hub.BroadcastVegetation(block.MapX, block.MapY, block.MapZ, chunk.Plants)
+					}
+				}
+			}
+
+			if blocksUpdated > 0 {
+				log.Printf("[Scanner] Camada Z %d: %d blocos novos/atualizados.", z, blocksUpdated)
+			}
+
+			// Pequeno fôlego para o DFHack
+			time.Sleep(40 * time.Millisecond)
 		}
-		time.Sleep(30 * time.Second)
+
+		// Pausa antes do próximo ciclo completo
+		time.Sleep(40 * time.Millisecond)
 	}
 }
 

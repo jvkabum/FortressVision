@@ -15,6 +15,8 @@ message Envelope {
         SERVER_STATUS = 5;
         WORLD_STATUS = 6;
         VEGETATION_UPDATE = 7;
+        TILETYPE_LIST = 8;
+        MATERIAL_LIST = 9;
     }
     Type type = 1;
     bytes payload = 2;

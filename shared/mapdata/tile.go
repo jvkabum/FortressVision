@@ -1,8 +1,8 @@
 package mapdata
 
 import (
-	"FortressVision/shared/util"
 	"FortressVision/shared/pkg/dfproto"
+	"FortressVision/shared/util"
 )
 
 // Tile representa um único tile do mapa do Dwarf Fortress.
@@ -144,6 +144,11 @@ func (t *Tile) Up() *Tile {
 }
 func (t *Tile) Down() *Tile {
 	return t.GetNeighbor(util.DirDown)
+}
+
+// SetStore vincula o tile a um container MapDataStore.
+func (t *Tile) SetStore(s *MapDataStore) {
+	t.container = s
 }
 
 // Tabela de lookup para rampas (Ramp Lookup Table - BLUT)

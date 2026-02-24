@@ -2,8 +2,8 @@ package meshing
 
 import (
 	"FortressVision/shared/mapdata"
-	"FortressVision/shared/util"
 	"FortressVision/shared/pkg/dfproto"
+	"FortressVision/shared/util"
 	"fmt"
 	"log" // Added based on the provided Code Edit
 	"math"

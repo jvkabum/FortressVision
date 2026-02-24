@@ -269,6 +269,14 @@ type ColorDefinition struct {
 	Blue  int32
 }
 
+func (c *ColorDefinition) Marshal() ([]byte, error) {
+	e := protowire.NewEncoder()
+	e.EncodeVarintForce(1, int64(c.Red))
+	e.EncodeVarintForce(2, int64(c.Green))
+	e.EncodeVarintForce(3, int64(c.Blue))
+	return e.Bytes(), nil
+}
+
 func (c *ColorDefinition) Unmarshal(data []byte) error {
 	d := protowire.NewDecoder(data)
 	for !d.Done() {
@@ -313,6 +321,19 @@ type Tiletype struct {
 	Special  int32
 	Variant  int32
 	Dir      string
+}
+
+func (t *Tiletype) Marshal() ([]byte, error) {
+	e := protowire.NewEncoder()
+	e.EncodeVarintForce(1, int64(t.ID))
+	e.EncodeStringForce(2, t.Name)
+	e.EncodeString(3, t.Name) // caption
+	e.EncodeVarintForce(4, int64(t.Shape))
+	e.EncodeVarintForce(5, int64(t.Special))
+	e.EncodeVarintForce(6, int64(t.Material))
+	e.EncodeVarintForce(7, int64(t.Variant))
+	e.EncodeString(8, t.Dir)
+	return e.Bytes(), nil
 }
 
 func (t *Tiletype) Unmarshal(data []byte) error {
@@ -382,6 +403,18 @@ type TiletypeList struct {
 	TiletypeList []Tiletype
 }
 
+func (t *TiletypeList) Marshal() ([]byte, error) {
+	e := protowire.NewEncoder()
+	for _, tt := range t.TiletypeList {
+		data, err := tt.Marshal()
+		if err != nil {
+			return nil, err
+		}
+		e.EncodeBytes(1, data)
+	}
+	return e.Bytes(), nil
+}
+
 func (t *TiletypeList) Unmarshal(data []byte) error {
 	d := protowire.NewDecoder(data)
 	for !d.Done() {
@@ -415,6 +448,21 @@ type MaterialDefinition struct {
 	ID         string
 	Name       string
 	StateColor ColorDefinition
+}
+
+func (m *MaterialDefinition) Marshal() ([]byte, error) {
+	e := protowire.NewEncoder()
+	data, err := m.MatPair.Marshal()
+	if err == nil {
+		e.EncodeBytes(1, data)
+	}
+	e.EncodeStringForce(2, m.ID)
+	e.EncodeStringForce(3, m.Name)
+	data, err = m.StateColor.Marshal()
+	if err == nil {
+		e.EncodeBytes(4, data)
+	}
+	return e.Bytes(), nil
 }
 
 func (m *MaterialDefinition) Unmarshal(data []byte) error {
@@ -465,6 +513,18 @@ type MaterialList struct {
 	MaterialList []MaterialDefinition
 }
 
+func (m *MaterialList) Marshal() ([]byte, error) {
+	e := protowire.NewEncoder()
+	for _, md := range m.MaterialList {
+		data, err := md.Marshal()
+		if err != nil {
+			return nil, err
+		}
+		e.EncodeBytes(1, data)
+	}
+	return e.Bytes(), nil
+}
+
 func (m *MaterialList) Unmarshal(data []byte) error {
 	d := protowire.NewDecoder(data)
 	for !d.Done() {
@@ -478,11 +538,11 @@ func (m *MaterialList) Unmarshal(data []byte) error {
 			if err != nil {
 				return err
 			}
-			var mat MaterialDefinition
-			if err := mat.Unmarshal(subData); err != nil {
+			var md MaterialDefinition
+			if err := md.Unmarshal(subData); err != nil {
 				return err
 			}
-			m.MaterialList = append(m.MaterialList, mat)
+			m.MaterialList = append(m.MaterialList, md)
 		default:
 			if err := d.SkipField(wireType); err != nil {
 				return err

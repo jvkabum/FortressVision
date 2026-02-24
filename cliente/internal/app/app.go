@@ -11,6 +11,7 @@ import (
 	"FortressVision/cliente/internal/render"
 	"FortressVision/shared/config"
 	"FortressVision/shared/mapdata"
+	"FortressVision/shared/pkg/dfproto"
 	"FortressVision/shared/proto/fvnet"
 	"FortressVision/shared/util"
 
@@ -213,8 +214,11 @@ func (a *App) connectServer() {
 		if !a.initialZSyncDone || rl.GetTime()-float64(a.lastManualMove)/1000.0 > 5.0 {
 			newZ := status.ViewZ
 			if a.mapCenter.Z != newZ {
-				log.Printf("[Server] Sincronização de Z: %d -> %d", a.mapCenter.Z, newZ)
-				a.mapCenter.Z = newZ
+				// Sincroniza o Z do servidor com o Z do app apenas se houver mudança relevante
+				if a.mapCenter.Z == 0 || util.Abs(a.mapCenter.Z-status.ViewZ) > 0 {
+					log.Printf("[App] Sincronizando Z com Servidor: %d -> %d", a.mapCenter.Z, status.ViewZ)
+					a.mapCenter.Z = status.ViewZ
+				}
 
 				// Atualiza posição alvo da câmera
 				targetCoord := util.NewDFCoord(status.ViewX, status.ViewY, status.ViewZ)
@@ -228,6 +232,23 @@ func (a *App) connectServer() {
 				}
 			}
 		}
+	}
+
+	a.netClient.OnTiletypes = func(list *dfproto.TiletypeList) {
+		a.mapStore.Mu.Lock()
+		for _, tt := range list.TiletypeList {
+			item := tt
+			a.mapStore.Tiletypes[tt.ID] = &item
+		}
+		a.mapStore.Mu.Unlock()
+		log.Printf("[App] Dicionário de %d tiletypes sincronizado.", len(list.TiletypeList))
+	}
+
+	a.netClient.OnMaterials = func(list *dfproto.MaterialList) {
+		go func() {
+			a.matStore.UpdateMaterials(list)
+			log.Printf("[App] Dicionário de %d materiais sincronizado em background.", len(list.MaterialList))
+		}()
 	}
 
 	if err := a.netClient.Connect(); err != nil {
@@ -257,11 +278,10 @@ func (a *App) updateMap() {
 		return
 	}
 
-	// throttle: requisita a cada 120 frames (2s a 60fps)
-	// throttle: requisita a cada 60 frames (1s a 60fps) durante o loading, ou 120 frames normal
-	checkInterval := 120
+	// throttle: requisita a cada 180 frames (3s) normal, ou 90 frames no loading
+	checkInterval := 180
 	if a.Loading {
-		checkInterval = 30 // Mais rápido durante o loading
+		checkInterval = 90
 	}
 	if a.frameCount%checkInterval != 0 {
 		return
@@ -569,15 +589,15 @@ func (a *App) drawHUD() {
 	rl.DrawText(fmt.Sprintf("FPS: %d", fps), 15, 15, 20, fpsColor)
 
 	// Estado do Clima (Novo na Fase 8)
-	weatherStr := "Dia Limpo ☀️"
+	weatherStr := "Dia Limpo"
 	weatherColor := rl.SkyBlue
 	if a.renderer != nil && a.renderer.Weather != nil {
 		switch a.renderer.Weather.Type {
 		case render.WeatherRain:
-			weatherStr = "Chuva 🌧️"
+			weatherStr = "Chuva"
 			weatherColor = rl.Blue
 		case render.WeatherSnow:
-			weatherStr = "Neve ❄️"
+			weatherStr = "Neve"
 			weatherColor = rl.White
 		}
 	}

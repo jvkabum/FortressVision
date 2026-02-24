@@ -33,6 +33,8 @@ const (
 	Envelope_SERVER_STATUS         Envelope_Type = 5
 	Envelope_WORLD_STATUS          Envelope_Type = 6
 	Envelope_VEGETATION_UPDATE     Envelope_Type = 7
+	Envelope_TILETYPE_LIST         Envelope_Type = 8
+	Envelope_MATERIAL_LIST         Envelope_Type = 9
 )
 
 // Enum value maps for Envelope_Type.
@@ -46,6 +48,8 @@ var (
 		5: "SERVER_STATUS",
 		6: "WORLD_STATUS",
 		7: "VEGETATION_UPDATE",
+		8: "TILETYPE_LIST",
+		9: "MATERIAL_LIST",
 	}
 	Envelope_Type_value = map[string]int32{
 		"PING":                  0,
@@ -56,6 +60,8 @@ var (
 		"SERVER_STATUS":         5,
 		"WORLD_STATUS":          6,
 		"VEGETATION_UPDATE":     7,
+		"TILETYPE_LIST":         8,
+		"MATERIAL_LIST":         9,
 	}
 )
 

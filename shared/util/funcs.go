@@ -14,3 +14,11 @@ func DistSq(v1, v2 rl.Vector3) float32 {
 	dz := v1.Z - v2.Z
 	return dx*dx + dy*dy + dz*dz
 }
+
+// Abs retorna o valor absoluto de um int32.
+func Abs(n int32) int32 {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
