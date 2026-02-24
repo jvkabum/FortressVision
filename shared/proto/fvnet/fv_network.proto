@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package fvnet;
+
+option go_package = "FortressVision/shared/proto/fvnet";
+
+// Envelope para qualquer mensagem via WebSocket
+message Envelope {
+    enum Type {
+        PING = 0;
+        PONG = 1;
+        MAP_CHUNK = 2;
+        CREATURE_UPDATE = 3;
+        CLIENT_REQUEST_REGION = 4;
+        SERVER_STATUS = 5;
+        WORLD_STATUS = 6;
+    }
+    Type type = 1;
+    bytes payload = 2;
+}
+
+// ... (MapChunkMessage e ClientRequestRegion continuam iguais)
+
+message MapChunkMessage {
+    int32 chunk_x = 1;
+    int32 chunk_y = 2;
+    int32 chunk_z = 3;
+    bytes voxel_data = 4; 
+}
+
+message ClientRequestRegion {
+    int32 center_x = 1;
+    int32 center_y = 2;
+    int32 center_z = 3;
+    int32 radius = 4;
+}
+
+message ServerStatus {
+    string message = 1;
+    bool df_connected = 2;
+    int32 tracked_units = 3;
+}
+
+message WorldStatus {
+    string world_name = 1;
+    int32 year = 2;
+    int32 day = 3;
+    string month = 4;
+    string season = 5;
+    int32 population = 6;
+    // Sincronização de posição (onde o DF está olhando)
+    int32 view_x = 7;
+    int32 view_y = 8;
+    int32 view_z = 9;
+}
