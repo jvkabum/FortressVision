@@ -95,6 +95,7 @@ func (h *Hub) WriteSafe(conn *websocket.Conn, messageType int, data []byte) erro
 	h.mu.Unlock()
 
 	if !ok {
+		// Log silendiado para não poluir se o cliente acabou de desconectar
 		return fmt.Errorf("cliente não encontrado no hub")
 	}
 
@@ -145,6 +146,21 @@ func (h *Hub) BroadcastVegetation(chunkX, chunkY, chunkZ int32, plants []dfproto
 	h.broadcast <- data
 }
 
+// BroadcastServerStatus envia uma mensagem de status/notificação para todos os clientes
+func (h *Hub) BroadcastServerStatus(message string, dfConnected bool) {
+	msg := &fvnet.ServerStatus{
+		Message:     message,
+		DfConnected: dfConnected,
+	}
+	payload, _ := proto.Marshal(msg)
+	envelope := &fvnet.Envelope{
+		Type:    fvnet.Envelope_SERVER_STATUS,
+		Payload: payload,
+	}
+	data, _ := proto.Marshal(envelope)
+	h.broadcast <- data
+}
+
 func main() {
 	log.SetFlags(log.Ltime | log.Lshortfile)
 
@@ -189,6 +205,8 @@ func main() {
 			worldName = dfClient.MapInfo.WorldName
 		}
 		if worldName != "" {
+			log.Printf("[Startup] Dimensões do Mapa: %dx%dx%d blocos (DF-Blocks)",
+				dfClient.MapInfo.BlockSizeX, dfClient.MapInfo.BlockSizeY, dfClient.MapInfo.BlockSizeZ)
 			log.Printf("Inicializando banco de dados para o mundo: %s", worldName)
 			if err := store.OpenInitialize(worldName); err != nil {
 				log.Printf("Erro ao abrir SQLite: %v", err)
@@ -199,6 +217,58 @@ func main() {
 	// Iniciar Scanner
 	scanner := NewServerScanner(dfClient, store, hub)
 	scanner.Start()
+
+	// ---------------------------------------------------------
+	// Auto-Save Periodico e Limpeza de Memória (Purge)
+	// ---------------------------------------------------------
+	go func() {
+		for {
+			time.Sleep(30 * time.Second)
+			if dfClient.IsConnected() && dfClient.MapInfo != nil {
+				worldName := dfClient.MapInfo.WorldNameEn
+				if worldName == "" {
+					worldName = dfClient.MapInfo.WorldName
+				}
+
+				// Salva chunks sujos
+				store.Save(worldName)
+
+				// Purga chunks distantes do foco atual (Raio de 256 tiles)
+				viewZ := dfClient.GetInterestZ()
+				view, err := dfClient.GetViewInfo()
+				if err == nil {
+					centerX := view.ViewPosX + view.ViewSizeX/2
+					centerY := view.ViewPosY + view.ViewSizeY/2
+					center := util.DFCoord{X: centerX, Y: centerY, Z: viewZ}
+					store.Purge(center, 512.0) // Raio de 512 tiles (~32 blocos)
+				}
+			}
+		}
+	}()
+
+	// ---------------------------------------------------------
+	// Heurística de Mundo Novo (Smart Full-Scan)
+	// ---------------------------------------------------------
+	go func() {
+		// Damos um tempo menor (2 segs) para o servidor conectar e carregar MapInfo
+		time.Sleep(2 * time.Second)
+		if dfClient.MapInfo == nil {
+			return
+		}
+
+		count, err := store.GetChunkCount()
+		if err == nil {
+			log.Printf("[Startup] Inspeção de Banco de Dados: %d chunks persistidos.", count)
+			if count < 5000 {
+				log.Println("[Startup] Banco incompleto. Agendando Varredura Total...")
+				// Notifica o cliente IMEDIATAMENTE para evitar timeout da splash screen
+				hub.BroadcastServerStatus("FULL_SCAN:0/1", dfClient.IsConnected())
+				scanner.StartFullScan()
+			} else {
+				log.Println("[Startup] Banco ok. Scan direcional ativo.")
+			}
+		}
+	}()
 
 	// Iniciar Broadcast de Status do Mundo
 	go broadcastWorldStatus(hub, dfClient)
@@ -294,6 +364,7 @@ func streamRegionToClient(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Clien
 	z := req.CenterZ
 
 	chunksSent := 0
+	chunksEmpty := 0
 	// Iterar em blocos de 16
 	for x := minX; x <= maxX; x += 16 {
 		for y := minY; y <= maxY; y += 16 {
@@ -308,27 +379,69 @@ func streamRegionToClient(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Clien
 				chunk, err = store.LoadChunk(origin)
 				if err != nil {
 					// Fallback On-Demand: Tenta buscar os blocos faltantes diretamente na memória do DFHack
-					if dfClient != nil && dfClient.IsConnected() {
-						list, rpcErr := dfClient.GetBlockList(origin.X, origin.Y, origin.Z, origin.X+15, origin.Y+15, origin.Z, 300)
-						if rpcErr == nil && list != nil {
+					if dfClient != nil && dfClient.IsConnected() && dfClient.MapInfo != nil {
+						info := dfClient.MapInfo
+						// Verifica se a coordenada está dentro dos limites reais da fortaleza no mundo (Absoluto)
+						if origin.X < info.BlockPosX || origin.X >= info.BlockPosX+info.BlockSizeX ||
+							origin.Y < info.BlockPosY || origin.Y >= info.BlockPosY+info.BlockSizeY ||
+							origin.Z < info.BlockPosZ || origin.Z >= info.BlockPosZ+info.BlockSizeZ {
+							// Fora dos limites do mapa gerado, é vazio.
+							store.MarkAsEmpty(origin)
+							continue
+						}
+
+						log.Printf("[WS-Fallback] Chunk %v não encontrado. Requisitando ao DFHack...", origin)
+						tx, ty := origin.X*16, origin.Y*16
+						list, rpcErr := dfClient.GetBlockList(tx, ty, origin.Z, tx, ty, origin.Z, 1)
+						if rpcErr == nil && list != nil && len(list.MapBlocks) > 0 {
 							for _, block := range list.MapBlocks {
-								store.StoreSingleBlock(&block) // Salva no banco e insere no cache (Chunks map)
+								store.StoreSingleBlock(&block)
 							}
-							// Tenta pegar o chunk novamente após o processamento
 							store.Mu.RLock()
 							chunk, exists = store.Chunks[origin]
 							store.Mu.RUnlock()
+							if exists {
+								log.Printf("[WS-Fallback] Chunk %v recuperado com sucesso via DFHack! (Enviando ao cliente)", origin)
+							}
+						} else {
+							// Se rpcErr for nil mas list vazio, logar também
+							if rpcErr == nil {
+								log.Printf("[WS-Fallback] Chunk %v retornou VAZIO do DFHack (Céu/Ar). Memorizando...", origin)
+								store.MarkAsEmpty(origin)
+							} else {
+								log.Printf("[WS-Fallback] ERRO ao recuperar %v: %v", origin, rpcErr)
+							}
 						}
 					}
-
-					// Se continuou não existindo (ex: fora dos limites do mapa ou vazio), segue em frente
 					if !exists {
+						chunksEmpty++
+						// Notifica o cliente que o chunk é "Ar" (vazio) para progresso de loading
+						msg := &fvnet.MapChunkMessage{
+							ChunkX:    origin.X,
+							ChunkY:    origin.Y,
+							ChunkZ:    origin.Z,
+							VoxelData: nil, // VoxelData nil = Chunk Vazio/Ar
+						}
+						hub.SendProtoMessage(conn, fvnet.Envelope_MAP_CHUNK, msg)
 						continue
 					}
 				}
 			}
 
 			if chunk != nil {
+				// Se for um bloco conhecido como vazio (Ar), enviamos sem VoxelData
+				if chunk.IsEmpty {
+					chunksEmpty++
+					msg := &fvnet.MapChunkMessage{
+						ChunkX:    origin.X,
+						ChunkY:    origin.Y,
+						ChunkZ:    origin.Z,
+						VoxelData: nil,
+					}
+					hub.SendProtoMessage(conn, fvnet.Envelope_MAP_CHUNK, msg)
+					continue
+				}
+
 				var buf bytes.Buffer
 				enc := gob.NewEncoder(&buf)
 				if err := enc.Encode(chunk.Tiles); err != nil {
@@ -347,7 +460,7 @@ func streamRegionToClient(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Clien
 			}
 		}
 	}
-	log.Printf("[WS] Streaming concluído: %d chunks enviados para Z=%d", chunksSent, z)
+	log.Printf("[WS] Streaming concluído: %d chunks enviados, %d ar/céu para Z=%d", chunksSent, chunksEmpty, z)
 }
 
 func broadcastWorldStatus(hub *Hub, dfClient *dfhack.Client) {

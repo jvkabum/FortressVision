@@ -65,24 +65,27 @@ type App struct {
 	FullScanActive         bool // Flag para download total do mundo
 
 	// Estado do Mundo (DFHack)
-	WorldName       string
-	WorldYear       int32
-	WorldSeason     string
-	WorldDay        int32
-	WorldMonth      string
-	WorldPopulation int
-	lastWorldUpdate float64
+	WorldName        string
+	WorldYear        int32
+	WorldSeason      string
+	WorldDay         int32
+	WorldMonth       string
+	WorldPopulation  int
+	ZOffset          int32 // Diferença entre coordenada interna e Elevation do HUD
+	lastWorldUpdate  float64
+	LoadingStartTime float64 // Timestamp de quando a sincronização inicial começou
 }
 
 // New cria uma nova instância da aplicação.
 func New(cfg *config.Config) *App {
 	app := &App{
-		Config:          cfg,
-		State:           StateLoading,
-		mapCenter:       util.NewDFCoord(0, 0, 10), // Força início no nível 10
-		Loading:         true,
-		LoadingStatus:   "Conectando ao DFHack...",
-		LoadingProgress: 0.1,
+		Config:           cfg,
+		State:            StateLoading,
+		mapCenter:        util.NewDFCoord(0, 0, 10), // Força início no nível 10
+		Loading:          true,
+		LoadingStatus:    "Conectando ao DFHack...",
+		LoadingProgress:  0.1,
+		LoadingStartTime: rl.GetTime(),
 	}
 	return app
 }
@@ -183,6 +186,26 @@ func (a *App) connectServer() {
 
 	// Callbacks
 	a.netClient.OnStatus = func(msg string, dfConnected bool) {
+		// Detecta progresso de varredura total
+		if len(msg) > 10 && msg[:10] == "FULL_SCAN:" {
+			// Resetamos o timer de failsafe do loading sempre que houver progresso
+			a.LoadingStartTime = rl.GetTime()
+
+			status := msg[10:]
+			if status == "DONE" {
+				a.FullScanActive = false
+				a.LoadingStatus = "Mundo sincronizado!"
+			} else {
+				a.FullScanActive = true
+				var current, total int
+				fmt.Sscanf(status, "%d/%d", &current, &total)
+				if total > 0 {
+					a.LoadingProgress = float32(current) / float32(total)
+					a.LoadingStatus = fmt.Sprintf("Primeiro arranque do mundo. Isso pode levar alguns minutos...\nVarredura: Nível Z %d de %d (%.1f%%)", current, total, a.LoadingProgress*100)
+				}
+			}
+			return
+		}
 		log.Printf("[Server] Status: %s (DF: %v)", msg, dfConnected)
 	}
 
@@ -330,29 +353,34 @@ func (a *App) processMesherResults() {
 			}
 			a.renderer.UploadResult(res)
 
-			// Lógica de progresso do Loading
-			if a.Loading {
+			// Lógica de progresso do Loading baseada em novos blocos
+			if a.Loading && !a.FullScanActive {
 				a.LoadingProcessedBlocks++
-
-				// Calcula progresso visual
+				// Calcula progresso visual genérico
 				if a.LoadingTotalBlocks > 0 {
 					a.LoadingProgress = float32(a.LoadingProcessedBlocks) / float32(a.LoadingTotalBlocks)
 					a.LoadingStatus = fmt.Sprintf("Construindo terreno: %d/%d (%.1f%%)",
 						a.LoadingProcessedBlocks, a.LoadingTotalBlocks, a.LoadingProgress*100)
 				}
-
-				// Só encerra o loading quando processarmos o suficiente (40% ou pelo menos 10 blocos e 3s)
-				loadThreshold := float32(0.40)
-				timeSinceSync := rl.GetTime() - startTime // simplistic proxy
-
-				if a.LoadingTotalBlocks > 0 && (float32(a.LoadingProcessedBlocks)/float32(a.LoadingTotalBlocks) >= loadThreshold || (a.LoadingProcessedBlocks >= 10 && timeSinceSync > 3.0)) {
-					a.Loading = false
-					a.LoadingProgress = 1.0
-					log.Printf("[App] Loading concluído! (%d blocos processados). Iniciando renderização.", a.LoadingProcessedBlocks)
-				}
 			}
 		default:
-			// Não há mais resultados prontos na fila, sai do loop imediatamente
+			// Se não há mais resultados, mas estamos no loading, verificamos o FailSafe temporal aqui
+			if a.Loading {
+				timeSinceSync := rl.GetTime() - a.LoadingStartTime
+				loadThreshold := float32(0.35) // Ajustado para 35%
+
+				// Condições de término: (Progresso OK OR Tempo limite atingido) AND Não estar em varredura total
+				reachedThreshold := a.LoadingTotalBlocks > 0 && float32(a.LoadingProcessedBlocks)/float32(a.LoadingTotalBlocks) >= loadThreshold
+				failedTimeout := timeSinceSync > 20.0 // Aumentado para 20s de margem de segurança
+
+				// Só saímos do loading se não houver varredura total ativa
+				if !a.FullScanActive && (reachedThreshold || failedTimeout) {
+					a.Loading = false
+					a.LoadingProgress = 1.0
+					log.Printf("[App] Loading concluído! (%d blocos processados em %.1fs). FailSafe: %v",
+						a.LoadingProcessedBlocks, timeSinceSync, failedTimeout)
+				}
+			}
 			return
 		}
 	}
@@ -446,6 +474,16 @@ func (a *App) updateInput() {
 			a.State = StateViewing
 			log.Println("[App] Retomando Jogo")
 		}
+	}
+
+	// Ajuste manual de Offset Z (Teclas [ e ])
+	if rl.IsKeyPressed(rl.KeyLeftBracket) {
+		a.ZOffset--
+		log.Printf("[App] Offset Z ajustado para: %d", a.ZOffset)
+	}
+	if rl.IsKeyPressed(rl.KeyRightBracket) {
+		a.ZOffset++
+		log.Printf("[App] Offset Z ajustado para: %d", a.ZOffset)
 	}
 }
 
@@ -609,26 +647,21 @@ func (a *App) drawHUD() {
 	// Informações de Localização
 	rl.DrawText("LOCALIZAÇÃO", 15, 50, 12, rl.Gray)
 
-	offsetZ := int32(0)
-	// O offset Z agora virá do servidor via metadados do mapa futuramente.
-
 	dfCoord := util.WorldToDFCoord(a.Cam.CurrentLookAt)
 	dfCoord.Z = a.mapCenter.Z
 
 	displayX := dfCoord.X
 	displayY := dfCoord.Y
-	displayZ := dfCoord.Z - offsetZ
+	displayZ := dfCoord.Z - a.ZOffset
 
 	rl.DrawText(fmt.Sprintf("Coord DF: (%d, %d, %d)", displayX, displayY, displayZ), 15, 65, 16, rl.White)
 
-	dfViewZ := int32(0)
 	syncStatus := "Offline"
 	if a.netClient != nil && a.netClient.IsConnected() {
-		syncStatus = "Conectado (Servidor)"
+		syncStatus = "Conectado"
 	}
-	displayViewZ := dfViewZ - offsetZ
 
-	rl.DrawText(fmt.Sprintf("Elevação: %d (DF: %d) [%s]", displayZ, displayViewZ, syncStatus), 15, 85, 14, rl.LightGray)
+	rl.DrawText(fmt.Sprintf("Elevação: %d (Offset:%d) [%s]", displayZ, a.ZOffset, syncStatus), 15, 85, 14, rl.LightGray)
 
 	// Divisor
 	rl.DrawLine(15, 105, 325, 105, rl.NewColor(100, 100, 100, 100))

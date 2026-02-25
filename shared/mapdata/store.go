@@ -44,6 +44,7 @@ type Chunk struct {
 	Plants  []dfproto.PlantDetail // Cache de plantas (shrubs/saplings) para atualizações leves
 	MTime   int64                 // Contador de modificações / versão
 	IsDirty bool                  // Indica que o chunk foi alterado e precisa salvar
+	IsEmpty bool                  // Indica que o bloco foi verificado e é conhecido como vazio (Ar/Céu)
 }
 
 // NewMapDataStore cria um novo repositório de dados do mapa.
@@ -51,6 +52,20 @@ func NewMapDataStore() *MapDataStore {
 	return &MapDataStore{
 		Chunks:    make(map[util.DFCoord]*Chunk),
 		Tiletypes: make(map[int32]*dfproto.Tiletype),
+	}
+}
+
+// MarkAsEmpty marca um chunk como conhecido e vazio (Ar).
+// Isso evita que o servidor fique requisitando o mesmo céu repetidamente.
+func (s *MapDataStore) MarkAsEmpty(origin util.DFCoord) {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+	if _, exists := s.Chunks[origin]; !exists {
+		s.Chunks[origin] = &Chunk{
+			Origin:  origin,
+			IsEmpty: true,
+			MTime:   1, // Versão mínima
+		}
 	}
 }
 
@@ -121,7 +136,7 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 		}
 		s.Chunks[origin] = chunk
 		chunk.IsDirty = true // Primeiro carregamento sempre marca como dirty
-		// log.Printf("[Store] Chunk criado em RAM: %v", origin)
+		log.Printf("[Store] Chunk criado em RAM: %v (Origem DFHack: %d,%d,%d)", origin, block.MapX, block.MapY, block.MapZ)
 	}
 
 	// Flag para indicar se houve mudança real nos dados deste chunk

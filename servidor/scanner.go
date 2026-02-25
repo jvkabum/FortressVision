@@ -4,6 +4,7 @@ import (
 	"FortressVision/servidor/internal/dfhack"
 	"FortressVision/shared/mapdata"
 	"FortressVision/shared/util"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -58,35 +59,56 @@ func (s *ServerScanner) scanLoop() {
 
 		for _, offset := range zOffsets {
 			z := center.Z + offset
-			// log.Printf("[Scanner] Trace: Iniciando varredura da camada Z=%d", z)
-			// Verifica se o foco do jogador mudou drasticamente a cada camada
 			if currentZ := s.dfClient.GetInterestZ(); util.Abs(currentZ-interestZ) > 3 {
 				log.Printf("[Scanner] Foco mudou (Z:%d -> Z:%d). Reiniciando varredura.", interestZ, currentZ)
-				// Dispara o cache preemptivo massivo do novo andar em background
 				go s.ScanZLevelBackground(currentZ)
-				break // Sai do loop de camadas para pegar o novo centro
+				break
 			}
 
-			// Busca TODA a camada de interesse em uma única chamada (Alta Performance)
-			minX, maxX := center.X-radius, center.X+radius
-			minY, maxY := center.Y-radius, center.Y+radius
+			// Limites baseados no MapInfo local (0 a Size-1)
+			info := s.dfClient.MapInfo
+			if info == nil {
+				break
+			}
 
-			// Pedimos até 600 blocos (24x24 = 576 blocos)
-			list, err := s.dfClient.GetBlockList(minX, minY, z, maxX, maxY, z, 600)
+			// NOTA: Agora usamos coordenadas ABSOLUTAS do mundo para tudo.
+			bxMin := util.Max(info.BlockPosX*16, center.X-radius)
+			bxMax := util.Min((info.BlockPosX+info.BlockSizeX)*16-1, center.X+radius)
+			byMin := util.Max(info.BlockPosY*16, center.Y-radius)
+			byMax := util.Min((info.BlockPosY+info.BlockSizeY)*16-1, center.Y+radius)
+
+			// Pedimos a região em uma única chamada.
+			list, err := s.dfClient.GetBlockList(bxMin, byMin, z, bxMax, byMax, z, 500)
 			if err != nil {
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
 
 			blocksUpdated := 0
-			for _, block := range list.MapBlocks {
-				change := s.store.StoreSingleBlock(&block)
-				if change != mapdata.NoChange {
-					blocksUpdated++
-					if change == mapdata.VegetationChange {
-						chunkOrigin := util.NewDFCoord(block.MapX, block.MapY, block.MapZ).BlockCoord()
-						chunk := s.store.Chunks[chunkOrigin]
-						s.hub.BroadcastVegetation(block.MapX, block.MapY, block.MapZ, chunk.Plants)
+			foundBlockMap := make(map[util.DFCoord]bool)
+
+			if list != nil && len(list.MapBlocks) > 0 {
+				for _, block := range list.MapBlocks {
+					origin := util.NewDFCoord(block.MapX, block.MapY, block.MapZ).BlockCoord()
+					foundBlockMap[origin] = true
+
+					change := s.store.StoreSingleBlock(&block)
+					if change != mapdata.NoChange {
+						blocksUpdated++
+						if change == mapdata.VegetationChange {
+							chunk := s.store.Chunks[origin]
+							s.hub.BroadcastVegetation(block.MapX, block.MapY, block.MapZ, chunk.Plants)
+						}
+					}
+				}
+			}
+
+			// Marca como vazio o que pedimos e não veio (Ar/Céu)
+			for bx := (bxMin / 16) * 16; bx <= bxMax; bx += 16 {
+				for by := (byMin / 16) * 16; by <= byMax; by += 16 {
+					origin := util.NewDFCoord(bx, by, z).BlockCoord()
+					if !foundBlockMap[origin] {
+						s.store.MarkAsEmpty(origin)
 					}
 				}
 			}
@@ -94,12 +116,8 @@ func (s *ServerScanner) scanLoop() {
 			if blocksUpdated > 0 {
 				log.Printf("[Scanner] Camada Z %d: %d blocos novos/atualizados.", z, blocksUpdated)
 			}
-
-			// Pequeno fôlego para o DFHack
 			time.Sleep(40 * time.Millisecond)
 		}
-
-		// Pausa antes do próximo ciclo completo
 		time.Sleep(40 * time.Millisecond)
 	}
 }
@@ -116,46 +134,83 @@ func (s *ServerScanner) StartFullScan() {
 			return
 		}
 
-		const minZ, maxZ = -130, 200
-		totalX, totalY := info.BlockSizeX, info.BlockSizeY
+		// Coordenadas mundiais absolutas do canto da fortaleza (Z já é absoluto)
+		minX, minY, minZ := info.BlockPosX, info.BlockPosY, info.BlockPosZ
+		totalBlocksX, totalBlocksY, totalBlocksZ := info.BlockSizeX, info.BlockSizeY, info.BlockSizeZ
+		maxZ := minZ + totalBlocksZ
 
-		for z := int32(minZ); z < int32(maxZ); z++ {
-			for x := int32(0); x < totalX; x += 128 {
-				for y := int32(0); y < totalY; y += 128 {
-					maxX, maxY := x+127, y+127
-					if maxX >= totalX {
-						maxX = totalX - 1
+		log.Printf("[Scanner] Iniciando varredura TOTAL linear (Top-Down): %d níveis (Z: %d a %d)", totalBlocksZ, minZ, maxZ-1)
+
+		for z := maxZ - 1; z >= minZ; z-- {
+			currentLevel := maxZ - z
+			progressMsg := fmt.Sprintf("FULL_SCAN:%d/%d", currentLevel, totalBlocksZ)
+			s.hub.BroadcastServerStatus(progressMsg, s.dfClient.IsConnected())
+
+			blocksInLayer := 0
+
+			for x := int32(0); x < totalBlocksX; x += 3 {
+				for y := int32(0); y < totalBlocksY; y += 3 {
+					// Coordenadas ABSOLUTAS em blocos
+					absX, absY := minX+x, minY+y
+					maxX, maxY := absX+2, absY+2
+
+					if maxX >= minX+totalBlocksX {
+						maxX = minX + totalBlocksX - 1
 					}
-					if maxY >= totalY {
-						maxY = totalY - 1
+					if maxY >= minY+totalBlocksY {
+						maxY = minY + totalBlocksY - 1
 					}
 
-					list, err := s.dfClient.GetBlockList(x, y, z, maxX, maxY, z, 10000)
-					if err == nil {
+					// GetBlockList espera coordenadas de TILES (Indices de Blocos * 16)
+					list, err := s.dfClient.GetBlockList(absX*16, absY*16, z, maxX*16, maxY*16, z, 10)
+					if err != nil {
+						continue
+					}
+
+					foundInBatch := make(map[util.DFCoord]bool)
+					if list != nil && len(list.MapBlocks) > 0 {
 						for _, block := range list.MapBlocks {
 							s.store.StoreSingleBlock(&block)
+							blocksInLayer++
+							foundInBatch[util.NewDFCoord(block.MapX, block.MapY, block.MapZ).BlockCoord()] = true
 						}
 					}
+
+					for bx := x; bx <= maxX; bx++ {
+						for by := y; by <= maxY; by++ {
+							origin := util.NewDFCoord(bx*16, by*16, z).BlockCoord()
+							if !foundInBatch[origin] {
+								s.store.MarkAsEmpty(origin)
+							}
+						}
+					}
+					time.Sleep(2 * time.Millisecond)
 				}
 			}
-			log.Printf("[Scanner] Camada Z %d concluída no servidor", z)
+			if blocksInLayer > 0 || z%10 == 0 {
+				log.Printf("[Scanner] Varredura Total: Camada Z %d concluída (%d/%d níveis)", z, maxZ-z, totalBlocksZ)
+			}
 		}
-		log.Println("[Scanner] Download total concluído no servidor!")
+		s.hub.BroadcastServerStatus("FULL_SCAN:DONE", s.dfClient.IsConnected())
+		log.Println("[Scanner] Download total concluído! Iniciando persistência em disco...")
+		worldName := s.dfClient.MapInfo.WorldNameEn
+		if worldName == "" {
+			worldName = s.dfClient.MapInfo.WorldName
+		}
+		s.store.Save(worldName)
+		log.Println("[Scanner] Persistência concluída com sucesso!")
 	}()
 }
 
-// ScanZLevelBackground faz a varredura silenciosa e completa de um nível Z inteiro.
-// Evita processamentos duplicados do mesmo nível ao mesmo tempo.
 func (s *ServerScanner) ScanZLevelBackground(z int32) {
-	// Verifica se já não estamos escaneando este Z
 	if _, loaded := s.zLevelLocks.LoadOrStore(z, true); loaded {
 		return
 	}
-	defer s.zLevelLocks.Delete(z) // Libera o lock ao final
+	defer s.zLevelLocks.Delete(z)
 
 	for !s.dfClient.IsConnected() {
 		time.Sleep(500 * time.Millisecond)
-		return // Aborta se perder conexão ao invés de ficar preso
+		return
 	}
 
 	info := s.dfClient.MapInfo
@@ -163,33 +218,34 @@ func (s *ServerScanner) ScanZLevelBackground(z int32) {
 		return
 	}
 
-	log.Printf("[Scanner-Cache] Iniciando cache massivo preemptivo do andar Z=%d...", z)
-	totalX, totalY := info.BlockSizeX, info.BlockSizeY
+	minX, minY := info.BlockPosX, info.BlockPosY
+	totalBlocksX, totalBlocksY := info.BlockSizeX, info.BlockSizeY
 	blocksCached := 0
 
-	for x := int32(0); x < totalX; x += 128 {
-		for y := int32(0); y < totalY; y += 128 {
-			maxX, maxY := x+127, y+127
-			if maxX >= totalX {
-				maxX = totalX - 1
+	log.Printf("[Scanner-Cache] Iniciando cache massivo preemptivo do andar Z=%d...", z)
+
+	for x := int32(0); x < totalBlocksX; x += 4 {
+		for y := int32(0); y < totalBlocksY; y += 4 {
+			// Coordenadas ABSOLUTAS
+			absX, absY := minX+x, minY+y
+			maxX, maxY := absX+3, absY+3
+			if maxX >= minX+totalBlocksX {
+				maxX = minX + totalBlocksX - 1
 			}
-			if maxY >= totalY {
-				maxY = totalY - 1
+			if maxY >= minY+totalBlocksY {
+				maxY = minY + totalBlocksY - 1
 			}
 
-			// Pede lotes de até 10.000 blocos por iteracao
-			list, err := s.dfClient.GetBlockList(x, y, z, maxX, maxY, z, 10000)
-			if err == nil {
+			// Coordenadas absolutas em tiles
+			list, err := s.dfClient.GetBlockList(absX*16, absY*16, z, maxX*16, maxY*16, z, 16)
+			if err == nil && list != nil {
 				for _, block := range list.MapBlocks {
-					change := s.store.StoreSingleBlock(&block)
-					if change != mapdata.NoChange {
-						blocksCached++
-					}
+					s.store.StoreSingleBlock(&block)
+					blocksCached++
 				}
 			}
-			// Pequeno respiro para não asfixiar a thread de RPC principal
-			time.Sleep(20 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	log.Printf("[Scanner-Cache] Andar Z=%d finalizado. %d blocos pré-aquecidos silenciosamente no servidor.", z, blocksCached)
+	log.Printf("[Scanner-Cache] Andar Z=%d finalizado. %d blocos pré-aquecidos.", z, blocksCached)
 }

@@ -208,6 +208,17 @@ func (c *NetworkClient) processVegetation(msg *fvnet.VegetationUpdateMessage) {
 func (c *NetworkClient) processChunk(msg *fvnet.MapChunkMessage) {
 	origin := util.DFCoord{X: msg.ChunkX, Y: msg.ChunkY, Z: msg.ChunkZ}
 
+	// Se VoxelData for nil, é um chunk de "Ar" (vazio)
+	if msg.VoxelData == nil {
+		c.store.Mu.Lock()
+		delete(c.store.Chunks, origin) // Garante que não há lixo
+		c.store.Mu.Unlock()
+		if c.OnMapChunk != nil {
+			c.OnMapChunk(origin)
+		}
+		return
+	}
+
 	// Decodificar Tiles via GOB
 	var tiles [16][16]*mapdata.Tile
 	dec := gob.NewDecoder(bytes.NewReader(msg.VoxelData))

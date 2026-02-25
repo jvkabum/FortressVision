@@ -22,3 +22,19 @@ func Abs(n int32) int32 {
 	}
 	return n
 }
+
+// Max retorna o maior de dois int32.
+func Max(a, b int32) int32 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// Min retorna o menor de dois int32.
+func Min(a, b int32) int32 {
+	if a < b {
+		return a
+	}
+	return b
+}

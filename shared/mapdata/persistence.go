@@ -142,6 +142,18 @@ func (s *MapDataStore) LoadChunk(origin util.DFCoord) (*Chunk, error) {
 	return chunk, nil
 }
 
+// GetChunkCount retorna a quantidade total de chunks gravados no disco SQLite.
+// Usado na inicialização para decidir se compensa ligar um full-scan em background.
+func (s *MapDataStore) GetChunkCount() (int64, error) {
+	if s.DB == nil {
+		return 0, fmt.Errorf("banco de dados não inicializado")
+	}
+
+	var count int64
+	err := s.DB.Model(&ChunkModel{}).Count(&count).Error
+	return count, err
+}
+
 // Save (Legacy Override) agora é apenas um wrapper que salva todos os chunks em memória.
 func (s *MapDataStore) Save(worldName string) error {
 	s.Mu.Lock()
