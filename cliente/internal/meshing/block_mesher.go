@@ -130,8 +130,8 @@ func (m *BlockMesher) Generate(req Request) Result {
 		return buf
 	}
 
-	// Algoritmo Greedy Meshing Vertical (1D Y-Axis)
-	runGreedyMesherX(req, getBuffer, liquidBuffer, m, &res)
+	// Algoritmo Greedy Meshing 2D (Otimização Massiva - Fase 32)
+	m.runGreedyMesher2D(req, getBuffer, liquidBuffer, &res)
 
 	// Converter buffers para GeometryData
 	for name, buf := range textureBuffers {
@@ -147,175 +147,303 @@ func (m *BlockMesher) Generate(req Request) Result {
 	return res
 }
 
-func runGreedyMesherX(req Request, getBuffer func(string) *MeshBuffer, liquidBuffer *MeshBuffer, m *BlockMesher, res *Result) {
-	// Chunks do DFHack são 16x16x1. O origin.Z é a camada correta.
+func (m *BlockMesher) runGreedyMesher2D(req Request, getBuffer func(string) *MeshBuffer, liquidBuffer *MeshBuffer, res *Result) {
 	currentZ := req.Origin.Z
-	{
-		for xx := int32(0); xx < 16; xx++ {
-			var runStartY int32 = -1
-			var runLength int32 = 0
-			var currentRunShape dfproto.TiletypeShape
-			var currentRunColor [4]uint8
-			var runTile *mapdata.Tile
 
-			flushRun := func() {
-				if runLength > 0 && runTile != nil {
-					// Quando terminamos uma fita ininterrupta, geramos a geometria.
-					pos := util.DFToWorldPos(util.DFCoord{X: req.Origin.X + xx, Y: req.Origin.Y + runStartY, Z: int32(currentZ)})
+	// Lista das 6 direções principais para o Greedy Meshing
+	coreDirs := []util.Directions{
+		util.DirUp, util.DirDown,
+		util.DirNorth, util.DirSouth,
+		util.DirWest, util.DirEast,
+	}
 
-					w := float32(1.0)
-					d := float32(runLength) // No raylib Z avança quando Y do DF avança (negativamente ou não, tratado no addCube)
-					h := float32(1.0)
-					if currentRunShape == dfproto.ShapeFloor {
-						h = 0.1
-					}
+	// Para cada uma das 6 faces, executamos a otimização
+	for _, faceDir := range coreDirs {
+		// 1. Gerar Máscara 16x16 para esta face
+		// Usamos uint32 para codificar [MaterialID(16 bits) | Color(16 bits reduzido)]
+		mask := make([]uint32, 16*16)
+		tiles := make([]*mapdata.Tile, 16*16)
 
-					// Construir flags de face baseados na fita
-					// A fita anda no eixo Y do DF (Norte->Sul).
-					// Logo, a face Norte da FITA é a face Norte do primeiro tile (runTile).
-					// A face Sul da FITA é a face Sul do último tile (o tile anterior à quebra).
-					// As faces laterais, topo e baixo são idênticas em todos os tiles da fita!
-					endTileY := runStartY + runLength - 1
-					endWorldCoord := util.NewDFCoord(req.Origin.X+xx, req.Origin.Y+endTileY, int32(currentZ))
-					endTile := req.Data.GetTile(endWorldCoord)
-
-					drawUp := m.shouldDrawFace(runTile, util.DirUp)
-					drawDown := m.shouldDrawFace(runTile, util.DirDown)
-					drawWest := m.shouldDrawFace(runTile, util.DirWest)
-					drawEast := m.shouldDrawFace(runTile, util.DirEast)
-					drawNorth := m.shouldDrawFace(runTile, util.DirNorth)
-
-					var drawSouth bool
-					if endTile != nil {
-						drawSouth = m.shouldDrawFace(endTile, util.DirSouth)
-					} else {
-						drawSouth = true // fallback se nao achar no mapa carregado (borda)
-					}
-
-					// Obter buffer correto para esta textura
-					texName := m.MatStore.GetTextureName(runTile.MaterialCategory())
-					targetBuffer := getBuffer(texName)
-
-					m.addCubeGreedy(pos, w, h, d, currentRunColor, drawUp, drawDown, drawNorth, drawSouth, drawWest, drawEast, targetBuffer, util.DFCoord{X: req.Origin.X + xx, Y: req.Origin.Y + runStartY, Z: currentZ}, req.Data)
-				}
-				runStartY = -1
-				runLength = 0
-				runTile = nil
-			}
-
-			for yy := int32(0); yy < 16; yy++ {
-				baseX := req.Origin.X + xx
-				baseY := req.Origin.Y + yy
-				worldCoord := util.NewDFCoord(baseX, baseY, int32(currentZ))
+		for yy := int32(0); yy < 16; yy++ {
+			for xx := int32(0); xx < 16; xx++ {
+				worldCoord := util.NewDFCoord(req.Origin.X+xx, req.Origin.Y+yy, currentZ)
 				tile := req.Data.GetTile(worldCoord)
 
 				if tile == nil || tile.Hidden || tile.Shape() == dfproto.ShapeNoShape {
-					flushRun()
 					continue
 				}
 
-				GenerateLiquidGeometry(tile, liquidBuffer)
+				// Líquidos e Objetos Especiais (Rampas/Escadas) não entram no Greedy Meshing Comum
+				// Líquidos são processados apenas uma vez (na primeira face iterada)
+				if faceDir == 0 {
+					GenerateLiquidGeometry(tile, liquidBuffer)
 
-				shape := tile.Shape()
-				rlColor := m.MatStore.GetTileColor(tile)
-				color := [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}
-
-				// Verifica quebra de fita (Cor, formato ou MaterialCategory diferente)
-				canMerge := true
-				if runLength > 0 {
-					if shape != currentRunShape || color != currentRunColor || tile.MaterialCategory() != runTile.MaterialCategory() {
-						canMerge = false
-					} else {
-						// Para fundir blocos na mesma fita, TODAS as faces (Top, Bottom, West, East)
-						// visíveis devem bater, exceto o eixo do movimento (North/South).
-						if m.shouldDrawFace(tile, util.DirWest) != m.shouldDrawFace(runTile, util.DirWest) ||
-							m.shouldDrawFace(tile, util.DirEast) != m.shouldDrawFace(runTile, util.DirEast) ||
-							m.shouldDrawFace(tile, util.DirUp) != m.shouldDrawFace(runTile, util.DirUp) ||
-							m.shouldDrawFace(tile, util.DirDown) != m.shouldDrawFace(runTile, util.DirDown) {
-							canMerge = false
-						}
+					shape := tile.Shape()
+					if shape == dfproto.ShapeRamp {
+						rlColor := m.MatStore.GetTileColor(tile)
+						m.addRamp(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, res)
+						continue
+					}
+					if shape == dfproto.ShapeStairUp || shape == dfproto.ShapeStairDown || shape == dfproto.ShapeStairUpDown {
+						texName := m.MatStore.GetTextureName(tile.MaterialCategory())
+						rlColor := m.MatStore.GetTileColor(tile)
+						m.addStairs(worldCoord, shape, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer(texName), req.Data)
+						continue
+					}
+					// Árvores e arbustos também são casos especiais
+					if shape == dfproto.ShapeTrunkBranch {
+						rlColor := m.MatStore.GetTileColor(tile)
+						m.addTrunkBranch(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer, res, req.Data)
+						continue
+					}
+					if shape == dfproto.ShapeBranch {
+						rlColor := m.MatStore.GetTileColor(tile)
+						m.addBranch(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer, res, req.Data)
+						continue
+					}
+					if shape == dfproto.ShapeTwig {
+						rlColor := m.MatStore.GetTileColor(tile)
+						m.addTwig(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer, res, req.Data)
+						continue
+					}
+					if shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
+						rlColor := m.MatStore.GetTileColor(tile)
+						m.addShrub(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, res)
+						// Solo sob arbusto será gerado pelo greedy mesher se for floor
 					}
 				}
 
-				if !canMerge {
-					flushRun()
-				}
-
-				if shape == dfproto.ShapeRamp {
-					flushRun() // Rampas não são mescladas no greedy mesher por enquanto
-					m.addRamp(worldCoord, tile, color, res)
-					continue
-				}
-
-				if shape == dfproto.ShapeStairUp || shape == dfproto.ShapeStairDown || shape == dfproto.ShapeStairUpDown {
-					flushRun()
-					texName := m.MatStore.GetTextureName(tile.MaterialCategory())
-					m.addStairs(worldCoord, shape, color, getBuffer(texName), req.Data)
-					continue
-				}
-
-				// === ÁRVORES (Replicando Armok Vision) ===
-				// TREE_SHAPE = cubo sólido (tronco grosso, como parede). Entra no greedy mesher normalmente.
-				if shape == dfproto.ShapeTreeShape {
-					// Não faz flush, deixa o greedy mesher fundir com outros TREE_SHAPE adjacentes
-					if runStartY == -1 {
-						runStartY = yy
-						currentRunShape = shape
-						currentRunColor = color
-						runTile = tile
+				// Se a face deve ser desenhada, adicionamos à máscara
+				if m.shouldDrawFace(tile, faceDir) {
+					// Pular formas que não são cubos padrão
+					shape := tile.Shape()
+					if shape != dfproto.ShapeWall && shape != dfproto.ShapeFloor && shape != dfproto.ShapeFortification && shape != dfproto.ShapeTreeShape {
+						continue
 					}
-					runLength++
-					continue
-				}
 
-				// TRUNK_BRANCH = piso fino (base do galho) + model 3D de tronco pequeno
-				if shape == dfproto.ShapeTrunkBranch {
-					flushRun()
-					m.addTrunkBranch(worldCoord, tile, color, getBuffer, res, req.Data)
-					continue
-				}
+					texID := uint32(tile.MaterialCategory())
+					rlColor := m.MatStore.GetTileColor(tile)
+					colorID := uint32(rlColor.R)<<16 | uint32(rlColor.G)<<8 | uint32(rlColor.B)
 
-				// BRANCH = piso fino + modelo de galho do Armok
-				if shape == dfproto.ShapeBranch {
-					flushRun()
-					m.addBranch(worldCoord, tile, color, getBuffer, res, req.Data)
-					continue
-				}
+					// Oclusão Ambiente (AO): Para fundir faces, elas devem ter o mesmo padrão de AO nos cantos.
+					// Isso evita interpolação errada de sombras em quads grandes.
+					aoMask := m.calculateAOMask(worldCoord, faceDir, req.Data)
 
-				// TWIG = piso finíssimo + modelo de raminho do Armok
-				if shape == dfproto.ShapeTwig {
-					flushRun()
-					m.addTwig(worldCoord, tile, color, getBuffer, res, req.Data)
-					continue
+					mask[yy*16+xx] = (texID << 24) | (aoMask << 20) | (colorID & 0xFFFFF) | 1<<31
+					tiles[yy*16+xx] = tile
 				}
-
-				if shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
-					flushRun()
-					// Gerar chão (piso fino) sob o arbusto para não deixar buraco
-					floorPos := util.DFToWorldPos(worldCoord)
-					floorTexName := m.MatStore.GetTextureName(tile.MaterialCategory())
-					floorBuffer := getBuffer(floorTexName)
-					floorColor := [4]uint8{color[0], color[1], color[2], color[3]}
-					m.addCubeGreedy(floorPos, 1.0, 0.1, 1.0, floorColor,
-						true, m.shouldDrawFace(tile, util.DirDown),
-						m.shouldDrawFace(tile, util.DirNorth), m.shouldDrawFace(tile, util.DirSouth),
-						m.shouldDrawFace(tile, util.DirWest), m.shouldDrawFace(tile, util.DirEast),
-						floorBuffer, worldCoord, req.Data)
-					m.addShrub(worldCoord, tile, color, res)
-					continue
-				}
-
-				if runStartY == -1 {
-					runStartY = yy
-					currentRunShape = shape
-					currentRunColor = color
-					runTile = tile
-				}
-				runLength++
 			}
-			flushRun() // Descarrega a ponta da fita se acabou o chunk no Y=15
+		}
+
+		// 2. Resolver a máscara (Otimização 2D)
+		for y := int32(0); y < 16; y++ {
+			for x := int32(0); x < 16; x++ {
+				idx := y*16 + x
+				if mask[idx] == 0 {
+					continue
+				}
+
+				currentMaskVal := mask[idx]
+				currentTile := tiles[idx]
+
+				// Encontrar largura máxima (W)
+				var w int32 = 1
+				canGrowW := true
+				if faceDir == util.DirWest || faceDir == util.DirEast {
+					canGrowW = false
+				}
+
+				if canGrowW {
+					for x+w < 16 && mask[y*16+(x+w)] == currentMaskVal {
+						w++
+					}
+				}
+
+				// Encontrar altura máxima (H) para essa largura
+				var h int32 = 1
+				// Restrição Crítica: Faces Laterais não podem ser fundidas no eixo de profundidade
+				canGrowH := true
+				if faceDir == util.DirNorth || faceDir == util.DirSouth {
+					canGrowH = false
+				}
+
+				if canGrowH {
+				loopH:
+					for y+h < 16 {
+						for k := int32(0); k < w; k++ {
+							if mask[(y+h)*16+(x+k)] != currentMaskVal {
+								break loopH
+							}
+						}
+						h++
+					}
+				}
+
+				// Gerar o Quad (Retângulo otimizado)
+				m.emitGreedyQuad(req, x, y, w, h, faceDir, currentTile, getBuffer)
+
+				// Limpar a área processada na máscara
+				for jh := int32(0); jh < h; jh++ {
+					for jw := int32(0); jw < w; jw++ {
+						mask[(y+jh)*16+(x+jw)] = 0
+					}
+				}
+			}
 		}
 	}
+}
+
+func (m *BlockMesher) emitGreedyQuad(req Request, x, y, w, h int32, face util.Directions, tile *mapdata.Tile, getBuffer func(string) *MeshBuffer) {
+	// Converte coordenadas locais (0-15) + dimensões (W, H) para mundo real
+	pos := util.DFToWorldPos(util.DFCoord{X: req.Origin.X + x, Y: req.Origin.Y + y, Z: req.Origin.Z})
+
+	// Espessura e formato baseados no shape
+	shape := tile.Shape()
+	thickness := float32(1.0)
+	if shape == dfproto.ShapeFloor {
+		thickness = 0.1
+	}
+
+	// Identificar material e cor
+	texName := m.MatStore.GetTextureName(tile.MaterialCategory())
+	targetBuffer := getBuffer(texName)
+	rlColor := m.MatStore.GetTileColor(tile)
+	color := [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}
+
+	// Chamar o gerador de faces especializado (passando dimensões)
+	m.addQuadFace(pos, float32(w), float32(h), thickness, face, color, targetBuffer, util.DFCoord{X: req.Origin.X + x, Y: req.Origin.Y + y, Z: req.Origin.Z}, req.Data)
+}
+
+func (m *BlockMesher) addQuadFace(pos rl.Vector3, w, h, thickness float32, face util.Directions, color [4]uint8, buffer *MeshBuffer, coord util.DFCoord, data *mapdata.MapDataStore) {
+	px, py, pz := pos.X, pos.Y, pos.Z
+
+	// Cores com AO por vértice
+	// Recuperamos o padrao de AO para os cantos deste retângulo
+	// Nota: Como garantimos no Greedy Mesher que todos os tiles do quad têm o mesmo AO,
+	// podemos pegar o AO de qualquer tile do quad (neste caso, o tile na origem 'coord').
+	c1, c2, c3, c4 := m.getQuadCornerColors(coord, face, color, data)
+
+	switch face {
+	case util.DirUp:
+		buffer.AddFaceUVStandard(
+			[3]float32{px, py + thickness, pz}, [2]float32{px, -pz}, c1,
+			[3]float32{px + w, py + thickness, pz}, [2]float32{px + w, -pz}, c2,
+			[3]float32{px + w, py + thickness, pz - h}, [2]float32{px + w, -(pz - h)}, c3,
+			[3]float32{px, py + thickness, pz - h}, [2]float32{px, -(pz - h)}, c4,
+			[3]float32{0, 1, 0},
+		)
+	case util.DirDown:
+		buffer.AddFaceUVStandard(
+			[3]float32{px, py, pz}, [2]float32{px, -pz}, c1,
+			[3]float32{px, py, pz - h}, [2]float32{px, -(pz - h)}, c2,
+			[3]float32{px + w, py, pz - h}, [2]float32{px + w, -(pz - h)}, c3,
+			[3]float32{px + w, py, pz}, [2]float32{px + w, -pz}, c4,
+			[3]float32{0, -1, 0},
+		)
+	case util.DirNorth:
+		buffer.AddFaceUVStandard(
+			[3]float32{px, py, pz}, [2]float32{px, -py}, c1,
+			[3]float32{px + w, py, pz}, [2]float32{px + w, -py}, c2,
+			[3]float32{px + w, py + thickness, pz}, [2]float32{px + w, -(py + thickness)}, c3,
+			[3]float32{px, py + thickness, pz}, [2]float32{px, -(py + thickness)}, c4,
+			[3]float32{0, 0, 1},
+		)
+	case util.DirSouth:
+		buffer.AddFaceUVStandard(
+			[3]float32{px + w, py, pz - h}, [2]float32{px + w, -py}, c1,
+			[3]float32{px, py, pz - h}, [2]float32{px, -py}, c2,
+			[3]float32{px, py + thickness, pz - h}, [2]float32{px, -(py + thickness)}, c3,
+			[3]float32{px + w, py + thickness, pz - h}, [2]float32{px + w, -(py + thickness)}, c4,
+			[3]float32{0, 0, -1},
+		)
+	case util.DirWest:
+		buffer.AddFaceUVStandard(
+			[3]float32{px, py, pz - h}, [2]float32{-pz + h, -py}, c1,
+			[3]float32{px, py, pz}, [2]float32{-pz, -py}, c2,
+			[3]float32{px, py + thickness, pz}, [2]float32{-pz, -(py + thickness)}, c3,
+			[3]float32{px, py + thickness, pz - h}, [2]float32{-pz + h, -(py + thickness)}, c4,
+			[3]float32{-1, 0, 0},
+		)
+	case util.DirEast:
+		buffer.AddFaceUVStandard(
+			[3]float32{px + w, py, pz}, [2]float32{-pz, -py}, c1,
+			[3]float32{px + w, py, pz - h}, [2]float32{-pz + h, -py}, c2,
+			[3]float32{px + w, py + thickness, pz - h}, [2]float32{-pz + h, -(py + thickness)}, c3,
+			[3]float32{px + w, py + thickness, pz}, [2]float32{-pz, -(py + thickness)}, c4,
+			[3]float32{1, 0, 0},
+		)
+	}
+}
+
+// calculateAOMask gera um hash de 4 bits representando o estado de oclusão dos cantos.
+func (m *BlockMesher) calculateAOMask(coord util.DFCoord, face util.Directions, data *mapdata.MapDataStore) uint32 {
+	// Simplificação: Vamos checar se existem blocos sólidos nas direções cardinais da face
+	// Para cada face, existem 4 cantos. Cada canto é afetado por 2 vizinhos cardinais.
+	// Se ambos forem sólidos, o AO é máximo (0.8).
+	var mask uint32
+	getBit := func(dir util.Directions) uint32 {
+		if m.isSolidAO(coord, dir, data) {
+			return 1
+		}
+		return 0
+	}
+
+	switch face {
+	case util.DirUp, util.DirDown:
+		mask |= getBit(util.DirNorth) << 0
+		mask |= getBit(util.DirSouth) << 1
+		mask |= getBit(util.DirWest) << 2
+		mask |= getBit(util.DirEast) << 3
+	case util.DirNorth, util.DirSouth:
+		mask |= getBit(util.DirUp) << 0
+		mask |= getBit(util.DirDown) << 1
+		mask |= getBit(util.DirWest) << 2
+		mask |= getBit(util.DirEast) << 3
+	case util.DirWest, util.DirEast:
+		mask |= getBit(util.DirUp) << 0
+		mask |= getBit(util.DirDown) << 1
+		mask |= getBit(util.DirNorth) << 2
+		mask |= getBit(util.DirSouth) << 3
+	}
+	return mask
+}
+
+func (m *BlockMesher) getQuadCornerColors(coord util.DFCoord, face util.Directions, baseColor [4]uint8, data *mapdata.MapDataStore) (c1, c2, c3, c4 [4]uint8) {
+	applyAO := func(c [4]uint8, ao float32) [4]uint8 {
+		return [4]uint8{uint8(float32(c[0]) * ao), uint8(float32(c[1]) * ao), uint8(float32(c[2]) * ao), c[3]}
+	}
+
+	getAO := func(d1, d2, d3 util.Directions) float32 {
+		occ1 := m.isSolidAO(coord, d1, data)
+		occ2 := m.isSolidAO(coord, d2, data)
+		occ3 := m.isSolidAO(coord, d3, data)
+		if occ1 && occ2 {
+			return 0.8
+		}
+		res := 1.0
+		if occ1 {
+			res -= 0.05
+		}
+		if occ2 {
+			res -= 0.05
+		}
+		if occ3 {
+			res -= 0.05
+		}
+		return float32(res)
+	}
+
+	switch face {
+	case util.DirUp:
+		c1 = applyAO(baseColor, getAO(util.DirNorth, util.DirWest, util.DirNorthWest))
+		c2 = applyAO(baseColor, getAO(util.DirNorth, util.DirEast, util.DirNorthEast))
+		c3 = applyAO(baseColor, getAO(util.DirSouth, util.DirEast, util.DirSouthEast))
+		c4 = applyAO(baseColor, getAO(util.DirSouth, util.DirWest, util.DirSouthWest))
+	default:
+		// Fallback para outras faces (AO simplificado ou nenhum por enquanto para manter performance)
+		return baseColor, baseColor, baseColor, baseColor
+	}
+	return
 }
 
 func (m *BlockMesher) generateTileGeometry(tile *mapdata.Tile, buffer *MeshBuffer) {
