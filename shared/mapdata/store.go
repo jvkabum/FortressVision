@@ -221,10 +221,10 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 		}
 	}
 
-	// O DFHack (via protobuf) agora devolve MapX e MapY como índices de BLOCOS inteiros (0 a TotalBlocks).
-	// Precisamos convertê-los de volta em coordenadas absolutas de TILEs mundo (*16) antes do loop.
-	baseTileX := block.MapX * 16
-	baseTileY := block.MapY * 16
+	// O DFHack (via protobuf) agora devolve MapX e MapY como coordenadas de TILEs mundo absolutas.
+	// Não precisamos mais multiplicá-los por 16, apenas usar os valores diretamente.
+	baseTileX := block.MapX
+	baseTileY := block.MapY
 
 	for yy := int32(0); yy < 16; yy++ {
 		for xx := int32(0); xx < 16; xx++ {
