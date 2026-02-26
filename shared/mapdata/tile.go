@@ -28,10 +28,19 @@ type Tile struct {
 	RampType int32
 	Hidden   bool
 
+	Light         bool // ID 12
+	Subterranean  bool // ID 13
+	Outside       bool // ID 14
+	Aquifer       bool // ID 15
+	WaterStagnant bool // ID 16
+	WaterSalt     bool // ID 17
+
 	TrunkPercent   uint8
 	PositionOnTree util.DFCoord
 
 	DigDesignation dfproto.TileDigDesignation
+	DigMarker      bool // ID 27
+	DigAuto        bool // ID 28
 
 	// GrassPercent armazena a quantidade de grama no tile (0-100)
 	GrassPercent int32
@@ -61,9 +70,17 @@ func (t *Tile) CopyFrom(orig *Tile) {
 	t.FlowVector = orig.FlowVector
 	t.RampType = orig.RampType
 	t.Hidden = orig.Hidden
+	t.Light = orig.Light
+	t.Subterranean = orig.Subterranean
+	t.Outside = orig.Outside
+	t.Aquifer = orig.Aquifer
+	t.WaterStagnant = orig.WaterStagnant
+	t.WaterSalt = orig.WaterSalt
 	t.TrunkPercent = orig.TrunkPercent
 	t.PositionOnTree = orig.PositionOnTree
 	t.DigDesignation = orig.DigDesignation
+	t.DigMarker = orig.DigMarker
+	t.DigAuto = orig.DigAuto
 	t.GrassPercent = orig.GrassPercent
 }
 

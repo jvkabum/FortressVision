@@ -79,6 +79,18 @@ const (
 	DigUpStair     TileDigDesignation = 6
 )
 
+// MatterState - estado da matéria para spatters
+type MatterState int32
+
+const (
+	MatterSolid   MatterState = 0
+	MatterLiquid  MatterState = 1
+	MatterGas     MatterState = 2
+	MatterPowder  MatterState = 3
+	MatterPaste   MatterState = 4
+	MatterPressed MatterState = 5
+)
+
 // ---------- STRUCTS ----------
 
 type Coord struct {
@@ -140,6 +152,149 @@ const (
 	FlowSeaFoam       FlowType = 12
 	FlowItemCloud     FlowType = 13
 )
+
+// Spatter representa uma mancha ou sujeira no mapa.
+type Spatter struct {
+	Material MatPair
+	Amount   int32
+	State    MatterState
+	Item     MatPair
+}
+
+func (s *Spatter) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			if err := s.Material.Unmarshal(subData); err != nil {
+				return err
+			}
+		case 2:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			s.Amount = int32(v)
+		case 3:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			s.State = MatterState(v)
+		case 4:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			if err := s.Item.Unmarshal(subData); err != nil {
+				return err
+			}
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// SpatterPile é uma coleção de spatters em um único tile.
+type SpatterPile struct {
+	Spatters []Spatter
+}
+
+func (s *SpatterPile) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var sp Spatter
+			if err := sp.Unmarshal(subData); err != nil {
+				return err
+			}
+			s.Spatters = append(s.Spatters, sp)
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Engraving representa uma gravura ou entalhe em um tile.
+type Engraving struct {
+	Pos       Coord
+	ItemIndex int32
+	ArtID     int32
+	TileType  int32
+	Quality   int32
+}
+
+func (e *Engraving) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			if err := e.Pos.Unmarshal(subData); err != nil {
+				return err
+			}
+		case 2:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			e.ItemIndex = int32(v)
+		case 3:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			e.ArtID = int32(v)
+		case 4:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			e.TileType = int32(v)
+		case 5:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			e.Quality = int32(v)
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 
 type FlowInfo struct {
 	Index     int32
@@ -592,31 +747,311 @@ func (p *PlantDetail) Unmarshal(data []byte) error {
 	return nil
 }
 
+type BuildingType struct {
+	BuildingType    int32
+	BuildingSubtype int32
+	BuildingCustom  int32
+}
+
+func (b *BuildingType) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.BuildingType = int32(v)
+		case 2:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.BuildingSubtype = int32(v)
+		case 3:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.BuildingCustom = int32(v)
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+type BuildingItem struct {
+	Item *Item
+	Mode int32
+}
+
+func (b *BuildingItem) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			b.Item = &Item{}
+			if err := b.Item.Unmarshal(subData); err != nil {
+				return err
+			}
+		case 2:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.Mode = int32(v)
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+type BuildingInstance struct {
+	Index         int32
+	PosXMin       int32
+	PosYMin       int32
+	PosZMin       int32
+	PosXMax       int32
+	PosYMax       int32
+	PosZMax       int32
+	BuildingType  BuildingType
+	Material      MatPair
+	BuildingFlags uint32
+	IsRoom        bool
+	Direction     BuildingDirection // BuildingDirection
+	Items         []BuildingItem
+	Active        int32
+}
+
+func (b *BuildingInstance) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.Index = int32(v)
+		case 2:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.PosXMin = int32(v)
+		case 3:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.PosYMin = int32(v)
+		case 4:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.PosZMin = int32(v)
+		case 5:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.PosXMax = int32(v)
+		case 6:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.PosYMax = int32(v)
+		case 7:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.PosZMax = int32(v)
+		case 8:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			if err := b.BuildingType.Unmarshal(subData); err != nil {
+				return err
+			}
+		case 9:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			if err := b.Material.Unmarshal(subData); err != nil {
+				return err
+			}
+		case 10:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.BuildingFlags = uint32(v)
+		case 11:
+			v, err := d.ReadBool()
+			if err != nil {
+				return err
+			}
+			b.IsRoom = v
+		case 13:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.Direction = BuildingDirection(v)
+		case 14:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var item BuildingItem
+			if err := item.Unmarshal(subData); err != nil {
+				return err
+			}
+			b.Items = append(b.Items, item)
+		case 15:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.Active = int32(v)
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+type Item struct {
+	ID       int32
+	Pos      Coord
+	Flags1   uint32
+	Flags2   uint32
+	Type     MatPair
+	Material MatPair
+}
+
+func (i *Item) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			i.ID = int32(v)
+		case 2:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			if err := i.Pos.Unmarshal(subData); err != nil {
+				return err
+			}
+		case 3:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			i.Flags1 = uint32(v)
+		case 4:
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			i.Flags2 = uint32(v)
+		case 5:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			if err := i.Type.Unmarshal(subData); err != nil {
+				return err
+			}
+		case 6:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			if err := i.Material.Unmarshal(subData); err != nil {
+				return err
+			}
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 type MapBlock struct {
-	MapX               int32
-	MapY               int32
-	MapZ               int32
-	Tiles              []int32
-	Materials          []MatPair
-	Water              []int32
-	Magma              []int32
-	Hidden             []bool
-	Light              []bool
-	Subterranean       []bool
-	Outside            []bool
-	Aquifer            []bool
-	WaterStagnant      []bool
-	WaterSalt          []bool
-	TileDigDesignation []TileDigDesignation
-	BaseMaterials      []MatPair
-	LayerMaterials     []MatPair
-	VeinMaterials      []MatPair
-	Flows              []FlowInfo
-	TreePercent        []int32
-	TreeX              []int32
-	TreeY              []int32
-	TreeZ              []int32
-	Plants             []PlantDetail
+	MapX                 int32
+	MapY                 int32
+	MapZ                 int32
+	Tiles                []int32
+	Materials            []MatPair
+	Water                []int32
+	Magma                []int32
+	Hidden               []bool
+	Light                []bool
+	Subterranean         []bool
+	Outside              []bool
+	Aquifer              []bool
+	WaterStagnant        []bool
+	WaterSalt            []bool
+	ConstructionItems    []MatPair          // ID 18
+	Buildings            []BuildingInstance // ID 19
+	TileDigDesignation   []TileDigDesignation
+	BaseMaterials        []MatPair
+	LayerMaterials       []MatPair
+	VeinMaterials        []MatPair
+	Flows                []FlowInfo
+	TreePercent          []int32
+	TreeX                []int32
+	TreeY                []int32
+	TreeZ                []int32
+	Items                []Item  // ID 26
+	DigDesignationMarker []bool  // ID 27
+	DigDesignationAuto   []bool  // ID 28
+	GrassPercent         []int32 // ID 29
+	Plants               []PlantDetail
+	SpatterPile          []SpatterPile // ID 25
+	Engravings           []Engraving   // ID 31
 }
 
 func (m *MapBlock) Unmarshal(data []byte) error {
@@ -651,7 +1086,9 @@ func (m *MapBlock) Unmarshal(data []byte) error {
 				if err != nil {
 					return err
 				}
-				m.Tiles = append(m.Tiles, vals...)
+				for _, v := range vals {
+					m.Tiles = append(m.Tiles, int32(v))
+				}
 			} else {
 				v, err := d.ReadVarint()
 				if err != nil {
@@ -705,7 +1142,9 @@ func (m *MapBlock) Unmarshal(data []byte) error {
 				if err != nil {
 					return err
 				}
-				m.Magma = append(m.Magma, vals...)
+				for _, v := range vals {
+					m.Magma = append(m.Magma, int32(v))
+				}
 			} else {
 				v, err := d.ReadVarint()
 				if err != nil {
@@ -719,7 +1158,9 @@ func (m *MapBlock) Unmarshal(data []byte) error {
 				if err != nil {
 					return err
 				}
-				m.Water = append(m.Water, vals...)
+				for _, v := range vals {
+					m.Water = append(m.Water, int32(v))
+				}
 			} else {
 				v, err := d.ReadVarint()
 				if err != nil {
@@ -728,129 +1169,67 @@ func (m *MapBlock) Unmarshal(data []byte) error {
 				m.Water = append(m.Water, int32(v))
 			}
 		case 11:
-			if wireType == protowire.WireLengthDelimited {
-				vals, err := d.ReadPackedBool()
-				if err != nil {
-					return err
-				}
-				m.Hidden = append(m.Hidden, vals...)
-			} else {
-				v, err := d.ReadBool()
-				if err != nil {
-					return err
-				}
-				m.Hidden = append(m.Hidden, v)
+			v, err := d.ReadBool()
+			if err != nil {
+				return err
 			}
+			m.Hidden = append(m.Hidden, v)
 		case 12:
-			if wireType == protowire.WireLengthDelimited {
-				vals, err := d.ReadPackedBool()
-				if err != nil {
-					return err
-				}
-				m.Light = append(m.Light, vals...)
-			} else {
-				v, err := d.ReadBool()
-				if err != nil {
-					return err
-				}
-				m.Light = append(m.Light, v)
+			v, err := d.ReadBool()
+			if err != nil {
+				return err
 			}
+			m.Light = append(m.Light, v)
 		case 13:
-			if wireType == protowire.WireLengthDelimited {
-				vals, err := d.ReadPackedBool()
-				if err != nil {
-					return err
-				}
-				m.Subterranean = append(m.Subterranean, vals...)
-			} else {
-				v, err := d.ReadBool()
-				if err != nil {
-					return err
-				}
-				m.Subterranean = append(m.Subterranean, v)
+			v, err := d.ReadBool()
+			if err != nil {
+				return err
 			}
+			m.Subterranean = append(m.Subterranean, v)
 		case 14:
-			if wireType == protowire.WireLengthDelimited {
-				vals, err := d.ReadPackedBool()
-				if err != nil {
-					return err
-				}
-				m.Outside = append(m.Outside, vals...)
-			} else {
-				v, err := d.ReadBool()
-				if err != nil {
-					return err
-				}
-				m.Outside = append(m.Outside, v)
+			v, err := d.ReadBool()
+			if err != nil {
+				return err
 			}
+			m.Outside = append(m.Outside, v)
 		case 15:
-			if wireType == protowire.WireLengthDelimited {
-				vals, err := d.ReadPackedBool()
-				if err != nil {
-					return err
-				}
-				m.Aquifer = append(m.Aquifer, vals...)
-			} else {
-				v, err := d.ReadBool()
-				if err != nil {
-					return err
-				}
-				m.Aquifer = append(m.Aquifer, v)
+			v, err := d.ReadBool()
+			if err != nil {
+				return err
 			}
+			m.Aquifer = append(m.Aquifer, v)
 		case 16:
-			if wireType == protowire.WireLengthDelimited {
-				vals, err := d.ReadPackedBool()
-				if err != nil {
-					return err
-				}
-				m.WaterStagnant = append(m.WaterStagnant, vals...)
-			} else {
-				v, err := d.ReadBool()
-				if err != nil {
-					return err
-				}
-				m.WaterStagnant = append(m.WaterStagnant, v)
+			v, err := d.ReadBool()
+			if err != nil {
+				return err
 			}
+			m.WaterStagnant = append(m.WaterStagnant, v)
 		case 17:
-			if wireType == protowire.WireLengthDelimited {
-				vals, err := d.ReadPackedBool()
-				if err != nil {
-					return err
-				}
-				m.WaterSalt = append(m.WaterSalt, vals...)
-			} else {
-				v, err := d.ReadBool()
-				if err != nil {
-					return err
-				}
-				m.WaterSalt = append(m.WaterSalt, v)
+			v, err := d.ReadBool()
+			if err != nil {
+				return err
 			}
-		case 24:
-			if wireType == protowire.WireLengthDelimited {
-				vals, err := d.ReadPackedVarint()
-				if err != nil {
-					return err
-				}
-				for _, v := range vals {
-					m.TileDigDesignation = append(m.TileDigDesignation, TileDigDesignation(v))
-				}
-			} else {
-				v, err := d.ReadVarint()
-				if err != nil {
-					return err
-				}
-				m.TileDigDesignation = append(m.TileDigDesignation, TileDigDesignation(v))
-			}
-		case 30:
+			m.WaterSalt = append(m.WaterSalt, v)
+		case 18: // construction_items
 			subData, err := d.ReadBytes()
 			if err != nil {
 				return err
 			}
-			var flow FlowInfo
-			if err := flow.Unmarshal(subData); err != nil {
+			var mp MatPair
+			if err := mp.Unmarshal(subData); err != nil {
 				return err
 			}
-			m.Flows = append(m.Flows, flow)
+			m.ConstructionItems = append(m.ConstructionItems, mp)
+		case 19: // buildings
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var bi BuildingInstance
+			if err := bi.Unmarshal(subData); err != nil {
+				return err
+			}
+			m.Buildings = append(m.Buildings, bi)
 		case 20: // tree_percent
 			if wireType == protowire.WireLengthDelimited {
 				vals, err := d.ReadPackedVarint()
@@ -915,6 +1294,100 @@ func (m *MapBlock) Unmarshal(data []byte) error {
 				}
 				m.TreeZ = append(m.TreeZ, int32(v))
 			}
+		case 24: // tile_dig_designation
+			if wireType == protowire.WireLengthDelimited {
+				vals, err := d.ReadPackedVarint()
+				if err != nil {
+					return err
+				}
+				for _, v := range vals {
+					m.TileDigDesignation = append(m.TileDigDesignation, TileDigDesignation(v))
+				}
+			} else {
+				v, err := d.ReadVarint()
+				if err != nil {
+					return err
+				}
+				m.TileDigDesignation = append(m.TileDigDesignation, TileDigDesignation(v))
+			}
+		case 25: // spatter_pile
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var sp SpatterPile
+			if err := sp.Unmarshal(subData); err != nil {
+				return err
+			}
+			m.SpatterPile = append(m.SpatterPile, sp)
+		case 26: // items
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var bit Item
+			if err := bit.Unmarshal(subData); err != nil {
+				return err
+			}
+			m.Items = append(m.Items, bit)
+		case 27: // tile_dig_designation_marker
+			v, err := d.ReadBool()
+			if err != nil {
+				return err
+			}
+			m.DigDesignationMarker = append(m.DigDesignationMarker, v)
+		case 28: // tile_dig_designation_auto
+			v, err := d.ReadBool()
+			if err != nil {
+				return err
+			}
+			m.DigDesignationAuto = append(m.DigDesignationAuto, v)
+		case 29: // grass_percent
+			if wireType == protowire.WireLengthDelimited {
+				vals, err := d.ReadPackedVarint()
+				if err != nil {
+					return err
+				}
+				for _, v := range vals {
+					m.GrassPercent = append(m.GrassPercent, int32(v))
+				}
+			} else {
+				v, err := d.ReadVarint()
+				if err != nil {
+					return err
+				}
+				m.GrassPercent = append(m.GrassPercent, int32(v))
+			}
+		case 30: // flows
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var flow FlowInfo
+			if err := flow.Unmarshal(subData); err != nil {
+				return err
+			}
+			m.Flows = append(m.Flows, flow)
+		case 31: // plants
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var plant PlantDetail
+			if err := plant.Unmarshal(subData); err != nil {
+				return err
+			}
+			m.Plants = append(m.Plants, plant)
+		case 32: // engravings
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var eng Engraving
+			if err := eng.Unmarshal(subData); err != nil {
+				return err
+			}
+			m.Engravings = append(m.Engravings, eng)
 		default:
 			if err := d.SkipField(wireType); err != nil {
 				return err
@@ -1399,9 +1872,9 @@ func (w *WorldMap) Unmarshal(data []byte) error {
 
 // BuildingDefinition representa uma instância ou definição de construção.
 type BuildingDefinition struct {
+	BuildingType BuildingType
 	ID           string
 	Name         string
-	BuildingType int32
 }
 
 func (b *BuildingDefinition) Unmarshal(data []byte) error {
@@ -1413,21 +1886,23 @@ func (b *BuildingDefinition) Unmarshal(data []byte) error {
 		}
 		switch fieldNum {
 		case 1:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			if err := b.BuildingType.Unmarshal(subData); err != nil {
+				return err
+			}
+		case 2:
 			b.ID, err = d.ReadString()
 			if err != nil {
 				return err
 			}
-		case 2:
+		case 3:
 			b.Name, err = d.ReadString()
 			if err != nil {
 				return err
 			}
-		case 14: // building_type no proto original
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
-			b.BuildingType = int32(v)
 		default:
 			if err := d.SkipField(wireType); err != nil {
 				return err
@@ -1497,36 +1972,15 @@ func (l *Language) Unmarshal(data []byte) error {
 	return nil
 }
 
-// BuildingDirection - direção da construção
-type BuildingDirection int32
-
-const (
-	BuildingDirNorth BuildingDirection = 0
-	BuildingDirEast  BuildingDirection = 1
-	BuildingDirSouth BuildingDirection = 2
-	BuildingDirWest  BuildingDirection = 3
-	BuildingDirNone  BuildingDirection = 4
-)
-
-// BuildingItem - item dentro de uma construção
-type BuildingItem struct {
-	ItemID int32
-	Mode   int32
+// BuildingExtents - área de uma construção
+type BuildingExtents struct {
+	X      int32
+	Y      int32
+	Width  int32
+	Height int32
 }
 
-// BuildingInstance representa uma instância de construção no mapa.
-type BuildingInstance struct {
-	Index     int32
-	PosXMin   int32
-	PosYMin   int32
-	PosZMin   int32
-	PosXMax   int32
-	PosYMax   int32
-	PosZMax   int32
-	Direction BuildingDirection
-}
-
-func (b *BuildingInstance) Unmarshal(data []byte) error {
+func (e *BuildingExtents) Unmarshal(data []byte) error {
 	d := protowire.NewDecoder(data)
 	for !d.Done() {
 		fieldNum, wireType, err := d.ReadTag()
@@ -1535,42 +1989,44 @@ func (b *BuildingInstance) Unmarshal(data []byte) error {
 		}
 		switch fieldNum {
 		case 1:
-			v, _ := d.ReadVarint()
-			b.Index = int32(v)
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			e.X = int32(v)
 		case 2:
-			v, _ := d.ReadVarint()
-			b.PosXMin = int32(v)
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			e.Y = int32(v)
 		case 3:
-			v, _ := d.ReadVarint()
-			b.PosYMin = int32(v)
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			e.Width = int32(v)
 		case 4:
-			v, _ := d.ReadVarint()
-			b.PosZMin = int32(v)
-		case 5:
-			v, _ := d.ReadVarint()
-			b.PosXMax = int32(v)
-		case 6:
-			v, _ := d.ReadVarint()
-			b.PosYMax = int32(v)
-		case 7:
-			v, _ := d.ReadVarint()
-			b.PosZMax = int32(v)
-		case 8:
-			v, _ := d.ReadVarint()
-			b.Direction = BuildingDirection(v)
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			e.Height = int32(v)
 		default:
-			d.SkipField(wireType)
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-// BuildingInstanceList contém a lista de construções.
+// BuildingInstanceList - lista de instâncias de construção
 type BuildingInstanceList struct {
 	BuildingList []BuildingInstance
 }
 
-func (b *BuildingInstanceList) Unmarshal(data []byte) error {
+func (l *BuildingInstanceList) Unmarshal(data []byte) error {
 	d := protowire.NewDecoder(data)
 	for !d.Done() {
 		fieldNum, wireType, err := d.ReadTag()
@@ -1579,13 +2035,35 @@ func (b *BuildingInstanceList) Unmarshal(data []byte) error {
 		}
 		switch fieldNum {
 		case 1:
-			sub, _ := d.ReadBytes()
-			var bi BuildingInstance
-			bi.Unmarshal(sub)
-			b.BuildingList = append(b.BuildingList, bi)
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var bit BuildingInstance
+			if err := bit.Unmarshal(subData); err != nil {
+				return err
+			}
+			l.BuildingList = append(l.BuildingList, bit)
 		default:
-			d.SkipField(wireType)
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
+
+// BuildingDirection - direção da construção
+type BuildingDirection int32
+
+const (
+	BuildingDirNorth     BuildingDirection = 0
+	BuildingDirEast      BuildingDirection = 1
+	BuildingDirSouth     BuildingDirection = 2
+	BuildingDirWest      BuildingDirection = 3
+	BuildingDirNortheast BuildingDirection = 4
+	BuildingDirSoutheast BuildingDirection = 5
+	BuildingDirSouthwest BuildingDirection = 6
+	BuildingDirNorthwest BuildingDirection = 7
+	BuildingDirNone      BuildingDirection = 8
+)

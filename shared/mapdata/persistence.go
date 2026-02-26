@@ -1,6 +1,7 @@
 package mapdata
 
 import (
+	"FortressVision/shared/pkg/dfproto"
 	"FortressVision/shared/util"
 	"bytes"
 	"encoding/gob"
@@ -38,7 +39,18 @@ type MaterialModel struct {
 	R, G, B  uint8
 }
 
-const CurrentFormatVersion = 2
+const CurrentFormatVersion = 4
+
+// chunkData é o container para serialização completa de um bloco
+type chunkData struct {
+	Tiles             [16][16]*Tile
+	Plants            []dfproto.PlantDetail
+	Buildings         []dfproto.BuildingInstance
+	Items             []dfproto.Item
+	ConstructionItems []dfproto.MatPair
+	SpatterPile       []dfproto.SpatterPile
+	Engravings        []dfproto.Engraving
+}
 
 // OpenInitialize abre (ou cria) o banco de dados SQLite para o mundo e roda migrações.
 func (s *MapDataStore) OpenInitialize(worldName string) error {
@@ -146,7 +158,19 @@ func (s *MapDataStore) SaveChunk(chunk *Chunk) error {
 	if !chunk.IsEmpty {
 		var buf bytes.Buffer
 		enc := gob.NewEncoder(&buf)
-		if err := enc.Encode(chunk.Tiles); err != nil {
+
+		// Agrupa todos os dados para serialização única
+		cData := chunkData{
+			Tiles:             chunk.Tiles,
+			Plants:            chunk.Plants,
+			Buildings:         chunk.Buildings,
+			Items:             chunk.Items,
+			ConstructionItems: chunk.ConstructionItems,
+			SpatterPile:       chunk.SpatterPile,
+			Engravings:        chunk.Engravings,
+		}
+
+		if err := enc.Encode(cData); err != nil {
 			log.Printf("[Persistence] ERRO Crítico GOB: %v", err)
 			return err
 		}
@@ -188,18 +212,45 @@ func (s *MapDataStore) LoadChunk(origin util.DFCoord) (*Chunk, error) {
 	}
 
 	var tiles [16][16]*Tile
+	var plants []dfproto.PlantDetail
+	var buildings []dfproto.BuildingInstance
+	var items []dfproto.Item
+	var constrItems []dfproto.MatPair
+	var spatter []dfproto.SpatterPile
+	var engravings []dfproto.Engraving
+
 	if !model.IsEmpty && len(model.Data) > 0 {
 		dec := gob.NewDecoder(bytes.NewReader(model.Data))
-		if err := dec.Decode(&tiles); err != nil {
-			return nil, err
+		// Tenta novo formato (chunkData)
+		var cData chunkData
+		if err := dec.Decode(&cData); err == nil {
+			tiles = cData.Tiles
+			plants = cData.Plants
+			buildings = cData.Buildings
+			items = cData.Items
+			constrItems = cData.ConstructionItems
+			spatter = cData.SpatterPile
+			engravings = cData.Engravings
+		} else {
+			// Fallback: Tenta formato antigo (apenas tiles)
+			decOld := gob.NewDecoder(bytes.NewReader(model.Data))
+			if err := decOld.Decode(&tiles); err != nil {
+				return nil, fmt.Errorf("falha ao decodificar dados do chunk %s: %v", id, err)
+			}
 		}
 	}
 
 	chunk := &Chunk{
-		Origin:  origin,
-		Tiles:   tiles,
-		MTime:   model.MTime,
-		IsEmpty: model.IsEmpty,
+		Origin:            origin,
+		Tiles:             tiles,
+		Plants:            plants,
+		Buildings:         buildings,
+		Items:             items,
+		ConstructionItems: constrItems,
+		SpatterPile:       spatter,
+		Engravings:        engravings,
+		MTime:             model.MTime,
+		IsEmpty:           model.IsEmpty,
 	}
 
 	// Se for um bloco conhecido por estar vazio, abortamos links nos tiles, ele não deve possuir nenhum.
@@ -266,7 +317,14 @@ func (s *MapDataStore) Save(worldName string) (int, error) {
 			if !chunk.IsEmpty {
 				var buf bytes.Buffer
 				enc := gob.NewEncoder(&buf)
-				if err := enc.Encode(chunk.Tiles); err != nil {
+				cData := chunkData{
+					Tiles:             chunk.Tiles,
+					Plants:            chunk.Plants,
+					Buildings:         chunk.Buildings,
+					Items:             chunk.Items,
+					ConstructionItems: chunk.ConstructionItems,
+				}
+				if err := enc.Encode(cData); err != nil {
 					log.Printf("[Persistence] ERRO Crítico GOB: %v", err)
 					continue // Pula este chunk, não aborta a transaction
 				}

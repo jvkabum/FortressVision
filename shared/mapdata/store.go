@@ -71,12 +71,17 @@ const (
 
 // Chunk representa um bloco 16x16x1 de tiles.
 type Chunk struct {
-	Origin  util.DFCoord
-	Tiles   [16][16]*Tile
-	Plants  []dfproto.PlantDetail // Cache de plantas (shrubs/saplings) para atualizações leves
-	MTime   int64                 // Contador de modificações / versão
-	IsDirty bool                  // Indica que o chunk foi alterado e precisa salvar
-	IsEmpty bool                  // Indica que o bloco foi verificado e é conhecido como vazio (Ar/Céu)
+	Origin            util.DFCoord
+	Tiles             [16][16]*Tile
+	Plants            []dfproto.PlantDetail      // Cache de plantas (shrubs/saplings)
+	Buildings         []dfproto.BuildingInstance // Construções no bloco
+	Items             []dfproto.Item             // Itens soltos no bloco
+	ConstructionItems []dfproto.MatPair          // Itens de construção (ex: paredes manuais)
+	SpatterPile       []dfproto.SpatterPile      // Manchas e sujeiras (ID 25)
+	Engravings        []dfproto.Engraving        // Gravuras e entalhes (ID 32)
+	MTime             int64                      // Contador de modificações / versão
+	IsDirty           bool                       // Indica que o chunk foi alterado e precisa salvar
+	IsEmpty           bool                       // Indica que o bloco é ar/vazio
 }
 
 // NewMapDataStore cria um novo repositório de dados do mapa.
@@ -306,6 +311,43 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 			if len(block.Hidden) > int(idx) {
 				checkChangeBool("Hidden", &tile.Hidden, block.Hidden[idx])
 			}
+			if len(block.Light) > int(idx) {
+				checkChangeBool("Light", &tile.Light, block.Light[idx])
+			}
+			if len(block.Subterranean) > int(idx) {
+				checkChangeBool("Subterranean", &tile.Subterranean, block.Subterranean[idx])
+			}
+			if len(block.Outside) > int(idx) {
+				checkChangeBool("Outside", &tile.Outside, block.Outside[idx])
+			}
+			if len(block.Aquifer) > int(idx) {
+				checkChangeBool("Aquifer", &tile.Aquifer, block.Aquifer[idx])
+			}
+			if len(block.WaterStagnant) > int(idx) {
+				checkChangeBool("WaterStagnant", &tile.WaterStagnant, block.WaterStagnant[idx])
+			}
+			if len(block.WaterSalt) > int(idx) {
+				checkChangeBool("WaterSalt", &tile.WaterSalt, block.WaterSalt[idx])
+			}
+			if len(block.ConstructionItems) > int(idx) {
+				checkChangeMatPair("ConstructionItem", &tile.ConstructionItem, block.ConstructionItems[idx])
+			}
+			if len(block.TileDigDesignation) > int(idx) {
+				newDig := block.TileDigDesignation[idx]
+				if tile.DigDesignation != newDig {
+					tile.DigDesignation = newDig
+					chunkChanged = true
+				}
+			}
+			if len(block.DigDesignationMarker) > int(idx) {
+				checkChangeBool("DigMarker", &tile.DigMarker, block.DigDesignationMarker[idx])
+			}
+			if len(block.DigDesignationAuto) > int(idx) {
+				checkChangeBool("DigAuto", &tile.DigAuto, block.DigDesignationAuto[idx])
+			}
+			if len(block.GrassPercent) > int(idx) {
+				checkChange("GrassPercent", &tile.GrassPercent, block.GrassPercent[idx])
+			}
 
 			// Dados de árvores (Tronco e Galhos)
 			if len(block.TreePercent) > int(idx) {
@@ -331,21 +373,45 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 		}
 	}
 
-	// Coleta dados de vegetação (saplings e shrubs) para o cache do chunk
-	var currentPlants []dfproto.PlantDetail
-	chunkOrigin := util.NewDFCoord(block.MapX, block.MapY, block.MapZ).BlockCoord()
-	chunk = s.Chunks[chunkOrigin]
+	// Sincroniza Entidades (Construções e Itens)
+	if len(block.Buildings) > 0 || len(chunk.Buildings) > 0 {
+		chunk.Buildings = block.Buildings
+		chunkChanged = true
+	}
+	if len(block.Items) > 0 || len(chunk.Items) > 0 {
+		chunk.Items = block.Items
+		chunkChanged = true
+	}
+	if len(block.ConstructionItems) > 0 || len(chunk.ConstructionItems) > 0 {
+		chunk.ConstructionItems = block.ConstructionItems
+		chunkChanged = true
+	}
+	if len(block.SpatterPile) > 0 || len(chunk.SpatterPile) > 0 {
+		chunk.SpatterPile = block.SpatterPile
+		chunkChanged = true
+	}
+	if len(block.Engravings) > 0 || len(chunk.Engravings) > 0 {
+		chunk.Engravings = block.Engravings
+		chunkChanged = true
+	}
 
-	for yy := int32(0); yy < 16; yy++ {
-		for xx := int32(0); xx < 16; xx++ {
-			tile := chunk.Tiles[xx][yy]
-			if tile != nil {
-				shape := tile.Shape()
-				if shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
-					currentPlants = append(currentPlants, dfproto.PlantDetail{
-						Pos:      dfproto.Coord{X: xx, Y: yy, Z: 0}, // Coordenada local
-						Material: tile.Material,
-					})
+	// Coleta dados de vegetação (saplings e shrubs)
+	var currentPlants []dfproto.PlantDetail
+	if len(block.Plants) > 0 {
+		currentPlants = block.Plants
+	} else {
+		// Fallback para detecção por shape (compatibilidade ou blocos incompletos)
+		for yy := int32(0); yy < 16; yy++ {
+			for xx := int32(0); xx < 16; xx++ {
+				tile := chunk.Tiles[xx][yy]
+				if tile != nil {
+					shape := tile.Shape()
+					if shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
+						currentPlants = append(currentPlants, dfproto.PlantDetail{
+							Pos:      dfproto.Coord{X: xx, Y: yy, Z: 0},
+							Material: tile.Material,
+						})
+					}
 				}
 			}
 		}
