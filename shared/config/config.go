@@ -54,7 +54,7 @@ func DefaultConfig() *Config {
 		DFHackHost: "localhost",
 		DFHackPort: 5000,
 
-		ServerURL: "ws://localhost:8080/ws",
+		ServerURL: "ws://127.0.0.1:8080/ws",
 
 		DrawDistance:  10,
 		ViewLevels:    5,

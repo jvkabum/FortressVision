@@ -7,6 +7,15 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// Ray representa um raio no espaço 3D (Origem e Direção)
+type Ray struct {
+	Origin    rl.Vector3
+	Direction rl.Vector3
+}
+
+// Vector3 é um alias para rl.Vector3 para conveniência
+type Vector3 = rl.Vector3
+
 // DFCoord representa uma coordenada no espaço do Dwarf Fortress.
 // X = leste/oeste, Y = norte/sul, Z = nível vertical
 type DFCoord struct {
@@ -90,7 +99,23 @@ func DFToWorldCenter(coord DFCoord) rl.Vector3 {
 	return pos
 }
 
-// WorldToDFCoord converte uma posição 3D de volta para coordenada DF.
+// FloorHeight é a altura visual de um piso (0.1 por padrão no Armok)
+const FloorHeight float32 = 0.1
+
+// DFToWorldBottomCorner retorna o canto inferior esquerdo do tile (espaço 3D).
+func DFToWorldBottomCorner(coord DFCoord) rl.Vector3 {
+	pos := DFToWorldPos(coord)
+	// Como DFToWorldPos já retorna o canto "origin" do tile,
+	// e nosso sistema já inverte o Y, o "BottomCorner"
+	// no espaço 3D depende se o DFToWorldPos é o centro ou o canto.
+	// No FortressVision V1, DFToWorldPos é o canto (X*Scale, Z*Scale, -Y*Scale).
+	return pos
+}
+
+// Between verifica se um valor está entre um limite inferior e superior.
+func Between(lower, t, upper float32) bool {
+	return t >= lower && t <= upper
+}
 func WorldToDFCoord(pos rl.Vector3) DFCoord {
 	return DFCoord{
 		X: int32(math.Floor(float64(pos.X / GameScale))),

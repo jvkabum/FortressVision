@@ -15,14 +15,16 @@ func main() {
 
 	// 1. Iniciar o Servidor em uma nova janela (necessário para ver os logs)
 	fmt.Println("[1/2] Iniciando Servidor...")
-	serverCmd := exec.Command("cmd", "/c", "start", "FortressVision SERVER", "cmd", "/c", "cd servidor && .\\server.exe")
+	// O servidor agora reside em sua própria subpasta
+	serverCmd := exec.Command("cmd", "/c", "start", "FortressVision SERVER", "server.exe")
+	serverCmd.Dir = "servidor"
 	if err := serverCmd.Run(); err != nil {
 		log.Fatalf("Erro ao iniciar servidor: %v", err)
 	}
 
 	// 2. Aguardar o servidor inicializar
-	fmt.Println("Aguardando inicialização do servidor...")
-	time.Sleep(2 * time.Second)
+	fmt.Println("Aguardando inicialização do servidor e carregamento de dados...")
+	time.Sleep(5 * time.Second)
 
 	// 3. Iniciar o Cliente silenciosamente (App GUI não precisa de CMD)
 	fmt.Println("[2/2] Abrindo Cliente...")

@@ -4,6 +4,7 @@ package dfproto
 
 import (
 	"FortressVision/shared/pkg/protowire"
+	"math"
 )
 
 // ---------- ENUMS essenciais ----------
@@ -12,7 +13,7 @@ import (
 type TiletypeShape int32
 
 const (
-	ShapeNone          TiletypeShape = 0
+	ShapeNoShape       TiletypeShape = 0
 	ShapeFloor         TiletypeShape = 1
 	ShapeBoulder       TiletypeShape = 2
 	ShapePebbles       TiletypeShape = 3
@@ -39,20 +40,20 @@ const (
 type TiletypeMaterial int32
 
 const (
-	TilematNone         TiletypeMaterial = 0
+	TilematNoMaterial   TiletypeMaterial = 0
 	TilematStone        TiletypeMaterial = 1
 	TilematSoil         TiletypeMaterial = 2
-	TilematGrass        TiletypeMaterial = 3 // grass_light, grass_dark, grass_dry, grass_dead
+	TilematGrassLight   TiletypeMaterial = 3 // grass_light, grass_dark, grass_dry, grass_dead
 	TilematPlant        TiletypeMaterial = 4
 	TilematTreeMaterial TiletypeMaterial = 5
-	TilematLava         TiletypeMaterial = 6
+	TilematLavaStone    TiletypeMaterial = 6
 	TilematMineral      TiletypeMaterial = 7
 	TilematFrozenLiquid TiletypeMaterial = 8
 	TilematConstruction TiletypeMaterial = 9
 	TilematGrassDark    TiletypeMaterial = 10
 	TilematGrassDry     TiletypeMaterial = 11
 	TilematGrassDead    TiletypeMaterial = 12
-	TilematHBM          TiletypeMaterial = 13 // hellstone, adamantine, etc
+	TilematHFS          TiletypeMaterial = 13 // hellstone, adamantine, etc
 	TilematMagma        TiletypeMaterial = 14
 	TilematDriftwood    TiletypeMaterial = 15
 	TilematCampfire     TiletypeMaterial = 16
@@ -62,7 +63,7 @@ const (
 	TilematRiverShore   TiletypeMaterial = 20
 	TilematMushroom     TiletypeMaterial = 21
 	TilematUnderworld   TiletypeMaterial = 22
-	TilematFeatureStone TiletypeMaterial = 23
+	TilematFeature      TiletypeMaterial = 23
 )
 
 // TileDigDesignation
@@ -600,6 +601,12 @@ type MapBlock struct {
 	Water              []int32
 	Magma              []int32
 	Hidden             []bool
+	Light              []bool
+	Subterranean       []bool
+	Outside            []bool
+	Aquifer            []bool
+	WaterStagnant      []bool
+	WaterSalt          []bool
 	TileDigDesignation []TileDigDesignation
 	BaseMaterials      []MatPair
 	LayerMaterials     []MatPair
@@ -734,6 +741,90 @@ func (m *MapBlock) Unmarshal(data []byte) error {
 				}
 				m.Hidden = append(m.Hidden, v)
 			}
+		case 12:
+			if wireType == protowire.WireLengthDelimited {
+				vals, err := d.ReadPackedBool()
+				if err != nil {
+					return err
+				}
+				m.Light = append(m.Light, vals...)
+			} else {
+				v, err := d.ReadBool()
+				if err != nil {
+					return err
+				}
+				m.Light = append(m.Light, v)
+			}
+		case 13:
+			if wireType == protowire.WireLengthDelimited {
+				vals, err := d.ReadPackedBool()
+				if err != nil {
+					return err
+				}
+				m.Subterranean = append(m.Subterranean, vals...)
+			} else {
+				v, err := d.ReadBool()
+				if err != nil {
+					return err
+				}
+				m.Subterranean = append(m.Subterranean, v)
+			}
+		case 14:
+			if wireType == protowire.WireLengthDelimited {
+				vals, err := d.ReadPackedBool()
+				if err != nil {
+					return err
+				}
+				m.Outside = append(m.Outside, vals...)
+			} else {
+				v, err := d.ReadBool()
+				if err != nil {
+					return err
+				}
+				m.Outside = append(m.Outside, v)
+			}
+		case 15:
+			if wireType == protowire.WireLengthDelimited {
+				vals, err := d.ReadPackedBool()
+				if err != nil {
+					return err
+				}
+				m.Aquifer = append(m.Aquifer, vals...)
+			} else {
+				v, err := d.ReadBool()
+				if err != nil {
+					return err
+				}
+				m.Aquifer = append(m.Aquifer, v)
+			}
+		case 16:
+			if wireType == protowire.WireLengthDelimited {
+				vals, err := d.ReadPackedBool()
+				if err != nil {
+					return err
+				}
+				m.WaterStagnant = append(m.WaterStagnant, vals...)
+			} else {
+				v, err := d.ReadBool()
+				if err != nil {
+					return err
+				}
+				m.WaterStagnant = append(m.WaterStagnant, v)
+			}
+		case 17:
+			if wireType == protowire.WireLengthDelimited {
+				vals, err := d.ReadPackedBool()
+				if err != nil {
+					return err
+				}
+				m.WaterSalt = append(m.WaterSalt, vals...)
+			} else {
+				v, err := d.ReadBool()
+				if err != nil {
+					return err
+				}
+				m.WaterSalt = append(m.WaterSalt, v)
+			}
 		case 24:
 			if wireType == protowire.WireLengthDelimited {
 				vals, err := d.ReadPackedVarint()
@@ -824,16 +915,6 @@ func (m *MapBlock) Unmarshal(data []byte) error {
 				}
 				m.TreeZ = append(m.TreeZ, int32(v))
 			}
-		case 12: // Plants (Campo customizado para FortressVision)
-			subData, err := d.ReadBytes()
-			if err != nil {
-				return err
-			}
-			var p PlantDetail
-			if err := p.Unmarshal(subData); err != nil {
-				return err
-			}
-			m.Plants = append(m.Plants, p)
 		default:
 			if err := d.SkipField(wireType); err != nil {
 				return err
@@ -892,17 +973,14 @@ func (b *BlockList) Unmarshal(data []byte) error {
 
 // BlockRequest - requisição de blocos
 type BlockRequest struct {
-	BlocksNeeded      int32
-	MinX              int32
-	MaxX              int32
-	MinY              int32
-	MaxY              int32
-	MinZ              int32
-	MaxZ              int32
-	RequestTiles      bool
-	RequestMaterials  bool
-	RequestLiquid     bool
-	RequestVegetation bool
+	BlocksNeeded int32
+	MinX         int32
+	MaxX         int32
+	MinY         int32
+	MaxY         int32
+	MinZ         int32
+	MaxZ         int32
+	ForceReload  bool
 }
 
 func (r *BlockRequest) Marshal() ([]byte, error) {
@@ -914,17 +992,8 @@ func (r *BlockRequest) Marshal() ([]byte, error) {
 	e.EncodeVarintForce(5, int64(r.MaxY))
 	e.EncodeVarintForce(6, int64(r.MinZ))
 	e.EncodeVarintForce(7, int64(r.MaxZ))
-	if r.RequestTiles {
+	if r.ForceReload {
 		e.EncodeBoolForce(8, true)
-	}
-	if r.RequestMaterials {
-		e.EncodeBoolForce(9, true)
-	}
-	if r.RequestLiquid {
-		e.EncodeBoolForce(11, true)
-	}
-	if r.RequestVegetation {
-		e.EncodeBoolForce(18, true)
 	}
 	return e.Bytes(), nil
 }
@@ -1101,13 +1170,21 @@ func (v *ViewInfo) Unmarshal(data []byte) error {
 	return nil
 }
 
-// UnitDefinition representa uma criatura/unidade no mundo.
+// UnitDefinition representa uma unidade (criatura) no DF.
 type UnitDefinition struct {
 	ID      int32
-	IsValid bool
+	Name    string
+	Race    int32
 	PosX    int32
 	PosY    int32
 	PosZ    int32
+	SubposX float32
+	SubposY float32
+	SubposZ float32
+	Flags1  uint32
+	Flags2  uint32
+	Flags3  uint32
+	IsValid bool
 }
 
 func (u *UnitDefinition) Unmarshal(data []byte) error {
@@ -1119,45 +1196,51 @@ func (u *UnitDefinition) Unmarshal(data []byte) error {
 		}
 		switch fieldNum {
 		case 1:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			u.ID = int32(v)
 		case 2:
-			v, err := d.ReadBool()
-			if err != nil {
-				return err
-			}
-			u.IsValid = v
+			u.Name, _ = d.ReadString()
 		case 3:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
-			u.PosX = int32(v)
+			v, _ := d.ReadVarint()
+			u.Race = int32(v)
 		case 4:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
-			u.PosY = int32(v)
+			v, _ := d.ReadVarint()
+			u.PosX = int32(v)
 		case 5:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
+			u.PosY = int32(v)
+		case 6:
+			v, _ := d.ReadVarint()
 			u.PosZ = int32(v)
+		case 7:
+			v, _ := d.ReadFixed32()
+			u.SubposX = math.Float32frombits(uint32(v))
+		case 8:
+			v, _ := d.ReadFixed32()
+			u.SubposY = math.Float32frombits(uint32(v))
+		case 9:
+			v, _ := d.ReadFixed32()
+			u.SubposZ = math.Float32frombits(uint32(v))
+		case 10:
+			v, _ := d.ReadVarint()
+			u.Flags1 = uint32(v)
+		case 11:
+			v, _ := d.ReadVarint()
+			u.Flags2 = uint32(v)
+		case 12:
+			v, _ := d.ReadVarint()
+			u.Flags3 = uint32(v)
+		case 13:
+			v, _ := d.ReadVarint()
+			u.IsValid = v != 0
 		default:
-			if err := d.SkipField(wireType); err != nil {
-				return err
-			}
+			d.SkipField(wireType)
 		}
 	}
 	return nil
 }
 
-// UnitList contém a lista de criaturas.
+// UnitList contém a lista de unidades.
 type UnitList struct {
 	CreatureList []UnitDefinition
 }
@@ -1171,19 +1254,12 @@ func (u *UnitList) Unmarshal(data []byte) error {
 		}
 		switch fieldNum {
 		case 1:
-			subData, err := d.ReadBytes()
-			if err != nil {
-				return err
-			}
-			var unit UnitDefinition
-			if err := unit.Unmarshal(subData); err != nil {
-				return err
-			}
-			u.CreatureList = append(u.CreatureList, unit)
+			sub, _ := d.ReadBytes()
+			var ud UnitDefinition
+			ud.Unmarshal(sub)
+			u.CreatureList = append(u.CreatureList, ud)
 		default:
-			if err := d.SkipField(wireType); err != nil {
-				return err
-			}
+			d.SkipField(wireType)
 		}
 	}
 	return nil
@@ -1316,6 +1392,199 @@ func (w *WorldMap) Unmarshal(data []byte) error {
 			if err := d.SkipField(wireType); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// BuildingDefinition representa uma instância ou definição de construção.
+type BuildingDefinition struct {
+	ID           string
+	Name         string
+	BuildingType int32
+}
+
+func (b *BuildingDefinition) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			b.ID, err = d.ReadString()
+			if err != nil {
+				return err
+			}
+		case 2:
+			b.Name, err = d.ReadString()
+			if err != nil {
+				return err
+			}
+		case 14: // building_type no proto original
+			v, err := d.ReadVarint()
+			if err != nil {
+				return err
+			}
+			b.BuildingType = int32(v)
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// BuildingList é a resposta para GetBuildingDefList.
+type BuildingList struct {
+	BuildingList []BuildingDefinition
+}
+
+func (b *BuildingList) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var bd BuildingDefinition
+			if err := bd.Unmarshal(subData); err != nil {
+				return err
+			}
+			b.BuildingList = append(b.BuildingList, bd)
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Language contém os termos e nomes do jogo.
+type Language struct {
+	WordEntries []string
+}
+
+func (l *Language) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			s, err := d.ReadString()
+			if err != nil {
+				return err
+			}
+			l.WordEntries = append(l.WordEntries, s)
+		default:
+			if err := d.SkipField(wireType); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// BuildingDirection - direção da construção
+type BuildingDirection int32
+
+const (
+	BuildingDirNorth BuildingDirection = 0
+	BuildingDirEast  BuildingDirection = 1
+	BuildingDirSouth BuildingDirection = 2
+	BuildingDirWest  BuildingDirection = 3
+	BuildingDirNone  BuildingDirection = 4
+)
+
+// BuildingItem - item dentro de uma construção
+type BuildingItem struct {
+	ItemID int32
+	Mode   int32
+}
+
+// BuildingInstance representa uma instância de construção no mapa.
+type BuildingInstance struct {
+	Index     int32
+	PosXMin   int32
+	PosYMin   int32
+	PosZMin   int32
+	PosXMax   int32
+	PosYMax   int32
+	PosZMax   int32
+	Direction BuildingDirection
+}
+
+func (b *BuildingInstance) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, _ := d.ReadVarint()
+			b.Index = int32(v)
+		case 2:
+			v, _ := d.ReadVarint()
+			b.PosXMin = int32(v)
+		case 3:
+			v, _ := d.ReadVarint()
+			b.PosYMin = int32(v)
+		case 4:
+			v, _ := d.ReadVarint()
+			b.PosZMin = int32(v)
+		case 5:
+			v, _ := d.ReadVarint()
+			b.PosXMax = int32(v)
+		case 6:
+			v, _ := d.ReadVarint()
+			b.PosYMax = int32(v)
+		case 7:
+			v, _ := d.ReadVarint()
+			b.PosZMax = int32(v)
+		case 8:
+			v, _ := d.ReadVarint()
+			b.Direction = BuildingDirection(v)
+		default:
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
+
+// BuildingInstanceList contém a lista de construções.
+type BuildingInstanceList struct {
+	BuildingList []BuildingInstance
+}
+
+func (b *BuildingInstanceList) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			sub, _ := d.ReadBytes()
+			var bi BuildingInstance
+			bi.Unmarshal(sub)
+			b.BuildingList = append(b.BuildingList, bi)
+		default:
+			d.SkipField(wireType)
 		}
 	}
 	return nil

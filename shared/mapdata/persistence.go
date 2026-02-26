@@ -21,6 +21,7 @@ type ChunkModel struct {
 	X, Y, Z   int32     `gorm:"index:idx_pos"`
 	Data      []byte    // Dados do chunk serializados em GOB
 	MTime     int64     // Versão/Timestamp
+	IsEmpty   bool      // Indica se o chunk é céu/ar puro
 	UpdatedAt time.Time // Para controle interno do GORM
 }
 
@@ -41,18 +42,40 @@ const CurrentFormatVersion = 2
 
 // OpenInitialize abre (ou cria) o banco de dados SQLite para o mundo e roda migrações.
 func (s *MapDataStore) OpenInitialize(worldName string) error {
-	if err := os.MkdirAll("saves", 0755); err != nil {
+	saveDir := "saves"
+	if err := os.MkdirAll(saveDir, 0755); err != nil {
 		return err
 	}
 
-	dbPath := filepath.Join("saves", fmt.Sprintf("%s.fv", worldName))
+	dbPath := filepath.Join(saveDir, fmt.Sprintf("%s.fv", worldName))
 
-	// Configuramos o logger para ser silencioso em produção
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
+	// Função interna para conectar com parâmetros otimizados
+	connect := func(path string) (*gorm.DB, error) {
+		// Parâmetros de conexão:
+		// _journal_mode=WAL: Permite leituras concorrentes durante escritas
+		// _busy_timeout=10000: Espera até 10s em vez de retornar "database is locked"
+		// _synchronous=NORMAL: Equilíbrio entre performance e segurança
+		dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=10000&_synchronous=NORMAL", path)
+		return gorm.Open(sqlite.Open(dsn), &gorm.Config{
+			Logger: logger.Default.LogMode(logger.Silent),
+		})
+	}
+
+	db, err := connect(dbPath)
 	if err != nil {
-		return fmt.Errorf("falha ao conectar no SQLite: %w", err)
+		log.Printf("[Persistence] ERRO ao conectar no SQLite: %v. Tentando reset do banco...", err)
+		return s.resetCorruptDatabase(dbPath, worldName)
+	}
+
+	// Verificação de Integridade Rápida
+	var integrity string
+	if err := db.Raw("PRAGMA integrity_check").Scan(&integrity).Error; err != nil || integrity != "ok" {
+		log.Printf("[Persistence] Banco CORROMPIDO Detectado: %s (%v). Iniciando auto-reset...", integrity, err)
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+		return s.resetCorruptDatabase(dbPath, worldName)
 	}
 
 	// Migração automática das tabelas
@@ -60,13 +83,54 @@ func (s *MapDataStore) OpenInitialize(worldName string) error {
 		return fmt.Errorf("falha na migração do banco: %w", err)
 	}
 
+	s.Mu.Lock()
 	s.DB = db
+	s.Mu.Unlock()
 
 	// Salva metadados iniciais
 	db.Save(&WorldMetadata{Key: "FormatVersion", Value: fmt.Sprint(CurrentFormatVersion)})
 	db.Save(&WorldMetadata{Key: "WorldName", Value: worldName})
 
-	log.Printf("[Persistence] Banco de dados SQLite aberto: %s", dbPath)
+	log.Printf("[Persistence] Banco de dados SQLite aberto e íntegro: %s", dbPath)
+	return nil
+}
+
+// resetCorruptDatabase renomeia o arquivo corrompido e tenta criar um novo
+func (s *MapDataStore) resetCorruptDatabase(dbPath, worldName string) error {
+	backupPath := dbPath + ".corrupt_" + time.Now().Format("20060102_150405")
+	log.Printf("[Persistence] Renomeando banco corrompido para: %s", backupPath)
+
+	// Fecha conexões ativas se existirem
+	if s.DB != nil {
+		sqlDB, _ := s.DB.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+	}
+
+	// Tenta renomear. Se falhar porque o arquivo está em uso, retornamos erro fatal.
+	if err := os.Rename(dbPath, backupPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("não foi possível mover banco corrompido (arquivo em uso?): %w", err)
+	}
+
+	// Tenta reconectar em modo limpo (isso criará um novo arquivo)
+	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=10000&_synchronous=NORMAL", dbPath)
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		return fmt.Errorf("falha crítica: não foi possível criar novo banco após reset: %w", err)
+	}
+
+	if err := db.AutoMigrate(&ChunkModel{}, &WorldMetadata{}, &MaterialModel{}); err != nil {
+		return fmt.Errorf("falha na migração do banco novo: %w", err)
+	}
+
+	s.Mu.Lock()
+	s.DB = db
+	s.Mu.Unlock()
+
+	log.Printf("[Persistence] Novo banco de dados criado com sucesso: %s", dbPath)
 	return nil
 }
 
@@ -76,22 +140,28 @@ func (s *MapDataStore) SaveChunk(chunk *Chunk) error {
 		return fmt.Errorf("banco de dados não inicializado")
 	}
 
-	// Serializa os tiles do chunk em bytes (GOB)
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	if err := enc.Encode(chunk.Tiles); err != nil {
-		log.Printf("[Persistence] ERRO Crítico GOB: %v", err)
-		return err
+	// Chunks vazios (Ar/Céu) não possuem tiles — pular serialização GOB
+	// pois o GOB do Go não aceita nil dentro de arrays fixos ([16][16]*Tile).
+	var data []byte
+	if !chunk.IsEmpty {
+		var buf bytes.Buffer
+		enc := gob.NewEncoder(&buf)
+		if err := enc.Encode(chunk.Tiles); err != nil {
+			log.Printf("[Persistence] ERRO Crítico GOB: %v", err)
+			return err
+		}
+		data = buf.Bytes()
 	}
 
 	id := fmt.Sprintf("%d_%d_%d", chunk.Origin.X, chunk.Origin.Y, chunk.Origin.Z)
 	model := ChunkModel{
-		ID:    id,
-		X:     chunk.Origin.X,
-		Y:     chunk.Origin.Y,
-		Z:     chunk.Origin.Z,
-		Data:  buf.Bytes(),
-		MTime: chunk.MTime,
+		ID:      id,
+		X:       chunk.Origin.X,
+		Y:       chunk.Origin.Y,
+		Z:       chunk.Origin.Z,
+		Data:    data,
+		MTime:   chunk.MTime,
+		IsEmpty: chunk.IsEmpty,
 	}
 
 	// Upsert (Cria ou Atualiza)
@@ -117,24 +187,29 @@ func (s *MapDataStore) LoadChunk(origin util.DFCoord) (*Chunk, error) {
 		return nil, err // Retorna error se não encontrar
 	}
 
-	// Deserializa os tiles
 	var tiles [16][16]*Tile
-	dec := gob.NewDecoder(bytes.NewReader(model.Data))
-	if err := dec.Decode(&tiles); err != nil {
-		return nil, err
+	if !model.IsEmpty && len(model.Data) > 0 {
+		dec := gob.NewDecoder(bytes.NewReader(model.Data))
+		if err := dec.Decode(&tiles); err != nil {
+			return nil, err
+		}
 	}
 
 	chunk := &Chunk{
-		Origin: origin,
-		Tiles:  tiles,
-		MTime:  model.MTime,
+		Origin:  origin,
+		Tiles:   tiles,
+		MTime:   model.MTime,
+		IsEmpty: model.IsEmpty,
 	}
 
-	// Re-conecta os tiles ao container
-	for x := 0; x < 16; x++ {
-		for y := 0; y < 16; y++ {
-			if tile := chunk.Tiles[x][y]; tile != nil {
-				tile.container = s
+	// Se for um bloco conhecido por estar vazio, abortamos links nos tiles, ele não deve possuir nenhum.
+	if !model.IsEmpty {
+		// Re-conecta os tiles ao container
+		for x := 0; x < 16; x++ {
+			for y := 0; y < 16; y++ {
+				if tile := chunk.Tiles[x][y]; tile != nil {
+					tile.container = s
+				}
 			}
 		}
 	}
@@ -155,12 +230,12 @@ func (s *MapDataStore) GetChunkCount() (int64, error) {
 }
 
 // Save (Legacy Override) agora é apenas um wrapper que salva todos os chunks em memória.
-func (s *MapDataStore) Save(worldName string) error {
+func (s *MapDataStore) Save(worldName string) (int, error) {
 	s.Mu.Lock()
 	if s.DB == nil {
 		if err := s.OpenInitialize(worldName); err != nil {
 			s.Mu.Unlock()
-			return err
+			return 0, err
 		}
 	}
 
@@ -174,19 +249,56 @@ func (s *MapDataStore) Save(worldName string) error {
 	s.Mu.Unlock() // Libera o lock para não travar o jogo durante o IO
 
 	if len(dirtyChunks) == 0 {
-		return nil
+		return 0, nil
 	}
 
-	log.Printf("[Persistence] Iniciando salvamento assíncrono em SQLite... (Chunks sujos: %d)", len(dirtyChunks))
+	// Serializa o acesso ao banco — impede "database is locked"
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
+
 	count := 0
-	for _, chunk := range dirtyChunks {
-		if err := s.SaveChunk(chunk); err == nil {
+	// Usa uma transaction para agrupar todas as escritas em uma operação atômica.
+	// Isso é MUITO mais rápido e elimina "database is locked" entre goroutines.
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		for _, chunk := range dirtyChunks {
+			// Serialização GOB inline (igual ao SaveChunk, mas usando tx)
+			var data []byte
+			if !chunk.IsEmpty {
+				var buf bytes.Buffer
+				enc := gob.NewEncoder(&buf)
+				if err := enc.Encode(chunk.Tiles); err != nil {
+					log.Printf("[Persistence] ERRO Crítico GOB: %v", err)
+					continue // Pula este chunk, não aborta a transaction
+				}
+				data = buf.Bytes()
+			}
+
+			id := fmt.Sprintf("%d_%d_%d", chunk.Origin.X, chunk.Origin.Y, chunk.Origin.Z)
+			model := ChunkModel{
+				ID:      id,
+				X:       chunk.Origin.X,
+				Y:       chunk.Origin.Y,
+				Z:       chunk.Origin.Z,
+				Data:    data,
+				MTime:   chunk.MTime,
+				IsEmpty: chunk.IsEmpty,
+			}
+
+			if err := tx.Save(&model).Error; err != nil {
+				log.Printf("[Persistence] ERRO ao salvar chunk %s: %v", id, err)
+				continue
+			}
+			chunk.IsDirty = false
 			count++
 		}
-	}
-	log.Printf("[Persistence] Salvamento concluído: %d chunks persistidos.", count)
+		return nil
+	})
 
-	return nil
+	if err != nil {
+		log.Printf("[Persistence] ERRO na transaction: %v", err)
+	}
+
+	return count, err
 }
 
 // Load (Legacy Override) inicializa o banco e pré-carrega o que for necessário.

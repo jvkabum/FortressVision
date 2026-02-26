@@ -71,22 +71,22 @@ func (t *Tile) CopyFrom(orig *Tile) {
 
 func (t *Tile) Shape() dfproto.TiletypeShape {
 	if t.container == nil || t.container.Tiletypes == nil {
-		return dfproto.ShapeNone
+		return dfproto.ShapeNoShape
 	}
 	tt, ok := t.container.Tiletypes[t.TileType]
 	if !ok {
-		return dfproto.ShapeNone
+		return dfproto.ShapeNoShape
 	}
 	return tt.Shape
 }
 
 func (t *Tile) MaterialCategory() dfproto.TiletypeMaterial {
 	if t.container == nil || t.container.Tiletypes == nil {
-		return dfproto.TilematNone
+		return dfproto.TilematNoMaterial
 	}
 	tt, ok := t.container.Tiletypes[t.TileType]
 	if !ok {
-		return dfproto.TilematNone
+		return dfproto.TilematNoMaterial
 	}
 	return tt.Material
 }

@@ -2,6 +2,7 @@ package mapdata
 
 import (
 	"log"
+	"math"
 	"sync"
 
 	"FortressVision/shared/pkg/dfproto"
@@ -15,18 +16,49 @@ import (
 type MapDataStore struct {
 	Mu sync.RWMutex
 
+	// dbMu serializa escritas no banco SQLite (impede "database is locked")
+	dbMu sync.Mutex
+
 	// Chunks armazena os blocos do mapa (16x16x1)
 	Chunks map[util.DFCoord]*Chunk
 
 	// Tiletypes é um cache para consulta de propriedades (shape, material, etc)
 	Tiletypes map[int32]*dfproto.Tiletype
 
+	// Entidades Dinâmicas
+	Buildings      map[int32]*BuildingInstance
+	Units          map[int32]*UnitInstance
+	BuildingLookup map[util.DFCoord]int32 // Mapa de Coordenada -> ID da Construção
+
 	// MapSize é o tamanho total detectado do mapa (opcional)
 	MapSize util.DFCoord
 
 	// DB é a conexão com o banco SQLite (GORM)
 	DB *gorm.DB
+
+	// FirstPerson indica se o sistema está em modo primeira pessoa (afeta desenho)
+	FirstPerson bool
+
+	// PosZ é o nível atual de foco (atualizado pelo servidor)
+	PosZ int32
 }
+
+// RaycastHit armazena informações sobre uma colisão de raio.
+type RaycastHit struct {
+	TileCoord util.DFCoord
+	Point     util.Vector3
+	Distance  float32
+}
+
+// CollisionState representa o estado físico de um ponto no mapa.
+type CollisionState int
+
+const (
+	CollisionNone   CollisionState = 0
+	CollisionSolid  CollisionState = 1
+	CollisionStairs CollisionState = 2
+	CollisionWater  CollisionState = 3
+)
 
 // ChangeType representa o tipo de mudança detectada em um bloco
 type ChangeType int
@@ -50,8 +82,11 @@ type Chunk struct {
 // NewMapDataStore cria um novo repositório de dados do mapa.
 func NewMapDataStore() *MapDataStore {
 	return &MapDataStore{
-		Chunks:    make(map[util.DFCoord]*Chunk),
-		Tiletypes: make(map[int32]*dfproto.Tiletype),
+		Chunks:         make(map[util.DFCoord]*Chunk),
+		Tiletypes:      make(map[int32]*dfproto.Tiletype),
+		Buildings:      make(map[int32]*BuildingInstance),
+		Units:          make(map[int32]*UnitInstance),
+		BuildingLookup: make(map[util.DFCoord]int32),
 	}
 }
 
@@ -64,7 +99,8 @@ func (s *MapDataStore) MarkAsEmpty(origin util.DFCoord) {
 		s.Chunks[origin] = &Chunk{
 			Origin:  origin,
 			IsEmpty: true,
-			MTime:   1, // Versão mínima
+			MTime:   1,    // Versão mínima
+			IsDirty: true, // DEVE ser salvo no banco para não perder a informação do vazio no Purge
 		}
 	}
 }
@@ -82,6 +118,14 @@ func (s *MapDataStore) GetTile(pos util.DFCoord) *Tile {
 
 	local := pos.LocalCoord()
 	return chunk.Tiles[local.X][local.Y]
+}
+
+// GetChunk retorna um chunk de forma segura (thread-safe).
+func (s *MapDataStore) GetChunk(origin util.DFCoord) (*Chunk, bool) {
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
+	c, ok := s.Chunks[origin]
+	return c, ok
 }
 
 // GetOrCreateTile retorna um tile existente ou cria um novo se necessário.
@@ -139,6 +183,11 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 		log.Printf("[Store] Chunk criado em RAM: %v (Origem DFHack: %d,%d,%d)", origin, block.MapX, block.MapY, block.MapZ)
 	}
 
+	// TEMPO-LOG: Inspecionar como o C++ reporta a coordenada X/Y/Z desse bloco.
+	if block.MapX > 0 || block.MapY > 0 {
+		log.Printf("[Store-DEBUG] Chegou Bloco do DFHack: MapX=%d, MapY=%d, MapZ=%d", block.MapX, block.MapY, block.MapZ)
+	}
+
 	// Flag para indicar se houve mudança real nos dados deste chunk
 	chunkChanged := false
 	vegChanged := false
@@ -172,11 +221,16 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 		}
 	}
 
+	// O DFHack (via protobuf) agora devolve MapX e MapY como índices de BLOCOS inteiros (0 a TotalBlocks).
+	// Precisamos convertê-los de volta em coordenadas absolutas de TILEs mundo (*16) antes do loop.
+	baseTileX := block.MapX * 16
+	baseTileY := block.MapY * 16
+
 	for yy := int32(0); yy < 16; yy++ {
 		for xx := int32(0); xx < 16; xx++ {
 			idx := xx + (yy * 16)
 			// Nota: Chamamos GetOrCreateTileINTERNO sem lock, pois já temos o lock
-			worldCoord := util.NewDFCoord(block.MapX+xx, block.MapY+yy, block.MapZ)
+			worldCoord := util.NewDFCoord(baseTileX+xx, baseTileY+yy, block.MapZ)
 
 			// Lógica inline de GetOrCreateTile para evitar deadlock (recursão de mutex)
 			blockPos := worldCoord.BlockCoord()
@@ -391,7 +445,13 @@ func (s *MapDataStore) Purge(center util.DFCoord, radius float32) {
 		if distSq > radiusSq {
 			// WRITE-BACK: Antes de descarregar, salva se estiver sujo de forma ASSÍNCRONA
 			if chunk.IsDirty {
-				go s.SaveChunk(chunk) // Persiste em background para não travar o jogo
+				// Salva em background com dbMu para serializar escritas no banco
+				chunkCopy := chunk
+				go func() {
+					s.dbMu.Lock()
+					s.SaveChunk(chunkCopy)
+					s.dbMu.Unlock()
+				}()
 			}
 			delete(s.Chunks, origin)
 		}
@@ -443,4 +503,323 @@ func (s *MapDataStore) QueueAllStoredChunks(enqueueFunc func(origin util.DFCoord
 	}
 
 	return count
+}
+
+// InMapBounds verifica se a coordenada está dentro dos limites do mapa.
+func (s *MapDataStore) InMapBounds(coord util.DFCoord) bool {
+	return coord.X >= 0 && coord.X < s.MapSize.X &&
+		coord.Y >= 0 && coord.Y < s.MapSize.Y &&
+		coord.Z >= 0 && coord.Z < s.MapSize.Z
+}
+
+// HitsMapCube verifica se o raio atinge o cubo delimitador do mapa.
+func (s *MapDataStore) HitsMapCube(ray util.Ray) bool {
+	if s.MapSize.X == 0 {
+		return false
+	}
+
+	lowerLimits := util.DFToWorldBottomCorner(util.DFCoord{0, 0, 0})
+	upperLimits := util.DFToWorldBottomCorner(util.DFCoord{
+		s.MapSize.X - 1,
+		s.MapSize.Y - 1,
+		s.MapSize.Z - 1,
+	})
+	upperLimits.X += util.GameScale
+	upperLimits.Y += util.GameScale
+	upperLimits.Z -= util.GameScale // Z é invertido no nosso sistema
+
+	// AABB intersection simples
+	tmin := float32(-math.MaxFloat32)
+	tmax := float32(math.MaxFloat32)
+
+	// X
+	if ray.Direction.X != 0 {
+		tx1 := (lowerLimits.X - ray.Origin.X) / ray.Direction.X
+		tx2 := (upperLimits.X - ray.Origin.X) / ray.Direction.X
+		tmin = float32(math.Max(float64(tmin), math.Min(float64(tx1), float64(tx2))))
+		tmax = float32(math.Min(float64(tmax), math.Max(float64(tx1), float64(tx2))))
+	}
+	// Y (Z no DF)
+	if ray.Direction.Y != 0 {
+		ty1 := (lowerLimits.Y - ray.Origin.Y) / ray.Direction.Y
+		ty2 := (upperLimits.Y - ray.Origin.Y) / ray.Direction.Y
+		tmin = float32(math.Max(float64(tmin), math.Min(float64(ty1), float64(ty2))))
+		tmax = float32(math.Min(float64(tmax), math.Max(float64(ty1), float64(ty2))))
+	}
+	// Z (Y no DF)
+	if ray.Direction.Z != 0 {
+		tz1 := (lowerLimits.Z - ray.Origin.Z) / ray.Direction.Z
+		tz2 := (upperLimits.Z - ray.Origin.Z) / ray.Direction.Z
+		tmin = float32(math.Max(float64(tmin), math.Min(float64(tz1), float64(tz2))))
+		tmax = float32(math.Min(float64(tmax), math.Max(float64(tz1), float64(tz2))))
+	}
+
+	return tmin <= tmax && tmax > 0
+}
+
+// Raycast realiza o rastreamento de raio através dos tiles do mapa.
+func (s *MapDataStore) Raycast(ray util.Ray, maxDistance float32) (*RaycastHit, bool) {
+	if !s.HitsMapCube(ray) {
+		return nil, false
+	}
+
+	const maxChecks = 1000
+	currentCoord := util.WorldToDFCoord(ray.Origin)
+	lastHit := ray.Origin
+	haveHitMap := false
+
+	var xWallOffset, yWallOffset, zWallOffset float32
+	var xHitInc, yHitInc, zHitInc util.DFCoord
+
+	if ray.Direction.X > 0 {
+		xWallOffset = util.GameScale
+		xHitInc = util.DFCoord{1, 0, 0}
+	} else {
+		xWallOffset = 0
+		xHitInc = util.DFCoord{-1, 0, 0}
+	}
+
+	if ray.Direction.Z > 0 { // Unity Z is -DF Y
+		zWallOffset = -util.GameScale // Direction is positive Z (decreasing DF Y)
+		zHitInc = util.DFCoord{0, -1, 0}
+	} else {
+		zWallOffset = 0
+		zHitInc = util.DFCoord{0, 1, 0}
+	}
+
+	if ray.Direction.Y > 0 { // Unity Y is DF Z
+		yWallOffset = util.GameScale
+		yHitInc = util.DFCoord{0, 0, 1}
+	} else {
+		yWallOffset = 0
+		yHitInc = util.DFCoord{0, 0, -1}
+	}
+
+	for i := 0; i < maxChecks; i++ {
+		corner := util.DFToWorldBottomCorner(currentCoord)
+
+		if !s.InMapBounds(currentCoord) || (s.PosZ > 0 && currentCoord.Z >= s.PosZ) {
+			if haveHitMap {
+				return nil, false
+			}
+		} else {
+			haveHitMap = true
+			tile := s.GetTile(currentCoord)
+			if tile != nil {
+				shape := tile.Shape()
+				switch shape {
+				case dfproto.ShapeWall, dfproto.ShapeTreeShape, dfproto.ShapeTwig, dfproto.ShapeTrunkBranch:
+					return &RaycastHit{TileCoord: currentCoord, Point: lastHit}, true
+
+				case dfproto.ShapeFloor, dfproto.ShapeBoulder, dfproto.ShapePebbles, dfproto.ShapeSapling, dfproto.ShapeShrub:
+					floorY := corner.Y + util.FloorHeight
+					if util.Between(corner.Y, lastHit.Y, floorY) {
+						return &RaycastHit{TileCoord: currentCoord, Point: lastHit}, true
+					}
+					// Verificação de entrada no piso
+					if ray.Direction.Y != 0 {
+						toFloorMult := (floorY - ray.Origin.Y) / ray.Direction.Y
+						intersect := util.Vector3{
+							X: ray.Origin.X + ray.Direction.X*toFloorMult,
+							Y: floorY,
+							Z: ray.Origin.Z + ray.Direction.Z*toFloorMult,
+						}
+						// Verificamos se o ponto de intersecção está dentro do tile (X e Z)
+						// Z é invertido, então logicamente corner.Z é o limite leste/oeste?
+						// Não, DFToWorldPos inverte Y para Z.
+						if util.Between(corner.X, intersect.X, corner.X+util.GameScale) &&
+							util.Between(corner.Z-util.GameScale, intersect.Z, corner.Z) {
+							return &RaycastHit{TileCoord: currentCoord, Point: intersect}, true
+						}
+					}
+
+				case dfproto.ShapeRamp:
+					rampTopY := corner.Y + util.GameScale/2 + util.FloorHeight
+					if util.Between(corner.Y, lastHit.Y, rampTopY) {
+						return &RaycastHit{TileCoord: currentCoord, Point: lastHit}, true
+					}
+					if ray.Direction.Y != 0 {
+						toRampMult := (rampTopY - ray.Origin.Y) / ray.Direction.Y
+						intersect := util.Vector3{
+							X: ray.Origin.X + ray.Direction.X*toRampMult,
+							Y: rampTopY,
+							Z: ray.Origin.Z + ray.Direction.Z*toRampMult,
+						}
+						if util.Between(corner.X, intersect.X, corner.X+util.GameScale) &&
+							util.Between(corner.Z-util.GameScale, intersect.Z, corner.Z) {
+							return &RaycastHit{TileCoord: currentCoord, Point: intersect}, true
+						}
+					}
+				}
+			}
+		}
+
+		// Avançar para o próximo tile baseado na intersecção com as paredes
+		minDist := float32(math.MaxFloat32)
+		var nextCoord util.DFCoord
+		var nextHit util.Vector3
+		found := false
+
+		// X Wall
+		if ray.Direction.X != 0 {
+			mult := (corner.X + xWallOffset - ray.Origin.X) / ray.Direction.X
+			if mult > 0 {
+				intersect := util.Vector3{
+					X: ray.Origin.X + ray.Direction.X*mult,
+					Y: ray.Origin.Y + ray.Direction.Y*mult,
+					Z: ray.Origin.Z + ray.Direction.Z*mult,
+				}
+				if util.Between(corner.Z-util.GameScale, intersect.Z, corner.Z) &&
+					util.Between(corner.Y, intersect.Y, corner.Y+util.GameScale) {
+					minDist = mult
+					nextCoord = currentCoord.Add(xHitInc)
+					nextHit = intersect
+					found = true
+				}
+			}
+		}
+
+		// Z Wall (Unity Z / DF Y)
+		if ray.Direction.Z != 0 {
+			mult := (corner.Z + zWallOffset - ray.Origin.Z) / ray.Direction.Z
+			if mult > 0 && mult < minDist {
+				intersect := util.Vector3{
+					X: ray.Origin.X + ray.Direction.X*mult,
+					Y: ray.Origin.Y + ray.Direction.Y*mult,
+					Z: ray.Origin.Z + ray.Direction.Z*mult,
+				}
+				if util.Between(corner.X, intersect.X, corner.X+util.GameScale) &&
+					util.Between(corner.Y, intersect.Y, corner.Y+util.GameScale) {
+					minDist = mult
+					nextCoord = currentCoord.Add(zHitInc)
+					nextHit = intersect
+					found = true
+				}
+			}
+		}
+
+		// Y Wall (Unity Y / DF Z)
+		if ray.Direction.Y != 0 {
+			mult := (corner.Y + yWallOffset - ray.Origin.Y) / ray.Direction.Y
+			if mult > 0 && mult < minDist {
+				intersect := util.Vector3{
+					X: ray.Origin.X + ray.Direction.X*mult,
+					Y: ray.Origin.Y + ray.Direction.Y*mult,
+					Z: ray.Origin.Z + ray.Direction.Z*mult,
+				}
+				if util.Between(corner.X, intersect.X, corner.X+util.GameScale) &&
+					util.Between(corner.Z-util.GameScale, intersect.Z, corner.Z) {
+					minDist = mult
+					nextCoord = currentCoord.Add(yHitInc)
+					nextHit = intersect
+					found = true
+				}
+			}
+		}
+
+		if !found || minDist > maxDistance {
+			break
+		}
+		currentCoord = nextCoord
+		lastHit = nextHit
+	}
+
+	return nil, false
+}
+
+// CheckCollision verifica o estado físico em uma posição 3D.
+func (s *MapDataStore) CheckCollision(pos util.Vector3) CollisionState {
+	dfPos := util.WorldToDFCoord(pos)
+	tile := s.GetTile(dfPos)
+	if tile == nil {
+		return CollisionNone
+	}
+
+	corner := util.DFToWorldPos(dfPos)
+	// localY varia de 0 a 1.0 (GameScale) de acordo com o Z do DF
+	localY := pos.Y - corner.Y
+
+	shape := tile.Shape()
+	state := CollisionNone
+
+	switch shape {
+	case dfproto.ShapeWall, dfproto.ShapeFortification, dfproto.ShapeTreeShape:
+		state = CollisionSolid
+	case dfproto.ShapeFloor, dfproto.ShapeBoulder, dfproto.ShapePebbles, dfproto.ShapeSapling, dfproto.ShapeShrub, dfproto.ShapeBranch, dfproto.ShapeTrunkBranch:
+		if localY < util.FloorHeight {
+			state = CollisionSolid
+		}
+	case dfproto.ShapeStairUp:
+		if localY < util.FloorHeight {
+			state = CollisionSolid
+		} else {
+			state = CollisionStairs
+		}
+	case dfproto.ShapeStairDown:
+		if localY < util.FloorHeight {
+			state = CollisionStairs
+		}
+	case dfproto.ShapeStairUpDown:
+		state = CollisionStairs
+	case dfproto.ShapeRamp:
+		if localY < util.FloorHeight {
+			state = CollisionSolid
+		}
+	}
+
+	// Adicionando verificação de líquidos
+	if localY < (float32(tile.WaterLevel)/7.0)*util.GameScale {
+		state = CollisionWater
+	}
+	if localY < (float32(tile.MagmaLevel)/7.0)*util.GameScale {
+		state = CollisionWater
+	}
+
+	return state
+}
+
+// AddBuilding adiciona ou atualiza uma construção no store e indexa seus tiles.
+func (s *MapDataStore) AddBuilding(b *BuildingInstance) {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+
+	s.Buildings[b.Index] = b
+
+	// Indexar todos os tiles ocupados pela construção
+	for zz := b.MinPos.Z; zz <= b.MaxPos.Z; zz++ {
+		for yy := b.MinPos.Y; yy <= b.MaxPos.Y; yy++ {
+			for xx := b.MinPos.X; xx <= b.MaxPos.X; xx++ {
+				pos := util.DFCoord{X: xx, Y: yy, Z: zz}
+				s.BuildingLookup[pos] = b.Index
+			}
+		}
+	}
+}
+
+// GetBuildingAt retorna a construção em uma coordenada específica.
+func (s *MapDataStore) GetBuildingAt(pos util.DFCoord) *BuildingInstance {
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
+
+	id, ok := s.BuildingLookup[pos]
+	if !ok {
+		return nil
+	}
+	return s.Buildings[id]
+}
+
+// UpdateUnit adiciona ou atualiza uma unidade no store.
+func (s *MapDataStore) UpdateUnit(u *UnitInstance) {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+	s.Units[u.ID] = u
+}
+
+// ClearEntities remove todas as entidades (útil ao mudar de mapa).
+func (s *MapDataStore) ClearEntities() {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+	s.Buildings = make(map[int32]*BuildingInstance)
+	s.Units = make(map[int32]*UnitInstance)
+	s.BuildingLookup = make(map[util.DFCoord]int32)
 }

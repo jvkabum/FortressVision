@@ -353,6 +353,7 @@ type WorldStatus struct {
 	ViewX         int32 `protobuf:"varint,7,opt,name=view_x,json=viewX,proto3" json:"view_x,omitempty"`
 	ViewY         int32 `protobuf:"varint,8,opt,name=view_y,json=viewY,proto3" json:"view_y,omitempty"`
 	ViewZ         int32 `protobuf:"varint,9,opt,name=view_z,json=viewZ,proto3" json:"view_z,omitempty"`
+	ZOffset       int32 `protobuf:"varint,10,opt,name=z_offset,json=zOffset,proto3" json:"z_offset,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -446,6 +447,13 @@ func (x *WorldStatus) GetViewY() int32 {
 func (x *WorldStatus) GetViewZ() int32 {
 	if x != nil {
 		return x.ViewZ
+	}
+	return 0
+}
+
+func (x *WorldStatus) GetZOffset() int32 {
+	if x != nil {
+		return x.ZOffset
 	}
 	return 0
 }

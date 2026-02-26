@@ -39,19 +39,28 @@ func NewNetworkClient(url string, store *mapdata.MapDataStore) *NetworkClient {
 }
 
 func (c *NetworkClient) Connect() error {
-	log.Printf("[Network] Conectando ao servidor em %s...", c.url)
-
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 5 * time.Second,
 	}
 
-	conn, _, err := dialer.Dial(c.url, nil)
+	var err error
+	maxRetries := 10
+	for i := 0; i < maxRetries; i++ {
+		log.Printf("[Network] Tentativa de conexão %d/%d em %s...", i+1, maxRetries, c.url)
+		c.conn, _, err = dialer.Dial(c.url, nil)
+		if err == nil {
+			break
+		}
+		log.Printf("[Network] Servidor ainda não está pronto: %v. Aguardando...", err)
+		time.Sleep(2 * time.Second)
+	}
+
 	if err != nil {
+		log.Printf("[Network] ERRO CRÍTICO após %d tentativas: %v", maxRetries, err)
 		return err
 	}
 
 	c.mu.Lock()
-	c.conn = conn
 	c.connected = true
 	c.mu.Unlock()
 

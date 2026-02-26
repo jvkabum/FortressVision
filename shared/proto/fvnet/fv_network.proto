@@ -68,4 +68,5 @@ message WorldStatus {
     int32 view_x = 7;
     int32 view_y = 8;
     int32 view_z = 9;
+    int32 z_offset = 10;
 }

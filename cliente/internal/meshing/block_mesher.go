@@ -209,7 +209,7 @@ func runGreedyMesherX(req Request, getBuffer func(string) *MeshBuffer, liquidBuf
 				worldCoord := util.NewDFCoord(baseX, baseY, int32(currentZ))
 				tile := req.Data.GetTile(worldCoord)
 
-				if tile == nil || tile.Hidden || tile.Shape() == dfproto.ShapeEmpty || tile.Shape() == dfproto.ShapeNone {
+				if tile == nil || tile.Hidden || tile.Shape() == dfproto.ShapeNoShape {
 					flushRun()
 					continue
 				}
@@ -433,9 +433,8 @@ func (m *BlockMesher) shouldDrawFace(tile *mapdata.Tile, dir util.Directions) bo
 		return true
 	}
 
-	// Se o vizinho for vazio/transparente, desenha
 	neighborShape := neighbor.Shape()
-	if neighborShape == dfproto.ShapeEmpty || neighborShape == dfproto.ShapeNone {
+	if neighborShape == dfproto.ShapeNoShape {
 		return true
 	}
 

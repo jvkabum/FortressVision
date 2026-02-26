@@ -231,7 +231,8 @@ func (a *App) connectServer() {
 		a.WorldDay = status.Day
 		a.WorldMonth = status.Month
 		a.WorldSeason = status.Season
-		a.WorldPopulation = int(status.Population)
+		a.WorldPopulation = int(status.GetPopulation())
+		a.ZOffset = status.GetZOffset()
 
 		// Sincronização automática de foco (Z-Sync)
 		if !a.initialZSyncDone || rl.GetTime()-float64(a.lastManualMove)/1000.0 > 5.0 {
@@ -650,18 +651,15 @@ func (a *App) drawHUD() {
 	dfCoord := util.WorldToDFCoord(a.Cam.CurrentLookAt)
 	dfCoord.Z = a.mapCenter.Z
 
-	displayX := dfCoord.X
-	displayY := dfCoord.Y
-	displayZ := dfCoord.Z - a.ZOffset
+	rl.DrawText(fmt.Sprintf("Coord DF: (%d, %d, %d)", dfCoord.X, dfCoord.Y, dfCoord.Z), 15, 65, 16, rl.White)
 
-	rl.DrawText(fmt.Sprintf("Coord DF: (%d, %d, %d)", displayX, displayY, displayZ), 15, 65, 16, rl.White)
-
+	elevation := dfCoord.Z - a.ZOffset
 	syncStatus := "Offline"
 	if a.netClient != nil && a.netClient.IsConnected() {
 		syncStatus = "Conectado"
 	}
 
-	rl.DrawText(fmt.Sprintf("Elevação: %d (Offset:%d) [%s]", displayZ, a.ZOffset, syncStatus), 15, 85, 14, rl.LightGray)
+	rl.DrawText(fmt.Sprintf("Elevação: %d (Offset:%d) [%s]", elevation, a.ZOffset, syncStatus), 15, 85, 14, rl.LightGray)
 
 	// Divisor
 	rl.DrawLine(15, 105, 325, 105, rl.NewColor(100, 100, 100, 100))

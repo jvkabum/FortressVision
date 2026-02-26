@@ -227,11 +227,16 @@ func (d *Decoder) ReadBytes() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if d.pos+int(length) > len(d.buf) {
-		return nil, fmt.Errorf("protowire: length-delimited overflow: precisa %d, tem %d", length, len(d.buf)-d.pos)
+
+	// Verificação de segurança: evita overflow e pânicos de slice bounds (ex: [152:151])
+	remaining := uint64(len(d.buf) - d.pos)
+	if length > remaining {
+		return nil, fmt.Errorf("protowire: comprimento excessivo: precisa %d, tem %d", length, remaining)
 	}
-	data := d.buf[d.pos : d.pos+int(length)]
-	d.pos += int(length)
+
+	intLen := int(length)
+	data := d.buf[d.pos : d.pos+intLen]
+	d.pos += intLen
 	return data, nil
 }
 

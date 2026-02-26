@@ -5,276 +5,223 @@ package dfhack
 import (
 	"fmt"
 	"sync"
+	"time"
 
+	"FortressVision/shared/pkg/dfclient"
+	"FortressVision/shared/pkg/dfnet"
 	"FortressVision/shared/pkg/dfproto"
-	"FortressVision/shared/pkg/protocol"
 )
 
-// Client é o cliente de alto nível para o RemoteFortressReader.
+// Client é uma fachada fina que gerencia a vida útil da conexão.
 type Client struct {
-	rpc       *protocol.Client
+	Service   *dfclient.RemoteFortressService
+	raw       *dfnet.RawClient
 	connected bool
 	mu        sync.RWMutex
+
+	lastReconnect time.Time
+	reconnectMu   sync.Mutex
 
 	// Cache de dados estáticos
 	TiletypeList *dfproto.TiletypeList
 	MaterialList *dfproto.MaterialList
 	PlantRawList *dfproto.PlantRawList
 	MapInfo      *dfproto.MapInfo
+
+	address string
 }
 
-// NewClient cria e conecta um novo cliente DFHack.
+// NewClient cria e conecta um novo cliente usando a arquitetura dfnet/dfclient.
 func NewClient(address string) (*Client, error) {
-	rpc, err := protocol.NewClient(address)
-	if err != nil {
-		return nil, fmt.Errorf("falha ao conectar ao DFHack em %s: %w", address, err)
-	}
-
 	c := &Client{
-		rpc:       rpc,
-		connected: true,
+		address: address,
 	}
-
+	if err := c.connect(); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
-// Close fecha a conexão com o DFHack.
+func (c *Client) connect() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.raw != nil {
+		c.raw.Close()
+	}
+
+	raw, err := dfnet.NewRawClient(c.address)
+	if err != nil {
+		c.connected = false
+		return fmt.Errorf("dfnet: %w", err)
+	}
+
+	c.raw = raw
+	c.Service = dfclient.NewRemoteFortressService(raw)
+	c.connected = true
+	return nil
+}
+
+// Reconnect limpa a conexão atual e tenta estabelecer uma nova com limite de frequência.
+// Útil após timeouts ou erros de protocolo que deixam o socket dessincronizado.
+func (c *Client) Reconnect(reason error) error {
+	c.reconnectMu.Lock()
+	defer c.reconnectMu.Unlock()
+
+	// Throttle: não reconecta mais de uma vez a cada 2 segundos para evitar "storms"
+	if time.Since(c.lastReconnect) < 2*time.Second {
+		return nil
+	}
+
+	fmt.Printf("[dfhack] Resetando conexão (Motivo: %v). Reiniciando socket com %s...\n", reason, c.address)
+	err := c.connect()
+	if err == nil {
+		c.lastReconnect = time.Now()
+	}
+	return err
+}
+
 func (c *Client) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.rpc != nil {
-		c.rpc.Close()
+	if c.raw != nil {
+		c.raw.Close()
 		c.connected = false
 	}
 }
 
-// IsConnected retorna se o cliente está conectado.
 func (c *Client) IsConnected() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.connected
 }
 
-// IsConnectedString retorna uma string representativa do status de conexão.
-func (c *Client) IsConnectedString() string {
-	if c.IsConnected() {
-		return "ON"
-	}
-	return "OFF"
-}
-
-// --- Métodos de inicialização (dados estáticos) ---
-
-// FetchStaticData carrega tiletypes, materiais e info do mapa.
 func (c *Client) FetchStaticData() error {
+	fmt.Println("[dfhack] Carregando dados estáticos do mundo...")
+
+	// Removida Suspensão Global (Fase 12): Causava deadlocks em mundos grandes
+	// se o tempo de transferência protobuf excedesse o timeout ou segurasse o loop do jogo.
+
 	var err error
 
-	// TiletypeList (necessário para interpretar os IDs dos tiles)
-	c.TiletypeList, err = c.GetTiletypeList()
+	c.TiletypeList, err = c.Service.GetTiletypeList()
 	if err != nil {
-		return fmt.Errorf("GetTiletypeList: %w", err)
+		return err
 	}
 	fmt.Printf("  → %d tiletypes carregados\n", len(c.TiletypeList.TiletypeList))
 
-	// MaterialList (necessário para cores)
-	c.MaterialList, err = c.GetMaterialList()
+	c.MaterialList, err = c.Service.GetMaterialList()
 	if err != nil {
-		return fmt.Errorf("GetMaterialList: %w", err)
+		return err
 	}
 	fmt.Printf("  → %d materiais carregados\n", len(c.MaterialList.MaterialList))
 
-	// MapInfo (tamanho do mapa, nome do mundo)
-	c.MapInfo, err = c.GetMapInfo()
-	if err != nil {
-		return fmt.Errorf("GetMapInfo: %w", err)
+	// Novos dados baseados no Armok Vision
+	buildings, err := c.Service.GetBuildingDefList()
+	if err == nil {
+		fmt.Printf("  → %d definições de prédios carregadas\n", len(buildings.BuildingList))
 	}
-	fmt.Printf("  → Mundo: %s (%s)\n", c.MapInfo.WorldNameEn, c.MapInfo.WorldName)
-	fmt.Printf("  → Tamanho: %dx%dx%d blocos\n",
-		c.MapInfo.BlockSizeX, c.MapInfo.BlockSizeY, c.MapInfo.BlockSizeZ)
 
-	// PlantRawList (definições de árvores e plantas)
-	c.PlantRawList, err = c.GetPlantList()
+	lang, err := c.Service.GetLanguage()
+	if err == nil {
+		fmt.Printf("  → Suporte a traduções OK\n")
+		_ = lang // Por enquanto apenas validando a conexão
+	}
+
+	c.MapInfo, err = c.Service.GetMapInfo()
 	if err != nil {
-		// Log mas não falha o boot se der erro nas plantas
+		return err
+	}
+	fmt.Printf("  → Mundo: %s\n", c.MapInfo.WorldNameEn)
+
+	c.PlantRawList, err = c.Service.GetPlantList()
+	if err != nil {
 		fmt.Printf(" [!] Erro ao carregar PlantRaws: %v\n", err)
-	} else {
-		fmt.Printf("  → %d espécies de plantas carregadas\n", len(c.PlantRawList.PlantRaws))
 	}
-
 	return nil
 }
 
-// --- Métodos RPC do RemoteFortressReader ---
+// --- Wrappers delegados para o dfclient ---
 
-const pluginName = "RemoteFortressReader"
-
-// GetTiletypeList obtém a lista de definições de tiletypes.
-func (c *Client) GetTiletypeList() (*dfproto.TiletypeList, error) {
-	req := &dfproto.EmptyMessage{}
-	resp := &dfproto.TiletypeList{}
-	if err := c.rpc.Call("GetTiletypeList", pluginName, req, resp); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-// GetMaterialList obtém a lista de materiais do jogo.
-func (c *Client) GetMaterialList() (*dfproto.MaterialList, error) {
-	req := &dfproto.EmptyMessage{}
-	resp := &dfproto.MaterialList{}
-	if err := c.rpc.Call("GetMaterialList", pluginName, req, resp); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-// GetMapInfo obtém informações sobre o mapa (tamanho, nome do mundo).
-func (c *Client) GetMapInfo() (*dfproto.MapInfo, error) {
-	req := &dfproto.EmptyMessage{}
-	resp := &dfproto.MapInfo{}
-	if err := c.rpc.Call("GetMapInfo", pluginName, req, resp); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-// GetPlantList obtém a lista de definições de plantas do jogo.
-func (c *Client) GetPlantList() (*dfproto.PlantRawList, error) {
-	req := &dfproto.BlockRequest{}
-	resp := &dfproto.PlantRawList{}
-	if err := c.rpc.Call("GetPlantList", pluginName, req, resp); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-// GetViewInfo obtém a posição atual da câmera no DF.
 func (c *Client) GetViewInfo() (*dfproto.ViewInfo, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	req := &dfproto.EmptyMessage{}
-	resp := &dfproto.ViewInfo{}
-	if err := c.rpc.Call("GetViewInfo", pluginName, req, resp); err != nil {
-		return nil, err
+	res, err := c.Service.GetViewInfo()
+	if err != nil {
+		c.Reconnect(err)
 	}
-	return resp, nil
+	return res, err
 }
 
-// GetWorldMapCenter obtém informações sobre o centro do mundo e tempo.
 func (c *Client) GetWorldMapCenter() (*dfproto.WorldMap, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	req := &dfproto.EmptyMessage{}
-	resp := &dfproto.WorldMap{}
-	if err := c.rpc.Call("GetWorldMapCenter", pluginName, req, resp); err != nil {
-		return nil, err
+	res, err := c.Service.GetWorldMapCenter()
+	if err != nil {
+		c.Reconnect(err)
 	}
-	return resp, nil
+	return res, err
 }
 
-// GetUnitList obtém a lista de criaturas/unidades.
 func (c *Client) GetUnitList() (*dfproto.UnitList, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	req := &dfproto.EmptyMessage{}
-	resp := &dfproto.UnitList{}
-	if err := c.rpc.Call("GetUnitList", pluginName, req, resp); err != nil {
-		return nil, err
+	res, err := c.Service.GetUnitList()
+	if err != nil {
+		c.Reconnect(err)
 	}
-	return resp, nil
+	return res, err
 }
 
-// GetBlockList obtém blocos do mapa na região especificada.
+func (c *Client) GetBuildingList() (*dfproto.BuildingInstanceList, error) {
+	res, err := c.Service.GetBuildingList()
+	if err != nil {
+		c.Reconnect(err)
+	}
+	return res, err
+}
+
 func (c *Client) GetBlockList(minX, minY, minZ, maxX, maxY, maxZ, blocksNeeded int32) (*dfproto.BlockList, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	info := c.MapInfo
+	c.mu.RUnlock()
 
 	req := &dfproto.BlockRequest{
-		BlocksNeeded:      blocksNeeded,
-		MinX:              minX,
-		MaxX:              maxX,
-		MinY:              minY,
-		MaxY:              maxY,
-		MinZ:              minZ,
-		MaxZ:              maxZ,
-		RequestTiles:      true,
-		RequestMaterials:  true,
-		RequestLiquid:     true,
-		RequestVegetation: true,
+		BlocksNeeded: blocksNeeded,
+		MinX:         minX, MaxX: maxX,
+		MinY: minY, MaxY: maxY,
+		MinZ: minZ, MaxZ: maxZ,
+		ForceReload: true,
 	}
-	resp := &dfproto.BlockList{}
-	if err := c.rpc.Call("GetBlockList", pluginName, req, resp); err != nil {
+
+	// Tradução Global -> Local para o DFHack 53.10
+	if info != nil {
+		req.MinX -= info.BlockPosX
+		req.MaxX -= info.BlockPosX
+		req.MinY -= info.BlockPosY
+		req.MaxY -= info.BlockPosY
+		req.MinZ -= info.BlockPosZ
+		req.MaxZ -= info.BlockPosZ
+	}
+
+	res, err := c.Service.GetBlockList(req)
+	if err != nil {
+		c.Reconnect(err)
 		return nil, err
 	}
-	return resp, nil
-}
 
-// SetPauseState pausa ou despausa o jogo.
-func (c *Client) SetPauseState(paused bool) error {
-	req := &dfproto.SingleBool{Value: paused}
-	resp := &dfproto.EmptyMessage{}
-	return c.rpc.Call("SetPauseState", pluginName, req, resp)
-}
-
-// SendDigCommand envia um comando de escavação.
-func (c *Client) SendDigCommand(x, y, z int32, designation dfproto.TileDigDesignation) error {
-	req := &dfproto.DigCommand{
-		PosX:        x,
-		PosY:        y,
-		PosZ:        z,
-		Designation: designation,
+	// Tradução Local -> Global para o FortressVision
+	if err == nil && res != nil && info != nil {
+		for i := range res.MapBlocks {
+			// Nota: No DFHack, MapX e MapY já são reportados como coordenadas TILE globais (region_x + local_tile_x).
+			// Somar BlockPosX/Y aqui causaria desalinhamento (dobraria o offset ou somaria blocos a tiles).
+			// Apenas o MapZ precisa ser ajustado se estivermos usando o sistema de índices locais (0-N).
+			res.MapBlocks[i].MapZ += info.BlockPosZ
+		}
 	}
-	resp := &dfproto.EmptyMessage{}
-	return c.rpc.Call("SendDigCommand", pluginName, req, resp)
+
+	return res, err
 }
 
-// CheckHashes verifica e reseta hashes para forçar atualização de blocos.
-func (c *Client) CheckHashes() error {
-	req := &dfproto.EmptyMessage{}
-	resp := &dfproto.EmptyMessage{}
-	return c.rpc.Call("CheckHashes", pluginName, req, resp)
-}
-
-// GetInterestZ retorna o Z mais relevante baseado na câmera ou unidades próximas.
 func (c *Client) GetInterestZ() int32 {
-	// 1. Tentar pela visualização da câmera
 	view, err := c.GetViewInfo()
 	if err != nil {
 		return 0
 	}
-
-	zToUse := view.ViewPosZ
-	centerX := view.ViewPosX + view.ViewSizeX/2
-	centerY := view.ViewPosY + view.ViewSizeY/2
-
-	// Se estiver no céu ou nível muito alto (típico do DFHack no início), busca solo via unidades
-	if zToUse > 100 {
-		units, err := c.GetUnitList()
-		if err == nil && len(units.CreatureList) > 0 {
-			var bestUnitZ int32 = -1
-			minDist := 999999.0
-			foundVessel := false
-			for _, u := range units.CreatureList {
-				// Prioriza unidades que parecem ser anões ou principais
-				if u.PosZ < 150 {
-					dx := float64(u.PosX - centerX)
-					dy := float64(u.PosY - centerY)
-					dist := dx*dx + dy*dy
-					if dist < minDist {
-						minDist = dist
-						bestUnitZ = u.PosZ
-						foundVessel = true
-					}
-				}
-			}
-			if foundVessel {
-				return bestUnitZ
-			}
-		}
-	}
-
-	return zToUse
+	// Armok Vision utiliza Z + 1 para alinhar o nível visual com o DF
+	return view.ViewPosZ + 1
 }

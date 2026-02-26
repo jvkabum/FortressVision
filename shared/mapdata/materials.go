@@ -33,19 +33,19 @@ func NewMaterialStore() *MaterialStore {
 // GetTextureName retorna o nome do arquivo de textura para uma categoria de material.
 func (s *MaterialStore) GetTextureName(mat dfproto.TiletypeMaterial) string {
 	switch mat {
-	case dfproto.TilematStone, dfproto.TilematHBM, dfproto.TilematFeatureStone:
+	case dfproto.TilematStone, dfproto.TilematHFS, dfproto.TilematFeature:
 		return "stone"
 	case dfproto.TilematMineral:
 		return "ore"
 	case dfproto.TilematFrozenLiquid:
 		return "marble" // Gelo parece mármore
-	case dfproto.TilematSoil, dfproto.TilematGrass, dfproto.TilematGrassDark, dfproto.TilematGrassDead, dfproto.TilematGrassDry:
+	case dfproto.TilematSoil, dfproto.TilematGrassLight, dfproto.TilematGrassDark, dfproto.TilematGrassDead, dfproto.TilematGrassDry:
 		return "grass"
 	case dfproto.TilematTreeMaterial, dfproto.TilematPlant, dfproto.TilematMushroom:
 		return "wood"
 	case dfproto.TilematConstruction:
 		return "marble"
-	case dfproto.TilematLava, dfproto.TilematMagma:
+	case dfproto.TilematLavaStone, dfproto.TilematMagma:
 		return "ore" // Magma rock
 	}
 	// Se for uma categoria de gema (baseado no rfr.go, gemas são maiores que Stone)
@@ -73,17 +73,17 @@ func (s *MaterialStore) GetTileColor(tile *Tile) rl.Color {
 		colorToken = "GRAY"
 	case dfproto.TilematSoil:
 		colorToken = "DARK_TAN"
-	case dfproto.TilematGrass, dfproto.TilematGrassDark, dfproto.TilematGrassDead, dfproto.TilematGrassDry:
+	case dfproto.TilematGrassLight, dfproto.TilematGrassDark, dfproto.TilematGrassDead, dfproto.TilematGrassDry:
 		colorToken = "GREEN"
 	case dfproto.TilematTreeMaterial, dfproto.TilematPlant, dfproto.TilematMushroom:
 		colorToken = "BROWN"
 	case dfproto.TilematMineral:
 		colorToken = "SILVER"
-	case dfproto.TilematLava, dfproto.TilematMagma:
+	case dfproto.TilematLavaStone, dfproto.TilematMagma:
 		colorToken = "RED"
 	case dfproto.TilematFrozenLiquid:
 		colorToken = "PALE_BLUE"
-	case dfproto.TilematHBM, dfproto.TilematConstruction:
+	case dfproto.TilematHFS, dfproto.TilematConstruction:
 		colorToken = "WHITE"
 	default:
 		colorToken = "GRAY"
