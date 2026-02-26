@@ -151,7 +151,76 @@ const (
 	FlowOceanWave     FlowType = 11
 	FlowSeaFoam       FlowType = 12
 	FlowItemCloud     FlowType = 13
+	FlowCampFire      FlowType = -1
 )
+
+type Hair struct {
+	Length int32
+	Style  int32
+}
+
+func (h *Hair) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, _ := d.ReadVarint()
+			h.Length = int32(v)
+		case 2:
+			v, _ := d.ReadVarint()
+			h.Style = int32(v)
+		default:
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
+
+type BodySizeInfo struct {
+	SizeCur    int32
+	SizeBase   int32
+	AreaCur    int32
+	AreaBase   int32
+	LengthCur  int32
+	LengthBase int32
+}
+
+func (b *BodySizeInfo) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, _ := d.ReadVarint()
+			b.SizeCur = int32(v)
+		case 2:
+			v, _ := d.ReadVarint()
+			b.SizeBase = int32(v)
+		case 3:
+			v, _ := d.ReadVarint()
+			b.AreaCur = int32(v)
+		case 4:
+			v, _ := d.ReadVarint()
+			b.AreaBase = int32(v)
+		case 5:
+			v, _ := d.ReadVarint()
+			b.LengthCur = int32(v)
+		case 6:
+			v, _ := d.ReadVarint()
+			b.LengthBase = int32(v)
+		default:
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
 
 // Spatter representa uma mancha ou sujeira no mapa.
 type Spatter struct {
@@ -229,144 +298,6 @@ func (s *SpatterPile) Unmarshal(data []byte) error {
 				return err
 			}
 			s.Spatters = append(s.Spatters, sp)
-		default:
-			if err := d.SkipField(wireType); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// Engraving representa uma gravura ou entalhe em um tile.
-type Engraving struct {
-	Pos       Coord
-	ItemIndex int32
-	ArtID     int32
-	TileType  int32
-	Quality   int32
-}
-
-func (e *Engraving) Unmarshal(data []byte) error {
-	d := protowire.NewDecoder(data)
-	for !d.Done() {
-		fieldNum, wireType, err := d.ReadTag()
-		if err != nil {
-			return err
-		}
-		switch fieldNum {
-		case 1:
-			subData, err := d.ReadBytes()
-			if err != nil {
-				return err
-			}
-			if err := e.Pos.Unmarshal(subData); err != nil {
-				return err
-			}
-		case 2:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
-			e.ItemIndex = int32(v)
-		case 3:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
-			e.ArtID = int32(v)
-		case 4:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
-			e.TileType = int32(v)
-		case 5:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
-			e.Quality = int32(v)
-		default:
-			if err := d.SkipField(wireType); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-type FlowInfo struct {
-	Index     int32
-	Type      FlowType
-	Density   int32
-	Pos       Coord
-	Dest      Coord
-	Expanding bool
-	Fast      bool
-	Creeping  bool
-}
-
-func (f *FlowInfo) Unmarshal(data []byte) error {
-	d := protowire.NewDecoder(data)
-	for !d.Done() {
-		fieldNum, wireType, err := d.ReadTag()
-		if err != nil {
-			return err
-		}
-		switch fieldNum {
-		case 1:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
-			f.Index = int32(v)
-		case 2:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
-			f.Type = FlowType(v)
-		case 3:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
-			f.Density = int32(v)
-		case 4:
-			subData, err := d.ReadBytes()
-			if err != nil {
-				return err
-			}
-			if err := f.Pos.Unmarshal(subData); err != nil {
-				return err
-			}
-		case 5:
-			subData, err := d.ReadBytes()
-			if err != nil {
-				return err
-			}
-			if err := f.Dest.Unmarshal(subData); err != nil {
-				return err
-			}
-		case 6:
-			v, err := d.ReadBool()
-			if err != nil {
-				return err
-			}
-			f.Expanding = v
-		case 12:
-			v, err := d.ReadBool()
-			if err != nil {
-				return err
-			}
-			f.Fast = v
-		case 13:
-			v, err := d.ReadBool()
-			if err != nil {
-				return err
-			}
-			f.Creeping = v
 		default:
 			if err := d.SkipField(wireType); err != nil {
 				return err
@@ -762,27 +693,262 @@ func (b *BuildingType) Unmarshal(data []byte) error {
 		}
 		switch fieldNum {
 		case 1:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			b.BuildingType = int32(v)
 		case 2:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			b.BuildingSubtype = int32(v)
 		case 3:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			b.BuildingCustom = int32(v)
 		default:
-			if err := d.SkipField(wireType); err != nil {
-				return err
-			}
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
+
+type ArtImageElementType int32
+
+const (
+	ImageCreature ArtImageElementType = 0
+	ImagePlant    ArtImageElementType = 1
+	ImageTree     ArtImageElementType = 2
+	ImageShape    ArtImageElementType = 3
+	ImageItem     ArtImageElementType = 4
+)
+
+type ArtImageElement struct {
+	Count        int32
+	Type         ArtImageElementType
+	CreatureItem MatPair
+	Material     MatPair
+	ID           int32
+}
+
+func (a *ArtImageElement) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, _ := d.ReadVarint()
+			a.Count = int32(v)
+		case 2:
+			v, _ := d.ReadVarint()
+			a.Type = ArtImageElementType(v)
+		case 3:
+			sub, _ := d.ReadBytes()
+			a.CreatureItem.Unmarshal(sub)
+		case 5:
+			sub, _ := d.ReadBytes()
+			a.Material.Unmarshal(sub)
+		case 6:
+			v, _ := d.ReadVarint()
+			a.ID = int32(v)
+		default:
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
+
+type ArtImagePropertyType int32
+
+const (
+	TransitiveVerb   ArtImagePropertyType = 0
+	IntransitiveVerb ArtImagePropertyType = 1
+)
+
+type ArtImageProperty struct {
+	Subject int32
+	Object  int32
+	Verb    int32 // ArtImageVerb
+	Type    ArtImagePropertyType
+}
+
+func (a *ArtImageProperty) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, _ := d.ReadVarint()
+			a.Subject = int32(v)
+		case 2:
+			v, _ := d.ReadVarint()
+			a.Object = int32(v)
+		case 3:
+			v, _ := d.ReadVarint()
+			a.Verb = int32(v)
+		case 4:
+			v, _ := d.ReadVarint()
+			a.Type = ArtImagePropertyType(v)
+		default:
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
+
+type ArtImage struct {
+	Elements   []ArtImageElement
+	ID         MatPair
+	Properties []ArtImageProperty
+}
+
+func (a *ArtImage) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			sub, _ := d.ReadBytes()
+			var ae ArtImageElement
+			ae.Unmarshal(sub)
+			a.Elements = append(a.Elements, ae)
+		case 2:
+			sub, _ := d.ReadBytes()
+			a.ID.Unmarshal(sub)
+		case 3:
+			sub, _ := d.ReadBytes()
+			var ap ArtImageProperty
+			ap.Unmarshal(sub)
+			a.Properties = append(a.Properties, ap)
+		default:
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
+
+type Item struct {
+	ID           int32
+	Pos          Coord
+	Flags1       uint32
+	Flags2       uint32
+	Type         MatPair
+	Material     MatPair
+	Dye          ColorDefinition   // ID 7
+	StackSize    int32             // ID 8
+	SubposX      float32           // ID 9
+	SubposY      float32           // ID 10
+	SubposZ      float32           // ID 11
+	Projectile   bool              // ID 12
+	VelocityX    float32           // ID 13
+	VelocityY    float32           // ID 14
+	VelocityZ    float32           // ID 15
+	Volume       int32             // ID 16
+	Improvements []ItemImprovement // ID 17
+	Image        ArtImage          // ID 18
+}
+
+func (i *Item) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, _ := d.ReadVarint()
+			i.ID = int32(v)
+		case 2:
+			sub, _ := d.ReadBytes()
+			i.Pos.Unmarshal(sub)
+		case 3:
+			v, _ := d.ReadVarint()
+			i.Flags1 = uint32(v)
+		case 4:
+			v, _ := d.ReadVarint()
+			i.Flags2 = uint32(v)
+		case 5:
+			sub, _ := d.ReadBytes()
+			i.Type.Unmarshal(sub)
+		case 6:
+			sub, _ := d.ReadBytes()
+			i.Material.Unmarshal(sub)
+		case 7:
+			sub, _ := d.ReadBytes()
+			i.Dye.Unmarshal(sub)
+		case 8:
+			v, _ := d.ReadVarint()
+			i.StackSize = int32(v)
+		case 9:
+			i.SubposX, _ = d.ReadFixed32()
+		case 10:
+			i.SubposY, _ = d.ReadFixed32()
+		case 11:
+			i.SubposZ, _ = d.ReadFixed32()
+		case 12:
+			i.Projectile, _ = d.ReadBool()
+		case 13:
+			i.VelocityX, _ = d.ReadFixed32()
+		case 14:
+			i.VelocityY, _ = d.ReadFixed32()
+		case 15:
+			i.VelocityZ, _ = d.ReadFixed32()
+		case 16:
+			v, _ := d.ReadVarint()
+			i.Volume = int32(v)
+		case 17:
+			sub, _ := d.ReadBytes()
+			var imp ItemImprovement
+			imp.Unmarshal(sub)
+			i.Improvements = append(i.Improvements, imp)
+		case 18:
+			sub, _ := d.ReadBytes()
+			i.Image.Unmarshal(sub)
+		default:
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
+
+type ItemImprovement struct {
+	Material     MatPair
+	Shape        int32
+	SpecificType int32
+	Image        ArtImage
+	Type         int32
+}
+
+func (i *ItemImprovement) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			sub, _ := d.ReadBytes()
+			i.Material.Unmarshal(sub)
+		case 3:
+			v, _ := d.ReadVarint()
+			i.Shape = int32(v)
+		case 4:
+			v, _ := d.ReadVarint()
+			i.SpecificType = int32(v)
+		case 5:
+			sub, _ := d.ReadBytes()
+			i.Image.Unmarshal(sub)
+		case 6:
+			v, _ := d.ReadVarint()
+			i.Type = int32(v)
+		default:
+			d.SkipField(wireType)
 		}
 	}
 	return nil
@@ -851,116 +1017,74 @@ func (b *BuildingInstance) Unmarshal(data []byte) error {
 		}
 		switch fieldNum {
 		case 1:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			b.Index = int32(v)
 		case 2:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			b.PosXMin = int32(v)
 		case 3:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			b.PosYMin = int32(v)
 		case 4:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			b.PosZMin = int32(v)
 		case 5:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			b.PosXMax = int32(v)
 		case 6:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			b.PosYMax = int32(v)
 		case 7:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			b.PosZMax = int32(v)
 		case 8:
-			subData, err := d.ReadBytes()
-			if err != nil {
-				return err
-			}
-			if err := b.BuildingType.Unmarshal(subData); err != nil {
-				return err
-			}
+			sub, _ := d.ReadBytes()
+			b.BuildingType.Unmarshal(sub)
 		case 9:
-			subData, err := d.ReadBytes()
-			if err != nil {
-				return err
-			}
-			if err := b.Material.Unmarshal(subData); err != nil {
-				return err
-			}
+			sub, _ := d.ReadBytes()
+			b.Material.Unmarshal(sub)
 		case 10:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			b.BuildingFlags = uint32(v)
 		case 11:
-			v, err := d.ReadBool()
-			if err != nil {
-				return err
-			}
-			b.IsRoom = v
+			b.IsRoom, _ = d.ReadBool()
 		case 13:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			b.Direction = BuildingDirection(v)
 		case 14:
-			subData, err := d.ReadBytes()
-			if err != nil {
-				return err
-			}
-			var item BuildingItem
-			if err := item.Unmarshal(subData); err != nil {
-				return err
-			}
-			b.Items = append(b.Items, item)
+			sub, _ := d.ReadBytes()
+			var bi BuildingItem
+			bi.Unmarshal(sub)
+			b.Items = append(b.Items, bi)
 		case 15:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
 			b.Active = int32(v)
 		default:
-			if err := d.SkipField(wireType); err != nil {
-				return err
-			}
+			d.SkipField(wireType)
 		}
 	}
 	return nil
 }
 
-type Item struct {
-	ID       int32
-	Pos      Coord
-	Flags1   uint32
-	Flags2   uint32
-	Type     MatPair
-	Material MatPair
+// Engraving representa uma gravura no mapa.
+type Engraving struct {
+	Pos       Coord
+	Quality   int32
+	Tile      int32
+	Image     ArtImage
+	IsFloor   bool
+	West      bool
+	East      bool
+	North     bool
+	South     bool
+	Hidden    bool
+	Northwest bool
+	Northeast bool
+	Southwest bool
+	Southeast bool
 }
 
-func (i *Item) Unmarshal(data []byte) error {
+func (e *Engraving) Unmarshal(data []byte) error {
 	d := protowire.NewDecoder(data)
 	for !d.Done() {
 		fieldNum, wireType, err := d.ReadTag()
@@ -969,51 +1093,129 @@ func (i *Item) Unmarshal(data []byte) error {
 		}
 		switch fieldNum {
 		case 1:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
-			i.ID = int32(v)
+			sub, _ := d.ReadBytes()
+			e.Pos.Unmarshal(sub)
 		case 2:
-			subData, err := d.ReadBytes()
-			if err != nil {
-				return err
-			}
-			if err := i.Pos.Unmarshal(subData); err != nil {
-				return err
-			}
+			v, _ := d.ReadVarint()
+			e.Quality = int32(v)
 		case 3:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
-			i.Flags1 = uint32(v)
+			v, _ := d.ReadVarint()
+			e.Tile = int32(v)
 		case 4:
-			v, err := d.ReadVarint()
-			if err != nil {
-				return err
-			}
-			i.Flags2 = uint32(v)
+			sub, _ := d.ReadBytes()
+			e.Image.Unmarshal(sub)
 		case 5:
-			subData, err := d.ReadBytes()
-			if err != nil {
-				return err
-			}
-			if err := i.Type.Unmarshal(subData); err != nil {
-				return err
-			}
+			e.IsFloor, _ = d.ReadBool()
 		case 6:
-			subData, err := d.ReadBytes()
-			if err != nil {
-				return err
-			}
-			if err := i.Material.Unmarshal(subData); err != nil {
-				return err
-			}
+			e.West, _ = d.ReadBool()
+		case 7:
+			e.East, _ = d.ReadBool()
+		case 8:
+			e.North, _ = d.ReadBool()
+		case 9:
+			e.South, _ = d.ReadBool()
+		case 10:
+			e.Hidden, _ = d.ReadBool()
+		case 11:
+			e.Northwest, _ = d.ReadBool()
+		case 12:
+			e.Northeast, _ = d.ReadBool()
+		case 13:
+			e.Southwest, _ = d.ReadBool()
+		case 14:
+			e.Southeast, _ = d.ReadBool()
 		default:
-			if err := d.SkipField(wireType); err != nil {
-				return err
-			}
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
+
+// FlowInfo representa um fluxo de gás, vapor ou líquido.
+type FlowInfo struct {
+	Index     int32
+	Type      FlowType
+	Density   int32
+	Pos       Coord
+	Dest      Coord
+	Expanding bool
+	GuideID   int32
+	Material  MatPair
+	Item      MatPair
+	Dead      bool
+	Fast      bool
+	Creeping  bool
+}
+
+func (f *FlowInfo) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, _ := d.ReadVarint()
+			f.Index = int32(v)
+		case 2:
+			v, _ := d.ReadVarint()
+			f.Type = FlowType(v)
+		case 3:
+			v, _ := d.ReadVarint()
+			f.Density = int32(v)
+		case 4:
+			sub, _ := d.ReadBytes()
+			f.Pos.Unmarshal(sub)
+		case 5:
+			sub, _ := d.ReadBytes()
+			f.Dest.Unmarshal(sub)
+		case 6:
+			f.Expanding, _ = d.ReadBool()
+		case 8:
+			v, _ := d.ReadVarint()
+			f.GuideID = int32(v)
+		case 9:
+			sub, _ := d.ReadBytes()
+			f.Material.Unmarshal(sub)
+		case 10:
+			sub, _ := d.ReadBytes()
+			f.Item.Unmarshal(sub)
+		case 11:
+			f.Dead, _ = d.ReadBool()
+		case 12:
+			f.Fast, _ = d.ReadBool()
+		case 13:
+			f.Creeping, _ = d.ReadBool()
+		default:
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
+
+// Wave representa uma onda marinha.
+type Wave struct {
+	Dest Coord
+	Pos  Coord
+}
+
+func (w *Wave) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			sub, _ := d.ReadBytes()
+			w.Dest.Unmarshal(sub)
+		case 2:
+			sub, _ := d.ReadBytes()
+			w.Pos.Unmarshal(sub)
+		default:
+			d.SkipField(wireType)
 		}
 	}
 	return nil
@@ -1399,10 +1601,11 @@ func (m *MapBlock) Unmarshal(data []byte) error {
 
 // BlockList - lista de blocos retornada por GetBlockList
 type BlockList struct {
-	MapBlocks     []MapBlock
-	MapX          int32
-	MapY          int32
-	EngravingInfo []int32 // ignoramos detalhes
+	MapBlocks  []MapBlock
+	MapX       int32
+	MapY       int32
+	Engravings []Engraving // ID 4
+	OceanWaves []Wave      // ID 5
 }
 
 func (b *BlockList) Unmarshal(data []byte) error {
@@ -1435,6 +1638,26 @@ func (b *BlockList) Unmarshal(data []byte) error {
 				return err
 			}
 			b.MapY = int32(v)
+		case 4: // engravings
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var eng Engraving
+			if err := eng.Unmarshal(subData); err != nil {
+				return err
+			}
+			b.Engravings = append(b.Engravings, eng)
+		case 5: // ocean_waves
+			subData, err := d.ReadBytes()
+			if err != nil {
+				return err
+			}
+			var wave Wave
+			if err := wave.Unmarshal(subData); err != nil {
+				return err
+			}
+			b.OceanWaves = append(b.OceanWaves, wave)
 		default:
 			if err := d.SkipField(wireType); err != nil {
 				return err
@@ -1643,21 +1866,196 @@ func (v *ViewInfo) Unmarshal(data []byte) error {
 	return nil
 }
 
-// UnitDefinition representa uma unidade (criatura) no DF.
+type UnitAppearance struct {
+	BodyModifiers       []int32
+	BpModifiers         []int32
+	SizeModifier        int32
+	Colors              []int32
+	Hair                Hair
+	Beard               Hair
+	Moustache           Hair
+	Sideburns           Hair
+	PhysicalDescription string
+}
+
+func (u *UnitAppearance) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			if wireType == protowire.WireLengthDelimited {
+				vals, _ := d.ReadPackedVarint()
+				for _, v := range vals {
+					u.BodyModifiers = append(u.BodyModifiers, int32(v))
+				}
+			} else {
+				v, _ := d.ReadVarint()
+				u.BodyModifiers = append(u.BodyModifiers, int32(v))
+			}
+		case 2:
+			if wireType == protowire.WireLengthDelimited {
+				vals, _ := d.ReadPackedVarint()
+				for _, v := range vals {
+					u.BpModifiers = append(u.BpModifiers, int32(v))
+				}
+			} else {
+				v, _ := d.ReadVarint()
+				u.BpModifiers = append(u.BpModifiers, int32(v))
+			}
+		case 3:
+			v, _ := d.ReadVarint()
+			u.SizeModifier = int32(v)
+		case 4:
+			if wireType == protowire.WireLengthDelimited {
+				vals, _ := d.ReadPackedVarint()
+				for _, v := range vals {
+					u.Colors = append(u.Colors, int32(v))
+				}
+			} else {
+				v, _ := d.ReadVarint()
+				u.Colors = append(u.Colors, int32(v))
+			}
+		case 5:
+			sub, _ := d.ReadBytes()
+			u.Hair.Unmarshal(sub)
+		case 6:
+			sub, _ := d.ReadBytes()
+			u.Beard.Unmarshal(sub)
+		case 7:
+			sub, _ := d.ReadBytes()
+			u.Moustache.Unmarshal(sub)
+		case 8:
+			sub, _ := d.ReadBytes()
+			u.Sideburns.Unmarshal(sub)
+		case 9:
+			u.PhysicalDescription, _ = d.ReadString()
+		default:
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
+
+type InventoryItem struct {
+	Mode       int32
+	Item       Item
+	BodyPartID int32
+}
+
+func (i *InventoryItem) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, _ := d.ReadVarint()
+			i.Mode = int32(v)
+		case 2:
+			sub, _ := d.ReadBytes()
+			i.Item.Unmarshal(sub)
+		case 3:
+			v, _ := d.ReadVarint()
+			i.BodyPartID = int32(v)
+		default:
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
+
+type WoundPart struct {
+	GlobalLayerIdx int32
+	BodyPartID     int32
+	LayerIdx       int32
+}
+
+func (w *WoundPart) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			v, _ := d.ReadVarint()
+			w.GlobalLayerIdx = int32(v)
+		case 2:
+			v, _ := d.ReadVarint()
+			w.BodyPartID = int32(v)
+		case 3:
+			v, _ := d.ReadVarint()
+			w.LayerIdx = int32(v)
+		default:
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
+
+type UnitWound struct {
+	Parts       []WoundPart
+	SeveredPart bool
+}
+
+func (u *UnitWound) Unmarshal(data []byte) error {
+	d := protowire.NewDecoder(data)
+	for !d.Done() {
+		fieldNum, wireType, err := d.ReadTag()
+		if err != nil {
+			return err
+		}
+		switch fieldNum {
+		case 1:
+			sub, _ := d.ReadBytes()
+			var wp WoundPart
+			wp.Unmarshal(sub)
+			u.Parts = append(u.Parts, wp)
+		case 2:
+			v, _ := d.ReadBool()
+			u.SeveredPart = v
+		default:
+			d.SkipField(wireType)
+		}
+	}
+	return nil
+}
+
+// UnitDefinition representa a definição de uma unidade (anão, animal, etc).
 type UnitDefinition struct {
-	ID      int32
-	Name    string
-	Race    int32
-	PosX    int32
-	PosY    int32
-	PosZ    int32
-	SubposX float32
-	SubposY float32
-	SubposZ float32
-	Flags1  uint32
-	Flags2  uint32
-	Flags3  uint32
-	IsValid bool
+	ID             int32
+	IsValid        bool
+	PosX           int32
+	PosY           int32
+	PosZ           int32
+	Race           MatPair
+	ProfessionCol  ColorDefinition
+	Flags1         uint32
+	Flags2         uint32
+	Flags3         uint32
+	IsSoldier      bool
+	SizeInfo       BodySizeInfo
+	Name           string
+	BloodMax       int32
+	BloodCount     int32
+	Appearance     UnitAppearance
+	ProfessionID   int32
+	NoblePositions []string
+	RiderID        int32
+	Inventory      []InventoryItem
+	SubposX        float32
+	SubposY        float32
+	SubposZ        float32
+	Facing         Coord
+	Age            int32
+	Wounds         []UnitWound
 }
 
 func (u *UnitDefinition) Unmarshal(data []byte) error {
@@ -1672,40 +2070,81 @@ func (u *UnitDefinition) Unmarshal(data []byte) error {
 			v, _ := d.ReadVarint()
 			u.ID = int32(v)
 		case 2:
-			u.Name, _ = d.ReadString()
+			u.IsValid, _ = d.ReadBool()
 		case 3:
 			v, _ := d.ReadVarint()
-			u.Race = int32(v)
+			u.PosX = int32(v)
 		case 4:
 			v, _ := d.ReadVarint()
-			u.PosX = int32(v)
+			u.PosY = int32(v)
 		case 5:
 			v, _ := d.ReadVarint()
-			u.PosY = int32(v)
-		case 6:
-			v, _ := d.ReadVarint()
 			u.PosZ = int32(v)
+		case 6:
+			sub, _ := d.ReadBytes()
+			u.Race.Unmarshal(sub)
 		case 7:
-			v, _ := d.ReadFixed32()
-			u.SubposX = math.Float32frombits(uint32(v))
+			sub, _ := d.ReadBytes()
+			u.ProfessionCol.Unmarshal(sub)
 		case 8:
-			v, _ := d.ReadFixed32()
-			u.SubposY = math.Float32frombits(uint32(v))
-		case 9:
-			v, _ := d.ReadFixed32()
-			u.SubposZ = math.Float32frombits(uint32(v))
-		case 10:
 			v, _ := d.ReadVarint()
 			u.Flags1 = uint32(v)
-		case 11:
+		case 9:
 			v, _ := d.ReadVarint()
 			u.Flags2 = uint32(v)
-		case 12:
+		case 10:
 			v, _ := d.ReadVarint()
 			u.Flags3 = uint32(v)
+		case 11:
+			u.IsSoldier, _ = d.ReadBool()
+		case 12:
+			sub, _ := d.ReadBytes()
+			u.SizeInfo.Unmarshal(sub)
 		case 13:
+			u.Name, _ = d.ReadString()
+		case 14:
 			v, _ := d.ReadVarint()
-			u.IsValid = v != 0
+			u.BloodMax = int32(v)
+		case 15:
+			v, _ := d.ReadVarint()
+			u.BloodCount = int32(v)
+		case 16:
+			sub, _ := d.ReadBytes()
+			u.Appearance.Unmarshal(sub)
+		case 17:
+			v, _ := d.ReadVarint()
+			u.ProfessionID = int32(v)
+		case 18:
+			s, _ := d.ReadString()
+			u.NoblePositions = append(u.NoblePositions, s)
+		case 19:
+			v, _ := d.ReadVarint()
+			u.RiderID = int32(v)
+		case 20:
+			sub, _ := d.ReadBytes()
+			var inv InventoryItem
+			inv.Unmarshal(sub)
+			u.Inventory = append(u.Inventory, inv)
+		case 21:
+			v, _ := d.ReadFixed32()
+			u.SubposX = math.Float32frombits(uint32(v))
+		case 22:
+			v, _ := d.ReadFixed32()
+			u.SubposY = math.Float32frombits(uint32(v))
+		case 23:
+			v, _ := d.ReadFixed32()
+			u.SubposZ = math.Float32frombits(uint32(v))
+		case 24:
+			sub, _ := d.ReadBytes()
+			u.Facing.Unmarshal(sub)
+		case 25:
+			v, _ := d.ReadVarint()
+			u.Age = int32(v)
+		case 26:
+			sub, _ := d.ReadBytes()
+			var w UnitWound
+			w.Unmarshal(sub)
+			u.Wounds = append(u.Wounds, w)
 		default:
 			d.SkipField(wireType)
 		}

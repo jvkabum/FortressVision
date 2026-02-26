@@ -29,7 +29,7 @@ type BuildingInstance struct {
 type UnitInstance struct {
 	ID   int32
 	Name string
-	Race int32
+	Race dfproto.MatPair
 
 	Pos    util.DFCoord
 	SubPos util.Vector3 // Posição detalhada (subtile)
