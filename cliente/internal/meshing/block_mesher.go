@@ -157,10 +157,11 @@ func (m *BlockMesher) runGreedyMesher2D(req Request, getBuffer func(string) *Mes
 		util.DirWest, util.DirEast,
 	}
 
+	firstPass := true
 	// Para cada uma das 6 faces, executamos a otimização
 	for _, faceDir := range coreDirs {
 		// 1. Gerar Máscara 16x16 para esta face
-		// Usamos uint32 para codificar [MaterialID(16 bits) | Color(16 bits reduzido)]
+		// Composite Mask [Active(1) | Tex(7) | Ao(4) | Shape(5) | Color(15)]
 		mask := make([]uint32, 16*16)
 		tiles := make([]*mapdata.Tile, 16*16)
 
@@ -173,9 +174,8 @@ func (m *BlockMesher) runGreedyMesher2D(req Request, getBuffer func(string) *Mes
 					continue
 				}
 
-				// Líquidos e Objetos Especiais (Rampas/Escadas) não entram no Greedy Meshing Comum
-				// Líquidos são processados apenas uma vez (na primeira face iterada)
-				if faceDir == 0 {
+				// Líquidos e Objetos Especiais processados uma única vez
+				if firstPass {
 					GenerateLiquidGeometry(tile, liquidBuffer)
 
 					shape := tile.Shape()
@@ -190,7 +190,7 @@ func (m *BlockMesher) runGreedyMesher2D(req Request, getBuffer func(string) *Mes
 						m.addStairs(worldCoord, shape, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer(texName), req.Data)
 						continue
 					}
-					// Árvores e arbustos também são casos especiais
+					// Árvores e arbustos
 					if shape == dfproto.ShapeTrunkBranch {
 						rlColor := m.MatStore.GetTileColor(tile)
 						m.addTrunkBranch(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer, res, req.Data)
@@ -209,27 +209,26 @@ func (m *BlockMesher) runGreedyMesher2D(req Request, getBuffer func(string) *Mes
 					if shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
 						rlColor := m.MatStore.GetTileColor(tile)
 						m.addShrub(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, res)
-						// Solo sob arbusto será gerado pelo greedy mesher se for floor
 					}
 				}
 
 				// Se a face deve ser desenhada, adicionamos à máscara
 				if m.shouldDrawFace(tile, faceDir) {
-					// Pular formas que não são cubos padrão
 					shape := tile.Shape()
 					if shape != dfproto.ShapeWall && shape != dfproto.ShapeFloor && shape != dfproto.ShapeFortification && shape != dfproto.ShapeTreeShape {
 						continue
 					}
 
-					texID := uint32(tile.MaterialCategory())
+					texID := uint32(tile.MaterialCategory()) & 0x7F
+					shapeID := uint32(shape) & 0x1F
 					rlColor := m.MatStore.GetTileColor(tile)
-					colorID := uint32(rlColor.R)<<16 | uint32(rlColor.G)<<8 | uint32(rlColor.B)
+					// Reduzir cor para 15 bits (5 por canal)
+					colorID := (uint32(rlColor.R)>>3)<<10 | (uint32(rlColor.G)>>3)<<5 | (uint32(rlColor.B) >> 3)
 
-					// Oclusão Ambiente (AO): Para fundir faces, elas devem ter o mesmo padrão de AO nos cantos.
-					// Isso evita interpolação errada de sombras em quads grandes.
-					aoMask := m.calculateAOMask(worldCoord, faceDir, req.Data)
+					aoMask := m.calculateAOMask(worldCoord, faceDir, req.Data) & 0x0F
 
-					mask[yy*16+xx] = (texID << 24) | (aoMask << 20) | (colorID & 0xFFFFF) | 1<<31
+					// Mask: [Active(1) | Tex(7) | Ao(4) | Shape(5) | Color(15)]
+					mask[yy*16+xx] = (1 << 31) | (texID << 24) | (aoMask << 20) | (shapeID << 15) | colorID
 					tiles[yy*16+xx] = tile
 				}
 			}
@@ -290,6 +289,7 @@ func (m *BlockMesher) runGreedyMesher2D(req Request, getBuffer func(string) *Mes
 				}
 			}
 		}
+		firstPass = false
 	}
 }
 
@@ -317,10 +317,6 @@ func (m *BlockMesher) emitGreedyQuad(req Request, x, y, w, h int32, face util.Di
 func (m *BlockMesher) addQuadFace(pos rl.Vector3, w, h, thickness float32, face util.Directions, color [4]uint8, buffer *MeshBuffer, coord util.DFCoord, data *mapdata.MapDataStore) {
 	px, py, pz := pos.X, pos.Y, pos.Z
 
-	// Cores com AO por vértice
-	// Recuperamos o padrao de AO para os cantos deste retângulo
-	// Nota: Como garantimos no Greedy Mesher que todos os tiles do quad têm o mesmo AO,
-	// podemos pegar o AO de qualquer tile do quad (neste caso, o tile na origem 'coord').
 	c1, c2, c3, c4 := m.getQuadCornerColors(coord, face, color, data)
 
 	switch face {
@@ -439,9 +435,31 @@ func (m *BlockMesher) getQuadCornerColors(coord util.DFCoord, face util.Directio
 		c2 = applyAO(baseColor, getAO(util.DirNorth, util.DirEast, util.DirNorthEast))
 		c3 = applyAO(baseColor, getAO(util.DirSouth, util.DirEast, util.DirSouthEast))
 		c4 = applyAO(baseColor, getAO(util.DirSouth, util.DirWest, util.DirSouthWest))
-	default:
-		// Fallback para outras faces (AO simplificado ou nenhum por enquanto para manter performance)
-		return baseColor, baseColor, baseColor, baseColor
+	case util.DirDown:
+		c1 = applyAO(baseColor, getAO(util.DirNorth, util.DirWest, util.DirNorthWest))
+		c2 = applyAO(baseColor, getAO(util.DirSouth, util.DirWest, util.DirSouthWest))
+		c3 = applyAO(baseColor, getAO(util.DirSouth, util.DirEast, util.DirSouthEast))
+		c4 = applyAO(baseColor, getAO(util.DirNorth, util.DirEast, util.DirNorthEast))
+	case util.DirNorth:
+		c1 = applyAO(baseColor, 1.0) // Fallback lateral sem AO por enquanto
+		c2 = applyAO(baseColor, 1.0)
+		c3 = applyAO(baseColor, 1.0)
+		c4 = applyAO(baseColor, 1.0)
+	case util.DirSouth:
+		c1 = applyAO(baseColor, 1.0)
+		c2 = applyAO(baseColor, 1.0)
+		c3 = applyAO(baseColor, 1.0)
+		c4 = applyAO(baseColor, 1.0)
+	case util.DirWest:
+		c1 = applyAO(baseColor, 1.0)
+		c2 = applyAO(baseColor, 1.0)
+		c3 = applyAO(baseColor, 1.0)
+		c4 = applyAO(baseColor, 1.0)
+	case util.DirEast:
+		c1 = applyAO(baseColor, 1.0)
+		c2 = applyAO(baseColor, 1.0)
+		c3 = applyAO(baseColor, 1.0)
+		c4 = applyAO(baseColor, 1.0)
 	}
 	return
 }
