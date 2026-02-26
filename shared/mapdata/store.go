@@ -188,11 +188,6 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 		log.Printf("[Store] Chunk criado em RAM: %v (Origem DFHack: %d,%d,%d)", origin, block.MapX, block.MapY, block.MapZ)
 	}
 
-	// TEMPO-LOG: Inspecionar como o C++ reporta a coordenada X/Y/Z desse bloco.
-	if block.MapX > 0 || block.MapY > 0 {
-		log.Printf("[Store-DEBUG] Chegou Bloco do DFHack: MapX=%d, MapY=%d, MapZ=%d", block.MapX, block.MapY, block.MapZ)
-	}
-
 	// Flag para indicar se houve mudança real nos dados deste chunk
 	chunkChanged := false
 	vegChanged := false
