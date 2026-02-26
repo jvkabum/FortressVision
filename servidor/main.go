@@ -481,6 +481,7 @@ func handleClientMessage(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Client
 			return
 		}
 		log.Printf("[Network] Região Center(%d,%d,%d) R:%d", req.CenterX, req.CenterY, req.CenterZ, req.Radius)
+		dfClient.SetInterestZ(req.CenterZ)
 		go streamRegionToClient(hub, conn, dfClient, store, &req, scanner)
 	}
 }

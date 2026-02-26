@@ -29,6 +29,10 @@ type Client struct {
 	MapInfo      *dfproto.MapInfo
 
 	address string
+
+	// Instant Z-Sync: Priorização de nível por demanda do cliente
+	OverrideInterestZ int32
+	LastOverrideTime  time.Time
 }
 
 // NewClient cria e conecta um novo cliente usando a arquitetura dfnet/dfclient.
@@ -205,7 +209,7 @@ func (c *Client) GetBlockList(minX, minY, minZ, maxX, maxY, maxZ, blocksNeeded i
 	}
 
 	// Tradução Local -> Global para o FortressVision
-	if err == nil && res != nil && info != nil {
+	if res != nil && info != nil {
 		for i := range res.MapBlocks {
 			// Nota: No DFHack, MapX e MapY já são reportados como coordenadas TILE globais (region_x + local_tile_x).
 			// Somar BlockPosX/Y aqui causaria desalinhamento (dobraria o offset ou somaria blocos a tiles).
@@ -218,10 +222,27 @@ func (c *Client) GetBlockList(minX, minY, minZ, maxX, maxY, maxZ, blocksNeeded i
 }
 
 func (c *Client) GetInterestZ() int32 {
+	c.mu.RLock()
+	// Z-Sync de Alta Prioridade: Se o cliente requisitou um nível específico nos últimos 10 segundos,
+	// o scanner deve focar as varreduras exclusivamente nesse nível para carregamento instantâneo.
+	if time.Since(c.LastOverrideTime) < 10*time.Second {
+		z := c.OverrideInterestZ
+		c.mu.RUnlock()
+		return z
+	}
+	c.mu.RUnlock()
+
 	view, err := c.GetViewInfo()
 	if err != nil {
 		return 0
 	}
 	// Armok Vision utiliza Z + 1 para alinhar o nível visual com o DF
 	return view.ViewPosZ + 1
+}
+
+func (c *Client) SetInterestZ(z int32) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.OverrideInterestZ = z
+	c.LastOverrideTime = time.Now()
 }

@@ -165,7 +165,7 @@ func (a *App) update() {
 		a.handleAutoSave() // Salvamento periódico (SQLite)
 		a.updateCamera()
 		a.updateInput()
-		a.updateMap()
+		a.updateMap(false)
 		a.processMesherResults()
 	case StatePaused:
 		a.updateInput() // Permite detectar ESC para despausar
@@ -297,7 +297,7 @@ func (a *App) handleAutoSave() {
 	}
 }
 
-func (a *App) updateMap() {
+func (a *App) updateMap(force bool) {
 	if a.netClient == nil || !a.netClient.IsConnected() {
 		return
 	}
@@ -307,7 +307,7 @@ func (a *App) updateMap() {
 	if a.Loading {
 		checkInterval = 90
 	}
-	if a.frameCount%checkInterval != 0 {
+	if !force && a.frameCount%checkInterval != 0 {
 		return
 	}
 
@@ -408,11 +408,13 @@ func (a *App) updateCamera() {
 		a.mapCenter.Z++
 		a.Cam.TargetLookAt.Y += util.GameScale
 		a.lastZKeyTime = rl.GetTime()
+		a.updateMap(true) // Instant Z-Sync (Phase 29)
 	}
 	if rl.IsKeyPressed(rl.KeyQ) || (rl.IsKeyDown(rl.KeyQ) && rl.GetTime()-a.lastZKeyTime > zRepeatDelay) {
 		a.mapCenter.Z--
 		a.Cam.TargetLookAt.Y -= util.GameScale
 		a.lastZKeyTime = rl.GetTime()
+		a.updateMap(true) // Instant Z-Sync (Phase 29)
 	}
 
 	// Alternar projeção com P
@@ -522,89 +524,6 @@ func (a *App) drawScene() {
 	}
 
 	rl.EndMode3D()
-}
-
-// drawTestTerrain desenha um terreno de teste para validar o sistema.
-// Será substituído pelo sistema de meshing real na Fase 4.
-func (a *App) drawTestTerrain() {
-	groundLevel := float32(a.mapCenter.Z) * util.GameScale
-
-	// Plano de chão
-	for x := int32(-10); x < 10; x++ {
-		for y := int32(-10); y < 10; y++ {
-			pos := util.DFToWorldPos(util.NewDFCoord(x, y, a.mapCenter.Z))
-
-			// Variar a cor baseado na posição (padrão xadrez)
-			var color rl.Color
-			if (x+y)%2 == 0 {
-				color = rl.NewColor(80, 120, 80, 255) // Verde escuro
-			} else {
-				color = rl.NewColor(100, 140, 100, 255) // Verde claro
-			}
-
-			rl.DrawCube(
-				rl.Vector3{
-					X: pos.X + util.GameScale*0.5,
-					Y: groundLevel - util.GameScale*0.5,
-					Z: pos.Z - util.GameScale*0.5,
-				},
-				util.GameScale*0.98, util.GameScale, util.GameScale*0.98,
-				color,
-			)
-		}
-	}
-
-	// Algumas paredes de teste
-	wallPositions := []util.DFCoord{
-		{X: -5, Y: -5, Z: a.mapCenter.Z},
-		{X: -4, Y: -5, Z: a.mapCenter.Z},
-		{X: -3, Y: -5, Z: a.mapCenter.Z},
-		{X: -5, Y: -4, Z: a.mapCenter.Z},
-		{X: -5, Y: -3, Z: a.mapCenter.Z},
-		// Segundo andar
-		{X: -5, Y: -5, Z: a.mapCenter.Z + 1},
-		{X: -4, Y: -5, Z: a.mapCenter.Z + 1},
-	}
-
-	for _, wc := range wallPositions {
-		pos := util.DFToWorldPos(wc)
-		rl.DrawCube(
-			rl.Vector3{
-				X: pos.X + util.GameScale*0.5,
-				Y: pos.Y + util.GameScale*0.5,
-				Z: pos.Z - util.GameScale*0.5,
-			},
-			util.GameScale*0.98, util.GameScale, util.GameScale*0.98,
-			rl.NewColor(128, 128, 128, 255), // Cinza pedra
-		)
-		// Wireframe por cima
-		rl.DrawCubeWires(
-			rl.Vector3{
-				X: pos.X + util.GameScale*0.5,
-				Y: pos.Y + util.GameScale*0.5,
-				Z: pos.Z - util.GameScale*0.5,
-			},
-			util.GameScale, util.GameScale, util.GameScale,
-			rl.NewColor(60, 60, 60, 255),
-		)
-	}
-
-	// Água de teste
-	waterPos := util.DFToWorldPos(util.NewDFCoord(3, 3, a.mapCenter.Z))
-	for dx := int32(0); dx < 3; dx++ {
-		for dy := int32(0); dy < 3; dy++ {
-			wp := util.DFToWorldPos(util.NewDFCoord(3+dx, 3+dy, a.mapCenter.Z))
-			rl.DrawCube(
-				rl.Vector3{
-					X: wp.X + util.GameScale*0.5,
-					Y: waterPos.Y + util.GameScale*0.25,
-					Z: wp.Z - util.GameScale*0.5,
-				},
-				util.GameScale, util.GameScale*0.5, util.GameScale,
-				rl.NewColor(50, 100, 200, 128), // Azul translúcido
-			)
-		}
-	}
 }
 
 // drawHUD desenha a interface sobreposta.

@@ -588,8 +588,8 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 	}
 	if r.TerrainShader.ID != 0 {
 		rl.SetShaderValue(r.TerrainShader, r.terrainTimeLoc, []float32{timeVal}, rl.ShaderUniformFloat)
-		// Snow Amount (Poderia vir do world state, mas vamos fixar para teste por enquanto)
-		rl.SetShaderValue(r.TerrainShader, r.snowAmountLoc, []float32{0.8}, rl.ShaderUniformFloat)
+		// Snow Amount (Fase 28: Depende do clima ativo)
+		rl.SetShaderValue(r.TerrainShader, r.snowAmountLoc, []float32{r.Weather.GetSnowAccumulation()}, rl.ShaderUniformFloat)
 	}
 
 	// Raio de visão generoso (120 unidades = ~120 tiles de distância)

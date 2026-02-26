@@ -31,7 +31,7 @@ func NewParticleSystem(max int) *ParticleSystem {
 	ps := &ParticleSystem{
 		Particles:    make([]Particle, max),
 		MaxParticles: max,
-		Type:         WeatherSnow, // Padrão
+		Type:         WeatherNone, // Iniciar sem clima (Fase 28)
 	}
 	for i := 0; i < max; i++ {
 		ps.resetParticle(i)
@@ -88,4 +88,11 @@ func (ps *ParticleSystem) Draw() {
 			rl.DrawCube(ps.Particles[i].Position, 0.1, 0.1, 0.1, rl.NewColor(255, 255, 255, 200))
 		}
 	}
+}
+
+func (ps *ParticleSystem) GetSnowAccumulation() float32 {
+	if ps.Type == WeatherSnow {
+		return 0.8 // Acúmulo visual de neve
+	}
+	return 0.0
 }
