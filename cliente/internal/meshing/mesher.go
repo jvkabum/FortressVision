@@ -169,13 +169,25 @@ func (b *MeshBuffer) AddTriangleUV(v1, v2, v3 [3]float32, uv1, uv2, uv3 [2]float
 }
 
 func (b *MeshBuffer) AddFaceAOStandard(v1 [3]float32, c1 [4]uint8, v2 [3]float32, c2 [4]uint8, v3 [3]float32, c3 [4]uint8, v4 [3]float32, c4 [4]uint8, normal [3]float32) {
-	b.AddTriangle(v1, v2, v3, normal, c1)
-	b.AddTriangle(v1, v3, v4, normal, c1)
+	// Triângulo 1 (v1, v2, v3)
+	b.addVertex(v1, normal, c1)
+	b.addVertex(v2, normal, c2)
+	b.addVertex(v3, normal, c3)
+
+	// Triângulo 2 (v1, v3, v4)
+	b.addVertex(v1, normal, c1)
+	b.addVertex(v3, normal, c3)
+	b.addVertex(v4, normal, c4)
 }
 
 func (b *MeshBuffer) AddFaceUVStandard(v1 [3]float32, uv1 [2]float32, c1 [4]uint8, v2 [3]float32, uv2 [2]float32, c2 [4]uint8, v3 [3]float32, uv3 [2]float32, c3 [4]uint8, v4 [3]float32, uv4 [2]float32, c4 [4]uint8, normal [3]float32) {
-	b.AddTriangleUV(v1, v2, v3, uv1, uv2, uv3, normal, c1)
-	b.addVertexUV(v1, uv1, normal, c1) // Re-adicionando v1 para o segundo triângulo
+	// Triângulo 1 (v1, v2, v3)
+	b.addVertexUV(v1, uv1, normal, c1)
+	b.addVertexUV(v2, uv2, normal, c2)
+	b.addVertexUV(v3, uv3, normal, c3)
+
+	// Triângulo 2 (v1, v3, v4)
+	b.addVertexUV(v1, uv1, normal, c1)
 	b.addVertexUV(v3, uv3, normal, c3)
 	b.addVertexUV(v4, uv4, normal, c4)
 }

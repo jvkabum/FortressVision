@@ -1,81 +1,78 @@
 # FortressVision v1
 
-![FortressVision Logo](icon.ico)
+![FortressVision Logo](cliente/icon.ico)
 
 **FortressVision** é um visualizador 3D de alta performance para **Dwarf Fortress**, construído utilizando **Go** e a biblioteca gráfica **Raylib**. Ele se conecta ao DFHack para extrair dados em tempo real da sua fortaleza e renderizá-los em um ambiente tridimensional imersivo.
 
 ## 🧭 Como Funciona
 
-O FortressVision atua como um cliente especializado que "escuta" o estado do mundo do Dwarf Fortress e o reconstrói localmente para exibição gráfica.
+O FortressVision atua como um sistema modular que "escuta" o estado do mundo do Dwarf Fortress via gRPC e o reconstrói localmente.
 
 ```mermaid
 graph TD
     DF["Dwarf Fortress (Game)"] --> DFH["DFHack (Plugin Bridge)"]
-    DFH --> RFR["RemoteFortressReader (Protobuf Stream)"]
+    DFH --> RFR["RemoteFortressReader (Protobuf Sync)"]
     
-    subgraph FV [FortressVision v1]
+    subgraph FV [FortressVision v1 Modular]
         RFR --> Scanner["Map Scanner (Async)"]
         Scanner --> Store["Map Data Store (SQLite)"]
-        Scanner --> Mesher["Block Mesher (Greedy Meshing / Pools)"]
-        Store -.->|Pre-heating| Mesher
-        Mesher --> Renderer["Renderer (Raylib / OpenGL)"]
+        Scanner --> Mesher["Block Mesher (Greedy + AO)"]
+        Mesher --> Renderer["Renderer (Raylib / Assets)"]
     end
     
     Renderer --> Display["Display / GPU"]
 ```
 
-
 ## 🚀 Principais Funcionalidades
 
-### 🏗️ Renderização Otimizada (Greedy Meshing)
-Utilizamos um algoritmo de **Greedy Meshing** para reduzir drasticamente o número de polígonos. Ao agrupar faces de blocos idênticos em "fitas" geométricas, conseguimos reduzir as *Draw Calls* e a contagem de triângulos em até 70%, garantindo uma taxa de quadros estável mesmo em fortalezas gigantescas.
+### 🏗️ Renderização Otimizada (Greedy Meshing & AO)
+Utilizamos um algoritmo de **Greedy Meshing** para reduzir drasticamente o número de polígonos. A versão **v1** introduz **Ambient Occlusion (AO)** calculado por vértice, garantindo sombras realistas e profundidade visual sem perda de performance.
 
 ### 💾 Persistência e Carga Offline (SQLite)
-O projeto integra um banco de dados local **SQLite**. Cada mundo visitado é salvo automaticamente, permitindo carregar o terreno instantaneamente no próximo boot sem depender exclusivamente do streaming lento do DFHack. O sistema de "Pre-heating" reconstrói o mapa a partir do disco em milissegundos.
+O projeto integra um banco de dados local **SQLite**. Cada mundo visitado é salvo automaticamente, permitindo carregar o terreno instantaneamente no próximo boot. O sistema de "Pre-heating" foi otimizado para a nova estrutura modular.
 
 ### 🌊 Fluidos Dinâmicos e Shaders
-A água não é apenas um bloco transparente; ela utiliza **Surface Merging** para criar superfícies contínuas e orgânicas. Além disso, implementamos **Flowing Shaders** em GLSL que interpretam os vetores de correnteza reais do Dwarf Fortress, criando animações de rios e cascatas baseadas na física do jogo.
+A água e o magma utilizam **Surface Merging** para criar superfícies contínuas. Implementamos **Flowing Shaders** dinâmicos e transparência real baseada na profundidade do fluido recebida do DFHack.
+
+### 💎 Sincronização de Protocolo
+Totalmente compatível com o protocolo mais recente do **DFHack (53.10-r1)**, garantindo que todas as unidades, itens, construções e novos tipos de materiais sejam reconhecidos e renderizados corretamente.
 
 ### ⚡ Performance Extrema
-- **Memory Pooling:** Uso intensivo de `sync.Pool` para reciclar buffers de geometria e evitar pausas do Garbage Collector (GC).
-- **Thermal Throttling de VRAM:** O upload de malhas para a GPU é controlado por um orçamento de tempo por frame, eliminando "stutters" durante a navegação.
-- **Multithreading:** Meshing e Scanner rodam em goroutines separadas, mantendo a thread principal focada apenas na renderização e entrada do usuário.
+- **Memory Pooling:** Uso intensivo de `sync.Pool` para reciclar buffers de geometria.
+- **Arquitetura Modular:** Separação entre `/cliente`, `/servidor` e `/shared` para melhor manutenção.
+- **Async Processing:** Scanner e Mesher rodam em background para evitar travas na UI.
 
 ## 🛠️ Tecnologias Utilizadas
 
 *   **Linguagem:** Go (Golang) 1.21+
 *   **Gráficos:** Raylib (via CGO)
-*   **Protocolo:** gRPC / Protobuf (via DFHack RemoteFortressReader)
+*   **Protocolo:** Protobuf (Sincronizado com DFHack 53.10-r1)
 *   **Persistência:** GORM + SQLite
-*   **Matemática 3D:** Mathgl (mgl64)
 
 ## 📦 Como Compilar
 
 ### Pré-requisitos
 1.  Instale o **Go 1.21+**.
-2.  Instale um compilador C para Windows (Recomendado: **MingW-w64** via niXman ou TDM-GCC).
-3.  Tenha o **Dwarf Fortress** com **DFHack** instalado e rodando.
+2.  Instale um compilador C (Recomendado: **MingW-w64**).
+3.  Tenha o **Dwarf Fortress** com **DFHack** rodando.
 
-### Build
-Para gerar o executável final com ícone embutido no Windows:
+### Build (Builder Unificado)
+Para compilar todo o ecossistema (Servidor + Cliente + Launcher):
 
 ```bash
-# Compilar recursos de ícone (opcional, se app.syso já existir)
-windres app.rc -o app.syso
-
-# Compilar o binário principal
-go build -o FortressVision.exe .
+# Execute o builder na raiz do projeto
+go run builder/main.go
 ```
 
 ## 🎮 Como Usar
 
 1.  Inicie o **Dwarf Fortress**.
-2.  Certifique-se de que o plugin `RemoteFortressReader` do DFHack está habilitado.
-3.  Execute o `FortressVision.exe`.
-4.  **Controles Básicos:**
-    *   **Mouse:** Rotacionar câmera e Zoom.
-    *   **WASD / Q / E:** Movimentar a câmera.
-    *   **ESC:** Fechar o aplicativo.
+2.  Inicie o `FortressVision.exe` gerado na raiz.
+3.  **Controles Básicos:**
+    *   **Mouse/WASD/Q/E:** Movimentação e Câmera.
+    *   **F3:** HUD de Depuração.
+    *   **F11:** Tela Cheia.
+    *   **ESC:** Sair.
 
 ---
-*Desenvolvido como um visualizador open-source focado em performance e fidelidade técnica ao simulador original.*
+*Desenvolvido focado em performance e fidelidade técnica ao simulador original.*
