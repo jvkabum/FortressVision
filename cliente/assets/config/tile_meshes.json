@@ -1,0 +1,166 @@
+{
+  "tileMeshes": [
+    {
+      "file": "environment/FLOOR.obj",
+      "tokens": ["FLOOR:*:*:*:*", "BRANCH:SMOOTH:*:*:--------"]
+    },
+    {
+      "file": "architecture/WALL.obj",
+      "tokens": ["WALL:*:*:*:*"]
+    },
+    {
+      "file": "environment/TreeTrunkPillar.obj",
+      "tokens": ["WALL:*:TREE_MATERIAL:*:--------"]
+    },
+    {
+      "file": "environment/BOULDER.obj",
+      "tokens": ["BOULDER:*:*:*:*"]
+    },
+    {
+      "file": "environment/PEBBLES.obj",
+      "tokens": ["PEBBLES:*:*:*:*"]
+    },
+    {
+      "file": "environment/SAPLING.obj",
+      "tokens": ["SAPLING:*:*:*:*"],
+      "subObjects": [
+        {
+          "file": "environment/Mushroom.obj",
+          "rotation": "Random",
+          "materialTokens": ["PLANT:BLACK_CAP:STRUCTURAL", "PLANT:TOWER_CAP:STRUCTURAL", "PLANT:GOBLIN_CAP:STRUCTURAL", "PLANT:NETHER_CAP:STRUCTURAL"]
+        }
+      ]
+    },
+    {
+      "file": "environment/BUSH.obj",
+      "tokens": ["SHRUB:*:*:*:*"]
+    },
+    {
+      "file": "architecture/FORTIFICATION.obj",
+      "tokens": ["FORTIFICATION:*:*:*:*"],
+      "subObjects": [
+        {
+          "file": "architecture/FORTIFICATION Open.obj",
+          "coverage": "OPEN"
+        }
+      ]
+    },
+    {
+      "file": "architecture/STAIRS_UP.obj",
+      "tokens": ["STAIR_UP:*:*:*:*"]
+    },
+    {
+      "file": "architecture/STAIRS_DOWN.obj",
+      "tokens": ["STAIR_DOWN:*:*:*:*"]
+    },
+    {
+      "file": "architecture/STAIRS_UPDOWN.obj",
+      "tokens": ["STAIR_UPDOWN:*:*:*:*"]
+    },
+    {
+      "file": "environment/BROOK_BED.obj",
+      "tokens": ["BROOK_BED:*:*:*:*"]
+    },
+    {
+      "file": "environment/TREE.obj",
+      "tokens": ["TREE_SHAPE:*:*:*:*"]
+    },
+    {
+      "file": "environment/TreeBranches.obj",
+      "rotation": "Random90",
+      "tokens": ["BRANCH:*:*:*:--------"]
+    },
+    {
+      "file": "environment/TreeBranchEW.obj",
+      "tokens": ["BRANCH:*:*:*:----W-E-"]
+    },
+    {
+      "file": "environment/TreeBranchSE.obj",
+      "tokens": ["BRANCH:*:*:*:--S---E-"]
+    },
+    {
+      "file": "environment/TreeBranchSW.obj",
+      "tokens": ["BRANCH:*:*:*:--S-W---"]
+    },
+    {
+      "file": "environment/TreeBranchSEW.obj",
+      "tokens": ["BRANCH:*:*:*:--S-W-E-"]
+    },
+    {
+      "file": "environment/TreeBranchNE.obj",
+      "tokens": ["BRANCH:*:*:*:N-----E-"]
+    },
+    {
+      "file": "environment/TreeBranchNW.obj",
+      "tokens": ["BRANCH:*:*:*:N---W---"]
+    },
+    {
+      "file": "environment/TreeBranchNEW.obj",
+      "tokens": ["BRANCH:*:*:*:N---W-E-"]
+    },
+    {
+      "file": "environment/TreeBranchNS.obj",
+      "tokens": ["BRANCH:*:*:*:N-S-----"]
+    },
+    {
+      "file": "environment/TreeBranchNSE.obj",
+      "tokens": ["BRANCH:*:*:*:N-S---E-"]
+    },
+    {
+      "file": "environment/TreeBranchNSW.obj",
+      "tokens": ["BRANCH:*:*:*:N-S-W---"]
+    },
+    {
+      "file": "environment/TreeBranchNSEW.obj",
+      "tokens": ["BRANCH:*:*:*:N-S-W-E-"]
+    },
+    {
+      "file": "environment/FLOOR.obj",
+      "tokens": ["TRUNK_BRANCH:*:*:*:*", "BRANCH:*:*:*:*"]
+    },
+    {
+      "file": "environment/TreeTwigs.obj",
+      "rotation": "Random90",
+      "tokens": ["TWIG:*:*:*:*"]
+    },
+    {
+      "file": "environment/TreeTrunkSloping_1.obj",
+      "tokens": ["RAMP:*:TREE_MATERIAL:*:*"],
+      "subObjects": [
+        { "file": "environment/TreeTrunkSloping_1.obj", "rampIndex": 1 }
+      ]
+    },
+    {
+      "file": "environment/Ramps/RAMP_1.obj",
+      "tokens": ["RAMP:*:*:*:*"],
+      "subObjects": [
+        { "file": "environment/Ramps/RAMP_1.obj", "rampIndex": 1 },
+        { "file": "environment/Ramps/RAMP_2.obj", "rampIndex": 2 },
+        { "file": "environment/Ramps/RAMP_3.obj", "rampIndex": 3 },
+        { "file": "environment/Ramps/RAMP_4.obj", "rampIndex": 4 },
+        { "file": "environment/Ramps/RAMP_5.obj", "rampIndex": 5 },
+        { "file": "environment/Ramps/RAMP_6_sharp.obj", "rampIndex": 6 },
+        { "file": "environment/Ramps/RAMP_7_sharp.obj", "rampIndex": 7 },
+        { "file": "environment/Ramps/RAMP_8_sharp.obj", "rampIndex": 8 },
+        { "file": "environment/Ramps/RAMP_9_sharp.obj", "rampIndex": 9 },
+        { "file": "environment/Ramps/RAMP_10_sharp.obj", "rampIndex": 10 },
+        { "file": "environment/Ramps/RAMP_11_sharp.obj", "rampIndex": 11 },
+        { "file": "environment/Ramps/RAMP_12_sharp.obj", "rampIndex": 12 },
+        { "file": "environment/Ramps/RAMP_13_sharp.obj", "rampIndex": 13 },
+        { "file": "environment/Ramps/RAMP_14_sharp.obj", "rampIndex": 14 },
+        { "file": "environment/Ramps/RAMP_15_sharp.obj", "rampIndex": 15 },
+        { "file": "environment/Ramps/RAMP_16.obj", "rampIndex": 16 },
+        { "file": "environment/Ramps/RAMP_17.obj", "rampIndex": 17 },
+        { "file": "environment/Ramps/RAMP_18_sharp.obj", "rampIndex": 18 },
+        { "file": "environment/Ramps/RAMP_19_sharp.obj", "rampIndex": 19 },
+        { "file": "environment/Ramps/RAMP_20_sharp.obj", "rampIndex": 20 },
+        { "file": "environment/Ramps/RAMP_21_sharp.obj", "rampIndex": 21 },
+        { "file": "environment/Ramps/RAMP_22_sharp.obj", "rampIndex": 22 },
+        { "file": "environment/Ramps/RAMP_23_sharp.obj", "rampIndex": 23 },
+        { "file": "environment/Ramps/RAMP_24_sharp.obj", "rampIndex": 24 },
+        { "file": "environment/Ramps/RAMP_25_sharp.obj", "rampIndex": 25 },
+        { "file": "environment/Ramps/RAMP_26_sharp.obj", "rampIndex": 26 }
+      ]
+    }
+  ]
+}

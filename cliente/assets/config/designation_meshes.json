@@ -1,0 +1,78 @@
+{
+    "designationMeshes": [
+        {
+            "file": "architecture/Designation.obj",
+            "type": "Hidden",
+            "textures": {
+                "metallic": "black.png",
+                "illumination": "Flat_O.png"
+            }
+        },
+        {
+            "file": "architecture/Designation.obj",
+            "type": "Default",
+            "textures": {
+                "metallic": "black.png",
+                "illumination": "Flat_O.png"
+            },
+            "subObjects": [
+                {
+                    "file": "architecture/Designation.obj",
+                    "tileToken": "*:*:TREE_MATERIAL:*:--------",
+                    "textures": {
+                        "metallic": "black.png",
+                        "illumination": "Flat_O.png"
+                    }
+                },
+                {
+                    "file": "architecture/Designation.obj",
+                    "tileToken": "*:*:PLANT:*:--------",
+                    "textures": {
+                        "metallic": "black.png",
+                        "illumination": "Flat_O.png"
+                    }
+                }
+            ]
+        },
+        {
+            "file": "architecture/Designation.obj",
+            "type": "UpDownStairs",
+            "textures": {
+                "metallic": "black.png",
+                "illumination": "Flat_O.png"
+            }
+        },
+        {
+            "file": "architecture/Designation.obj",
+            "type": "Channel",
+            "textures": {
+                "metallic": "black.png",
+                "illumination": "Flat_O.png"
+            }
+        },
+        {
+            "file": "architecture/Designation.obj",
+            "type": "Ramp",
+            "textures": {
+                "metallic": "black.png",
+                "illumination": "Flat_O.png"
+            }
+        },
+        {
+            "file": "architecture/Designation.obj",
+            "type": "UpStairs",
+            "textures": {
+                "metallic": "black.png",
+                "illumination": "Flat_O.png"
+            }
+        },
+        {
+            "file": "architecture/Designation.obj",
+            "type": "DownStairs",
+            "textures": {
+                "metallic": "black.png",
+                "illumination": "Flat_O.png"
+            }
+        }
+    ]
+}

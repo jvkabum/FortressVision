@@ -1,0 +1,122 @@
+{
+    "tileTextures": [
+        {
+            "item": "BAR",
+            "textures": {
+                "normal": "Bars_N.png",
+                "occlusion": "Bars_O.png",
+                "alpha": "Opaque_A.png"
+            },
+            "materialOverrides": [
+                {
+                    "materialToken": "COAL:*",
+                    "textures": {
+                        "normal": "Bars_N.png",
+                        "occlusion": "Bars_O.png",
+                        "alpha": "Opaque_A.png"
+                    }
+                }
+            ]
+        },
+        {
+            "item": "BLOCKS",
+            "textures": {
+                "normal": "Tiles_N.png",
+                "occlusion": "Tiles_O.png",
+                "alpha": "Opaque_A.png"
+            }
+        },
+        {
+            "item": "WOOD",
+            "textures": {
+                "normal": "Logs_N.png",
+                "occlusion": "Logs_O.png",
+                "alpha": "Opaque_A.png"
+            }
+        },
+        {
+            "item": "BOULDER",
+            "textures": {
+                "normal": "Boulders_N.png",
+                "occlusion": "Boulders_O.png",
+                "alpha": "Opaque_A.png"
+            }
+        },
+        {
+            "item": "NONE",
+            "comment": "Fallback genérico para terreno bruto",
+            "textures": {
+                "normal": "Rough_N.png",
+                "occlusion": "Rough_O.png",
+                "alpha": "Opaque_A.png"
+            },
+            "tileOverrides": [
+                {
+                    "tileToken": "*:SMOOTH:*:*:*",
+                    "textures": {
+                        "normal": "Flat_N.png",
+                        "occlusion": "Flat_O.png",
+                        "alpha": "Opaque_A.png"
+                    }
+                }
+            ]
+        }
+    ],
+    "buildingTextures": [
+        {
+            "token": "NONE",
+            "textures": {
+                "normal": "Flat_N.png",
+                "occlusion": "Flat_O.png",
+                "alpha": "Opaque_A.png"
+            }
+        },
+        {
+            "token": "Workshop_Jewelers",
+            "textures": {
+                "normal": "Flat_N.png",
+                "occlusion": "Flat_O.png",
+                "alpha": "Opaque_A.png"
+            },
+            "subObjects": [
+                {
+                    "textures": {
+                        "normal": "Flat_N.png",
+                        "occlusion": "Flat_O.png",
+                        "alpha": "Jewelers_Tools_A.png"
+                    },
+                    "positions": [
+                        {
+                            "x": 2,
+                            "y": 0
+                        },
+                        {
+                            "x": 2,
+                            "y": 1
+                        },
+                        {
+                            "x": 2,
+                            "y": 2
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "token": "WindowGlass",
+            "textures": {
+                "normal": "Flat_N.png",
+                "occlusion": "Flat_O.png",
+                "alpha": "Medium_A.png"
+            }
+        },
+        {
+            "token": "WindowGem",
+            "textures": {
+                "normal": "Flat_N.png",
+                "occlusion": "Flat_O.png",
+                "alpha": "Medium_A.png"
+            }
+        }
+    ]
+}

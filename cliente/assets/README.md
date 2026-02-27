@@ -37,5 +37,24 @@ Imagens 2D (billboards) importadas do Armok Vision para atuar como recursos visu
 *   `items/`: Sprites 2D de comidas, sementes e ferramentas secundárias.
 *   `ui_graphics/`: Tiles originais do jogo.
 
+## ⚙️ Config (`assets/config/`)
+Arquivos JSON de mapeamento entre tokens do Dwarf Fortress e modelos/texturas.
+
+*   `tile_meshes.json`: Terreno (WALL, FLOOR, RAMP, TREE, etc.)
+*   `building_meshes.json`: Construções (Bed, Chair, Door, Workshops, etc.)
+*   `growth_meshes.json`: Folhagens, frutas, flores e palmeiras.
+*   `designation_meshes.json`: Overlays de escavação e designação.
+*   `collision_meshes.json`: Meshes simplificadas para colisão.
+*   `tile_textures.json`: Normal/Occlusion maps por material (PBR).
+
+## 🔊 Sons (`assets/sounds/`)
+Efeitos sonoros básicos (passos, pulos).
+
+## 📡 Proto (`assets/proto/`)
+Definições Protobuf do DFHack para comunicação com o jogo.
+
+## 🌐 Localização (`assets/localization/`)
+Traduções da interface (pt-BR, en).
+
 ---
-*Nota: A maioria dos modelos foi migrada do projeto Armok Vision e organizada para máxima performance e compatibilidade com o motor Raylib (Go).*
+*Nota: Todos os recursos foram migrados do projeto Armok Vision e organizados para máxima performance e compatibilidade com o motor Raylib (Go).*

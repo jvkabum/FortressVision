@@ -1,0 +1,366 @@
+{
+    "collisionMeshes": {
+        "tiles": [
+            {
+                "file": "environment/FLOOR.obj",
+                "tokens": [
+                    "FLOOR:*:*:*:*",
+                    "BRANCH:*:*:*:*",
+                    "BOULDER:*:*:*:*",
+                    "PEBBLES:*:*:*:*",
+                    "SAPLING:*:*:*:*",
+                    "SHRUB:*:*:*:*",
+                    "BROOK_BED:*:*:*:*",
+                    "TRUNK_BRANCH:*:*:*:*",
+                    "STAIR_UP:*:*:*:*"
+                ]
+            },
+            {
+                "file": "architecture/WALL.obj",
+                "tokens": [
+                    "WALL:*:*:*:*",
+                    "FORTIFICATION:*:*:*:*",
+                    "TREE_SHAPE:*:*:*:*"
+                ]
+            },
+            {
+                "file": "environment/Ramps/RAMP_1.obj",
+                "tokens": [
+                    "RAMP:*:*:*:*"
+                ],
+                "subObjects": [
+                    {
+                        "file": "environment/Ramps/RAMP_1.obj",
+                        "rampIndex": 1
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_2.obj",
+                        "rampIndex": 2
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_3.obj",
+                        "rampIndex": 3
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_4.obj",
+                        "rampIndex": 4
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_5.obj",
+                        "rampIndex": 5
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_6_sharp.obj",
+                        "rampIndex": 6
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_7_sharp.obj",
+                        "rampIndex": 7
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_8_sharp.obj",
+                        "rampIndex": 8
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_9_sharp.obj",
+                        "rampIndex": 9
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_10_sharp.obj",
+                        "rampIndex": 10
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_11_sharp.obj",
+                        "rampIndex": 11
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_12_sharp.obj",
+                        "rampIndex": 12
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_13_sharp.obj",
+                        "rampIndex": 13
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_14_sharp.obj",
+                        "rampIndex": 14
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_15_sharp.obj",
+                        "rampIndex": 15
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_16.obj",
+                        "rampIndex": 16
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_17.obj",
+                        "rampIndex": 17
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_18_sharp.obj",
+                        "rampIndex": 18
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_19_sharp.obj",
+                        "rampIndex": 19
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_20_sharp.obj",
+                        "rampIndex": 20
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_21_sharp.obj",
+                        "rampIndex": 21
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_22_sharp.obj",
+                        "rampIndex": 22
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_23_sharp.obj",
+                        "rampIndex": 23
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_24_sharp.obj",
+                        "rampIndex": 24
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_25_sharp.obj",
+                        "rampIndex": 25
+                    },
+                    {
+                        "file": "environment/Ramps/RAMP_26_sharp.obj",
+                        "rampIndex": 26
+                    }
+                ]
+            }
+        ],
+        "buildings": [
+            {
+                "file": "architecture/Statue.obj",
+                "tokens": [
+                    "Statue"
+                ]
+            },
+            {
+                "file": "architecture/Window.obj",
+                "tokens": [
+                    "WindowGlass",
+                    "WindowGem"
+                ]
+            },
+            {
+                "file": "architecture/Bridge.obj",
+                "tokens": [
+                    "Bridge"
+                ]
+            },
+            {
+                "file": "architecture/Support.obj",
+                "tokens": [
+                    "Support"
+                ]
+            },
+            {
+                "file": "NONE",
+                "tokens": [
+                    "ScrewPump"
+                ],
+                "subObjects": [
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "rotation": "BuildingDirection",
+                        "position": {
+                            "x": 0,
+                            "y": 1
+                        }
+                    }
+                ]
+            },
+            {
+                "file": "NONE",
+                "tokens": [
+                    "Workshop_MetalsmithsForge",
+                    "Workshop_MagmaForge"
+                ],
+                "subObjects": [
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 1,
+                            "y": 0
+                        }
+                    },
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 1,
+                            "y": 2
+                        }
+                    }
+                ]
+            },
+            {
+                "file": "NONE",
+                "tokens": [
+                    "Furnace"
+                ],
+                "subObjects": [
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 1,
+                            "y": 0
+                        }
+                    }
+                ]
+            },
+            {
+                "file": "NONE",
+                "tokens": [
+                    "Workshop_Carpenters"
+                ],
+                "subObjects": [
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 0,
+                            "y": 1
+                        }
+                    },
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 0,
+                            "y": 2
+                        }
+                    },
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 2,
+                            "y": 2
+                        }
+                    }
+                ]
+            },
+            {
+                "file": "NONE",
+                "tokens": [
+                    "Workshop_Farmers"
+                ],
+                "subObjects": [
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 0,
+                            "y": 2
+                        }
+                    },
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 1,
+                            "y": 0
+                        }
+                    }
+                ]
+            },
+            {
+                "file": "NONE",
+                "tokens": [
+                    "Workshop_Masons"
+                ],
+                "subObjects": [
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 2,
+                            "y": 0
+                        }
+                    },
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 0,
+                            "y": 1
+                        }
+                    },
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 2,
+                            "y": 1
+                        }
+                    }
+                ]
+            },
+            {
+                "file": "NONE",
+                "tokens": [
+                    "Workshop_Craftsdwarfs"
+                ],
+                "subObjects": [
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 2,
+                            "y": 0
+                        }
+                    },
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 0,
+                            "y": 1
+                        }
+                    },
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 0,
+                            "y": 2
+                        }
+                    },
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 1,
+                            "y": 2
+                        }
+                    }
+                ]
+            },
+            {
+                "file": "NONE",
+                "tokens": [
+                    "Workshop_Jewelers"
+                ],
+                "subObjects": [
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 2,
+                            "y": 0
+                        }
+                    },
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 2,
+                            "y": 1
+                        }
+                    },
+                    {
+                        "file": "architecture/WorkshopCounter.obj",
+                        "position": {
+                            "x": 2,
+                            "y": 2
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+}
