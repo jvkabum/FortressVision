@@ -1,0 +1,23 @@
+{
+    "named_models": {
+        "shrub": "assets/models/environment/shrub.glb",
+        "tree_body": "assets/models/environment/TREE.obj",
+        "tree_trunk": "assets/models/environment/TreeTrunkPillar.obj",
+        "tree_branches": "assets/models/environment/TreeBranches.obj",
+        "tree_twigs": "assets/models/environment/TreeTwigs.obj",
+        "tree_branch_ns": "assets/models/environment/TreeBranchNS.obj",
+        "tree_branch_ew": "assets/models/environment/TreeBranchEW.obj",
+        "tree_branch_ne": "assets/models/environment/TreeBranchNE.obj",
+        "tree_branch_nw": "assets/models/environment/TreeBranchNW.obj",
+        "tree_branch_se": "assets/models/environment/TreeBranchSE.obj",
+        "tree_branch_sw": "assets/models/environment/TreeBranchSW.obj",
+        "tree_branch_nse": "assets/models/environment/TreeBranchNSE.obj",
+        "tree_branch_nsw": "assets/models/environment/TreeBranchNSW.obj",
+        "tree_branch_new": "assets/models/environment/TreeBranchNEW.obj",
+        "tree_branch_sew": "assets/models/environment/TreeBranchSEW.obj",
+        "tree_branch_nsew": "assets/models/environment/TreeBranchNSEW.obj",
+        "branches": "assets/models/environment/Branches.obj",
+        "mushroom": "assets/models/environment/SAPLING.obj",
+        "sapling": "assets/models/environment/SAPLING.obj"
+    }
+}

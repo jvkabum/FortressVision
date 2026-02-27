@@ -58,12 +58,18 @@ type BuildingMeshConfig struct {
 	BuildingMeshes []MeshEntry `json:"buildingMeshes"`
 }
 
+// NamedModelsConfig é o root do models.json
+type NamedModelsConfig struct {
+	NamedModels map[string]string `json:"named_models"`
+}
+
 // --- Manager ---
 
 // Manager é a estrutura central em memória que responde às consultas do Mesher
 type Manager struct {
 	tileMeshes     []MeshEntry
 	buildingMeshes []MeshEntry
+	namedModels    map[string]string
 }
 
 // NewManager cria e carrega o gerenciador de assets a partir dos JSONs configurados
@@ -91,6 +97,20 @@ func NewManager(configDir string) (*Manager, error) {
 		return nil, fmt.Errorf("falha ao parsear building_meshes.json: %w", err)
 	}
 	m.buildingMeshes = buildConf.BuildingMeshes
+
+	// Carregar named models (essentials)
+	namedData, err := os.ReadFile(configDir + "/models.json")
+	if err != nil {
+		// Fallback silencioso se o arquivo não existir (opcional)
+		// return nil, fmt.Errorf("falha ao ler models.json: %w", err)
+		m.namedModels = make(map[string]string)
+	} else {
+		var namedConf NamedModelsConfig
+		if err := json.Unmarshal(namedData, &namedConf); err != nil {
+			return nil, fmt.Errorf("falha ao parsear models.json: %w", err)
+		}
+		m.namedModels = namedConf.NamedModels
+	}
 
 	return m, nil
 }
@@ -211,6 +231,11 @@ func (m *Manager) GetAllTileMeshes() []MeshEntry {
 // GetAllBuildingMeshes retorna todas as entradas de building meshes carregadas
 func (m *Manager) GetAllBuildingMeshes() []MeshEntry {
 	return m.buildingMeshes
+}
+
+// GetNamedModels retorna o mapa de modelos essenciais
+func (m *Manager) GetNamedModels() map[string]string {
+	return m.namedModels
 }
 
 // specificityScore calcula a "especificidade" de um padrão
