@@ -28,5 +28,14 @@ Texturas e mapas de bits organizados por uso.
 *   **`entities/`**: Texturas para criaturas e unidades.
 *   **`ui/`**: Elementos da interface do usuário.
 
+## 👾 Sprites (`assets/sprites/`)
+Imagens 2D (billboards) importadas do Armok Vision para atuar como recursos visuais alternativos ou substitutos de modelos 3D inexistentes.
+
+*   `dwarf_male/`, `dwarf_female/`, `dwarf_child/`: Sprites de anões.
+*   `human_male/`, `human_female/`: Sprites de humanos.
+*   `animals_domestic/`, `animals_wild/`, `creatures_other/`: Fauna e monstros globais.
+*   `items/`: Sprites 2D de comidas, sementes e ferramentas secundárias.
+*   `ui_graphics/`: Tiles originais do jogo.
+
 ---
 *Nota: A maioria dos modelos foi migrada do projeto Armok Vision e organizada para máxima performance e compatibilidade com o motor Raylib (Go).*
