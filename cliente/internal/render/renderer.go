@@ -349,19 +349,31 @@ func NewRenderer() *Renderer {
 }
 
 func (r *Renderer) loadTextures() {
-	assets := []string{"stone", "grass", "wood", "marble", "ore", "gem", "plant"}
-	for _, name := range assets {
-		path := fmt.Sprintf("assets/textures/%s.png", name)
-		tex := rl.LoadTexture(path)
-		if tex.ID != 0 {
-			rl.GenTextureMipmaps(&tex)
-			rl.SetTextureFilter(tex, rl.FilterTrilinear)
-			rl.SetTextureWrap(tex, rl.WrapRepeat)
-			r.Textures[name] = tex
-			log.Printf("[Renderer] Textura carregada: %s", path)
-		} else {
-			log.Printf("[Renderer] FALHA ao carregar textura: %s", path)
-		}
+	// Texturas de blocos/terreno
+	blocks := []string{"stone", "grass", "wood", "marble", "ore", "plant"}
+	for _, name := range blocks {
+		path := fmt.Sprintf("assets/textures/blocks/%s.png", name)
+		r.loadSingleTexture(name, path)
+	}
+
+	// Texturas de itens
+	items := []string{"gem"}
+	for _, name := range items {
+		path := fmt.Sprintf("assets/textures/items/%s.png", name)
+		r.loadSingleTexture(name, path)
+	}
+}
+
+func (r *Renderer) loadSingleTexture(name, path string) {
+	tex := rl.LoadTexture(path)
+	if tex.ID != 0 {
+		rl.GenTextureMipmaps(&tex)
+		rl.SetTextureFilter(tex, rl.FilterTrilinear)
+		rl.SetTextureWrap(tex, rl.WrapRepeat)
+		r.Textures[name] = tex
+		log.Printf("[Renderer] Textura carregada: %s", path)
+	} else {
+		log.Printf("[Renderer] FALHA ao carregar textura: %s", path)
 	}
 }
 
@@ -372,12 +384,12 @@ func (r *Renderer) loadModels() {
 	}
 
 	entries := []modelEntry{
-		{"shrub", "assets/models/shrub.glb"},
-		{"tree_trunk", "assets/models/TreeTrunkPillar.obj"},
-		{"tree_branches", "assets/models/TreeBranches.obj"},
-		{"tree_twigs", "assets/models/TreeTwigs.obj"},
-		{"branches", "assets/models/Branches.obj"},
-		{"mushroom", "assets/models/SAPLING.obj"},
+		{"shrub", "assets/models/environment/shrub.glb"},
+		{"tree_trunk", "assets/models/environment/TreeTrunkPillar.obj"},
+		{"tree_branches", "assets/models/environment/TreeBranches.obj"},
+		{"tree_twigs", "assets/models/environment/TreeTwigs.obj"},
+		{"branches", "assets/models/environment/Branches.obj"},
+		{"mushroom", "assets/models/environment/SAPLING.obj"},
 	}
 
 	for _, entry := range entries {
