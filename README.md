@@ -23,6 +23,16 @@ graph TD
     Renderer --> Display["Display / GPU"]
 ```
 
+## 📸 Galeria
+
+| Servidor em Operação | Visualização do Mundo (Exemplo 1) |
+|:---:|:---:|
+| ![Server Startup](docs/images/server_startup.png) | ![Gameplay 1](docs/images/gameplay_1.png) |
+
+| Visualização do Mundo (Exemplo 2) |
+|:---:|
+| ![Gameplay 2](docs/images/gameplay_2.png) |
+
 ## 🚀 Principais Funcionalidades
 
 ### 🏗️ Renderização Otimizada (Greedy Meshing & AO)
