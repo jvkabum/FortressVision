@@ -203,6 +203,16 @@ func (m *Manager) GetSubObjectForMaterial(entry *MeshEntry, materialToken string
 	return nil
 }
 
+// GetAllTileMeshes retorna todas as entradas de tile meshes carregadas
+func (m *Manager) GetAllTileMeshes() []MeshEntry {
+	return m.tileMeshes
+}
+
+// GetAllBuildingMeshes retorna todas as entradas de building meshes carregadas
+func (m *Manager) GetAllBuildingMeshes() []MeshEntry {
+	return m.buildingMeshes
+}
+
 // specificityScore calcula a "especificidade" de um padrão
 // Quanto mais segmentos NÃO são wildcard, mais específico é
 func specificityScore(pattern string) int {

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"FortressVision/cliente/internal/assets"
 	"FortressVision/cliente/internal/meshing"
 	"FortressVision/shared/util"
 
@@ -308,6 +309,9 @@ type Renderer struct {
 	// Modelos 3D carregados (shrub, tree, etc)
 	Models3D map[string]rl.Model
 
+	// Gerenciador de Assets (JSON config)
+	AssetMgr *assets.Manager
+
 	// Sistema de Clima (Fase 8)
 	Weather *ParticleSystem
 
@@ -322,6 +326,15 @@ func NewRenderer() *Renderer {
 		purgeQueue: make([]util.DFCoord, 0),
 		Textures:   make(map[string]rl.Texture2D),
 		Models3D:   make(map[string]rl.Model),
+	}
+
+	// Inicializar o Gerenciador de Assets (JSON)
+	mgr, err := assets.NewManager("assets/config")
+	if err != nil {
+		log.Printf("[Renderer] AVISO: Asset Manager não inicializado: %v", err)
+	} else {
+		r.AssetMgr = mgr
+		log.Printf("[Renderer] Asset Manager carregado com sucesso")
 	}
 
 	// Tenta carregar os Shaders Customizados
@@ -339,7 +352,7 @@ func NewRenderer() *Renderer {
 		// Carregar Texturas Premium
 		r.loadTextures()
 
-		// Carregar Modelos 3D
+		// Carregar Modelos 3D (via JSON config)
 		r.loadModels()
 	}
 
@@ -378,12 +391,12 @@ func (r *Renderer) loadSingleTexture(name, path string) {
 }
 
 func (r *Renderer) loadModels() {
+	// Fallback hardcoded (sempre carrega estes modelos essenciais)
 	type modelEntry struct {
 		name string
 		path string
 	}
-
-	entries := []modelEntry{
+	essentials := []modelEntry{
 		{"shrub", "assets/models/environment/shrub.glb"},
 		{"tree_trunk", "assets/models/environment/TreeTrunkPillar.obj"},
 		{"tree_branches", "assets/models/environment/TreeBranches.obj"},
@@ -391,18 +404,80 @@ func (r *Renderer) loadModels() {
 		{"branches", "assets/models/environment/Branches.obj"},
 		{"mushroom", "assets/models/environment/SAPLING.obj"},
 	}
-
-	for _, entry := range entries {
-		log.Printf("[Renderer] CARGA: Tentando '%s' de '%s'...", entry.name, entry.path)
-
-		model := rl.LoadModel(entry.path)
-		if model.MeshCount > 0 {
-			r.Models3D[entry.name] = model
-			log.Printf("[Renderer] SUCESSO: '%s' carregado", entry.name)
-		} else {
-			log.Printf("[Renderer] AVISO: '%s' falhou (sem meshes)", entry.name)
-		}
+	for _, entry := range essentials {
+		r.loadSingleModel(entry.name, entry.path)
 	}
+
+	// Carregar modelos adicionais do Asset Manager (JSON)
+	if r.AssetMgr != nil {
+		loaded := make(map[string]bool)
+		for _, name := range r.getModelNames() {
+			loaded[name] = true
+		}
+
+		// Tile meshes do JSON
+		for _, entry := range r.AssetMgr.GetAllTileMeshes() {
+			if entry.File == "" || entry.File == "NONE" {
+				continue
+			}
+			path := "assets/models/" + entry.File
+			if !loaded[path] {
+				r.loadSingleModel(entry.File, path)
+				loaded[path] = true
+			}
+			// SubObjects
+			for _, sub := range entry.SubObjects {
+				if sub.File == "" || sub.File == "NONE" {
+					continue
+				}
+				subPath := "assets/models/" + sub.File
+				if !loaded[subPath] {
+					r.loadSingleModel(sub.File, subPath)
+					loaded[subPath] = true
+				}
+			}
+		}
+
+		// Building meshes do JSON
+		for _, entry := range r.AssetMgr.GetAllBuildingMeshes() {
+			if entry.File == "" || entry.File == "NONE" {
+				continue
+			}
+			path := "assets/models/" + entry.File
+			if !loaded[path] {
+				r.loadSingleModel(entry.File, path)
+				loaded[path] = true
+			}
+			for _, sub := range entry.SubObjects {
+				if sub.File == "" || sub.File == "NONE" {
+					continue
+				}
+				subPath := "assets/models/" + sub.File
+				if !loaded[subPath] {
+					r.loadSingleModel(sub.File, subPath)
+					loaded[subPath] = true
+				}
+			}
+		}
+
+		log.Printf("[Renderer] Total de modelos 3D carregados via JSON: %d", len(r.Models3D))
+	}
+}
+
+func (r *Renderer) loadSingleModel(name, path string) {
+	model := rl.LoadModel(path)
+	if model.MeshCount > 0 {
+		r.Models3D[name] = model
+		log.Printf("[Renderer] Modelo carregado: %s", path)
+	}
+}
+
+func (r *Renderer) getModelNames() []string {
+	names := make([]string, 0, len(r.Models3D))
+	for k := range r.Models3D {
+		names = append(names, k)
+	}
+	return names
 }
 
 // HasModel verifica se já existe um modelo carregado para esta coordenada e com a mesma versão.
