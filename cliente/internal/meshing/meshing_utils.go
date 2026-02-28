@@ -75,8 +75,11 @@ func (m *BlockMesher) getQuadCornerColors(coord util.DFCoord, face util.Directio
 
 func (m *BlockMesher) shouldDrawFace(tile *mapdata.Tile, dir util.Directions) bool {
 	neighbor := tile.GetNeighbor(dir)
-	if neighbor == nil || neighbor.Hidden {
-		return true
+	if neighbor == nil {
+		return true // Borda do mapa: desenha
+	}
+	if neighbor.Hidden {
+		return false // Vizinho oculto é "vácuo preto sólido": NÃO desenha face contra ele
 	}
 	neighborShape := neighbor.Shape()
 	if neighborShape == dfproto.ShapeNoShape {

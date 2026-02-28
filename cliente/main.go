@@ -22,6 +22,11 @@ func main() {
 	height := flag.Int("height", 0, "Altura da janela")
 	flag.Parse()
 
+	// Garantir que estamos no diretório correto para caminhos relativos de assets funcionarem
+	if _, err := os.Stat("cliente/assets"); err == nil {
+		os.Chdir("cliente")
+	}
+
 	// Configurar Log em Arquivo
 	f, err := os.OpenFile("debug_fv.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err == nil {

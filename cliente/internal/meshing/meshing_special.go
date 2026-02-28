@@ -5,9 +5,13 @@ import (
 	"FortressVision/shared/pkg/dfproto"
 	"FortressVision/shared/util"
 	"fmt"
+	"log"
+	"sync/atomic"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
+
+var rampDebugCount atomic.Int64
 
 // addRamp renderiza a rampa usando o sistema de material para garantir shaders sólidos (Fase 34: Fix Final)
 func (m *BlockMesher) addRamp(coord util.DFCoord, tile *mapdata.Tile, color [4]uint8, res *Result) {
@@ -30,10 +34,19 @@ func (m *BlockMesher) addRamp(coord util.DFCoord, tile *mapdata.Tile, color [4]u
 		}
 	}
 
+	texName := m.MatStore.GetTextureName(tile.MaterialCategory())
+
+	// DEBUG: Log da primeira rampa encontrada
+	count := rampDebugCount.Add(1)
+	if count <= 5 {
+		log.Printf("[DEBUG RAMP] #%d tipo=%d modelo='%s' tex='%s' pos=(%.1f,%.1f,%.1f) assetMgr=%v",
+			count, rampType, modelName, texName, pos.X, pos.Y, pos.Z, m.AssetMgr != nil)
+	}
+
 	// Adicionamos como ModelInstance, mas vamos garantir que o Renderer NÃO use shaders de planta para ela
 	res.ModelInstances = append(res.ModelInstances, ModelInstance{
 		ModelName:   modelName,
-		TextureName: m.MatStore.GetTextureName(tile.MaterialCategory()),
+		TextureName: texName,
 		Position:    [3]float32{pos.X + 0.5, pos.Y, pos.Z - 0.5},
 		Scale:       1.0,
 		Color:       color,

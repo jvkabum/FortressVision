@@ -2,6 +2,7 @@ package mapdata
 
 import (
 	"FortressVision/shared/pkg/dfproto"
+	"fmt"
 	"log"
 	"sync"
 
@@ -16,6 +17,12 @@ type MaterialStore struct {
 	// Cache de cores por par de material (MatType, MatIndex)
 	Colors map[dfproto.MatPair]rl.Color
 
+	// Cache de nomes legíveis (ex: "Granite", "Iron Ore")
+	Names map[dfproto.MatPair]string
+
+	// Cache de IDs internos/tokens (ex: "STONE:GRANITE")
+	Tokens map[dfproto.MatPair]string
+
 	// Mapeamento de texturas carregadas no Renderer (armazenamos apenas os nomes/IDs aqui)
 	TextureMap map[dfproto.TiletypeMaterial]string
 
@@ -26,6 +33,8 @@ type MaterialStore struct {
 func NewMaterialStore() *MaterialStore {
 	return &MaterialStore{
 		Colors:     make(map[dfproto.MatPair]rl.Color),
+		Names:      make(map[dfproto.MatPair]string),
+		Tokens:     make(map[dfproto.MatPair]string),
 		TextureMap: make(map[dfproto.TiletypeMaterial]string),
 	}
 }
@@ -130,7 +139,6 @@ func (s *MaterialStore) UpdateMaterials(list *dfproto.MaterialList) {
 	s.mu.Lock()
 	var models []MaterialModel
 	for _, mat := range list.MaterialList {
-		// No dfproto v1, MatPair é um struct por valor
 		pair := mat.MatPair
 		color := rl.NewColor(
 			uint8(mat.StateColor.Red),
@@ -139,6 +147,8 @@ func (s *MaterialStore) UpdateMaterials(list *dfproto.MaterialList) {
 			255,
 		)
 		s.Colors[pair] = color
+		s.Names[pair] = mat.Name
+		s.Tokens[pair] = mat.ID
 
 		if s.DB != nil {
 			models = append(models, MaterialModel{
@@ -160,4 +170,20 @@ func (s *MaterialStore) UpdateMaterials(list *dfproto.MaterialList) {
 			log.Printf("[MaterialStore] Erro ao persistir materiais: %v", err)
 		}
 	}
+}
+
+// GetMaterialName retorna o nome legível do material ou seu token como fallback.
+func (s *MaterialStore) GetMaterialName(pair dfproto.MatPair) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if name, ok := s.Names[pair]; ok && name != "" {
+		return name
+	}
+
+	if token, ok := s.Tokens[pair]; ok && token != "" {
+		return token
+	}
+
+	return fmt.Sprintf("Desconhecido (%d:%d)", pair.MatType, pair.MatIndex)
 }

@@ -66,8 +66,11 @@ func (pm *PropManager) AddInstance(inst meshing.ModelInstance, mesh rl.Mesh, mat
 	}
 
 	// 1. Escala (S)
+	if inst.Scale == 0 {
+		inst.Scale = 1.0
+	}
 	scaleMat := rl.MatrixScale(inst.Scale, inst.Scale, inst.Scale)
-	// 2. Rotação (R)
+	// 2. Rotação (R) - inst.Rotation deveria vir em graus (0-360) do JSON, Raylib MatrixRotateY aceita Radianos
 	rotMat := rl.MatrixRotateY(inst.Rotation * (math.Pi / 180.0))
 	// 3. Translação (T)
 	transMat := rl.MatrixTranslate(inst.Position[0], inst.Position[1], inst.Position[2])
@@ -83,7 +86,7 @@ func (pm *PropManager) AddInstance(inst meshing.ModelInstance, mesh rl.Mesh, mat
 
 // DrawAll executa Frustum Culling e desenha as instâncias visíveis.
 func (pm *PropManager) DrawAll(cam rl.Camera3D) {
-	camDir := rl.Vector3Normalize(rl.Vector3Subtract(cam.Target, cam.Position))
+	// camDir := rl.Vector3Normalize(rl.Vector3Subtract(cam.Target, cam.Position))
 
 	for _, b := range pm.Batches {
 		if len(b.Transforms) == 0 {
@@ -94,26 +97,26 @@ func (pm *PropManager) DrawAll(cam rl.Camera3D) {
 		b.Visible = b.Visible[:0]
 
 		for _, m := range b.Transforms {
-			// Extrair posição da matriz (M12, M13, M14 em row-major da raylib)
-			pos := rl.Vector3{X: m.M12, Y: m.M13, Z: m.M14}
+			// Extrair posição da matriz (M12, M13, M14 em row-major da raylib) - DESABILITADO
+			// pos := rl.Vector3{X: m.M12, Y: m.M13, Z: m.M14}
 
-			// Frustum Culling manual via Dot Product
-			diff := rl.Vector3Subtract(pos, cam.Position)
-			distSq := diff.X*diff.X + diff.Y*diff.Y + diff.Z*diff.Z
+			// Frustum Culling manual via Dot Product - DESABILITADO PARA DEBUG
+			// diff := rl.Vector3Subtract(pos, cam.Position)
+			// distSq := diff.X*diff.X + diff.Y*diff.Y + diff.Z*diff.Z
 
 			// Se estiver muito perto, sempre desenha (evita pop-in lateral)
-			if distSq < 225 { // 15 units
-				b.Visible = append(b.Visible, m)
-				continue
-			}
+			// if distSq < 225 { // 15 units
+			b.Visible = append(b.Visible, m)
+			// 	continue
+			// }
 
 			// Check de ângulo relaxado (dot product > 0.1 significa quase 90 graus de cada lado)
-			dirToPoint := rl.Vector3Normalize(diff)
-			dot := rl.Vector3DotProduct(camDir, dirToPoint)
+			// dirToPoint := rl.Vector3Normalize(diff)
+			// dot := rl.Vector3DotProduct(camDir, dirToPoint)
 
-			if dot > 0.1 { // Muito mais permissivo
-				b.Visible = append(b.Visible, m)
-			}
+			// if dot > 0.1 { // Muito mais permissivo
+			// 	b.Visible = append(b.Visible, m)
+			// }
 		}
 
 		b.Draw()

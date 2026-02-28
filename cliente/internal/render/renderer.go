@@ -7,6 +7,7 @@ import "C"
 
 import (
 	"log"
+	"math"
 	"sync"
 	"unsafe"
 
@@ -53,6 +54,8 @@ type Renderer struct {
 	purgeQueue []util.DFCoord
 
 	PropMgr *PropManager // Sistema de GPU Instancing (Fase 33)
+
+	debugInstCount int // DEBUG: contador frame para log temporário
 }
 
 // NewRenderer cria um novo renderizador.
@@ -87,9 +90,17 @@ func NewRenderer() *Renderer {
 		locsT[0] = rl.GetShaderLocation(r.TerrainShader, "texture0")    // SHADER_LOC_MAP_DIFFUSE
 		locsT[12] = rl.GetShaderLocation(r.TerrainShader, "colDiffuse") // SHADER_LOC_COLOR_DIFFUSE
 
+		locsTI := unsafe.Slice(r.TerrainInstancedShader.Locs, 32)
+		locsTI[0] = rl.GetShaderLocation(r.TerrainInstancedShader, "texture0")
+		locsTI[12] = rl.GetShaderLocation(r.TerrainInstancedShader, "colDiffuse")
+
 		locsP := unsafe.Slice(r.PlantShader.Locs, 32)
 		locsP[0] = rl.GetShaderLocation(r.PlantShader, "texture0")
 		locsP[12] = rl.GetShaderLocation(r.PlantShader, "colDiffuse")
+
+		locsPI := unsafe.Slice(r.PlantInstancedShader.Locs, 32)
+		locsPI[0] = rl.GetShaderLocation(r.PlantInstancedShader, "texture0")
+		locsPI[12] = rl.GetShaderLocation(r.PlantInstancedShader, "colDiffuse")
 
 		r.terrainTimeLoc = rl.GetShaderLocation(r.TerrainShader, "time")
 		r.snowAmountLoc = rl.GetShaderLocation(r.TerrainShader, "snowAmount")
@@ -103,6 +114,8 @@ func NewRenderer() *Renderer {
 		// Carregar Modelos 3D (via JSON config)
 		r.loadModels()
 	}
+
+	log.Printf("[DEBUG INIT] NewRenderer() finalizado. Models3D=%d, Textures=%d", len(r.Models3D), len(r.Textures))
 
 	r.Weather = NewParticleSystem(2000)
 
@@ -158,10 +171,15 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		Instances: res.ModelInstances,
 	}
 
+	if len(res.ModelInstances) > 0 {
+		log.Printf("[Renderer] Recebidas %d instâncias para o chunk %s (Primeira rampa: %v)",
+			len(res.ModelInstances), res.Origin.String(), res.ModelInstances[0].IsRamp)
+	}
+
 	if len(res.Terreno.Vertices) > 0 {
 		mesh := r.geometryToMesh(res.Terreno)
 		rl.UploadMesh(&mesh, false)
-		r.freeMeshRAM(&mesh)
+		// r.freeMeshRAM(&mesh) // DESATIVADO para permitir Raycasting (Fase 35 Fix)
 		bm.Model = rl.LoadModelFromMesh(mesh)
 		if bm.Model.MaterialCount > 0 {
 			materials := unsafe.Slice(bm.Model.Materials, bm.Model.MaterialCount)
@@ -173,7 +191,7 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		if len(geo.Vertices) > 0 {
 			mesh := r.geometryToMesh(geo)
 			rl.UploadMesh(&mesh, false)
-			r.freeMeshRAM(&mesh)
+			// r.freeMeshRAM(&mesh) // DESATIVADO para permitir Raycasting (Fase 35 Fix)
 			model := rl.LoadModelFromMesh(mesh)
 			if model.MaterialCount > 0 {
 				materials := unsafe.Slice(model.Materials, model.MaterialCount)
@@ -269,6 +287,11 @@ func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 
 	camPos := camera3d.Position
 
+	if r.debugInstCount == 0 {
+		log.Printf("[DEBUG DRAW] Primeiro Draw(). Models3D=%d, Models=%d, r=%p, focusZ=%d, camPos=(%.1f,%.1f,%.1f)",
+			len(r.Models3D), len(r.Models), r, focusZ, camPos.X, camPos.Y, camPos.Z)
+	}
+
 	// Update da variavel global de tempo nos shaders
 	timeVal := float32(rl.GetTime())
 	if r.WaterShader.ID != 0 {
@@ -293,16 +316,17 @@ func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 		if !bm.Active {
 			continue
 		}
-		// Culling Vertical de Terreno: Ignora chunks muito distantes verticalmente (Fase 33)
+		// Culling Vertical de Terreno: Relaxado (+/- 128 níveis) para ver buracos profundos
 		diffZ := util.Abs(bm.Origin.Z - focusZ)
-		if diffZ > 32 {
+		if diffZ > 128 {
 			continue
 		}
 
-		distSq := util.DistSq(camPos, rl.Vector3{X: float32(bm.Origin.X), Y: camPos.Y, Z: float32(-bm.Origin.Y)})
-		if bm.Origin.Z != focusZ && distSq > viewRadiusSq {
-			continue
-		}
+		// DEBUG: Ignorar culling de distância por enquanto
+		// distSq := util.DistSq(camPos, rl.Vector3{X: float32(bm.Origin.X), Y: camPos.Y, Z: float32(-bm.Origin.Y)})
+		// if bm.Origin.Z != focusZ && distSq > viewRadiusSq {
+		// 	continue
+		// }
 
 		if bm.Model.MeshCount > 0 {
 			rl.DrawModel(bm.Model, rl.Vector3{0, 0, 0}, 1.0, rl.White)
@@ -314,8 +338,7 @@ func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 		}
 	}
 
-	// PASS 1.5: VEGETACAO (GPU INSTANCING - Ultra Performance)
-	rl.DisableDepthMask()
+	// PASS 1.5: VEGETACAO E RAMPAS (GPU INSTANCING - Ultra Performance)
 	r.PropMgr.Clear()
 	const instViewRadiusSq = 90.0 * 90.0
 
@@ -324,17 +347,17 @@ func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 			continue
 		}
 
-		// Culling Vertical de Vegetação: AGRESSIVO (+/- 12 níveis)
+		// Culling Vertical de Props/Rampas: Relaxado (+/- 64 níveis)
 		diffZ := util.Abs(bm.Origin.Z - focusZ)
-		if diffZ > 12 {
+		if diffZ > 64 {
 			continue
 		}
 
 		// Culling de chunk rápido
-		distSq := util.DistSq(camPos, rl.Vector3{X: float32(bm.Origin.X), Y: camPos.Y, Z: float32(-bm.Origin.Y)})
-		if bm.Origin.Z != focusZ && distSq > viewRadiusSq {
-			continue
-		}
+		// distSq := util.DistSq(camPos, rl.Vector3{X: float32(bm.Origin.X), Y: camPos.Y, Z: float32(-bm.Origin.Y)})
+		// if bm.Origin.Z != focusZ && distSq > viewRadiusSq {
+		// 	continue
+		// }
 
 		for _, inst := range bm.Instances {
 			pos := rl.Vector3{X: inst.Position[0], Y: inst.Position[1], Z: inst.Position[2]}
@@ -369,7 +392,6 @@ func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 
 	// Desenha tudo em lotes otimizados (1 draw call por tipo)
 	r.PropMgr.DrawAll(camera3d)
-	rl.EnableDepthMask()
 
 	// PASS 2: LIQUIDOS
 	rl.BeginBlendMode(rl.BlendAlpha)
@@ -427,6 +449,100 @@ func (r *Renderer) Unload() {
 	}
 	r.Models = make(map[util.DFCoord]*BlockModel)
 }
+
+// GetRayCollision verifica qual bloco do terreno foi atingido pelo raio do mouse.
+func (r *Renderer) GetRayCollision(ray rl.Ray) (util.DFCoord, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	log.Printf("[Renderer] GetRayCollision iniciado. Testando contra %d modelos de chunks", len(r.Models))
+	var closestDist float32 = 1000000.0
+	var hit bool
+	var hitPos rl.Vector3
+
+	for _, bm := range r.Models {
+		if !bm.Active {
+			continue
+		}
+
+		// Testamos contra o modelo principal de terreno (várias meshes)
+		if bm.Model.MeshCount > 0 {
+			meshes := unsafe.Slice(bm.Model.Meshes, bm.Model.MeshCount)
+			for i := int32(0); i < bm.Model.MeshCount; i++ {
+				collision := rl.GetRayCollisionMesh(ray, meshes[i], bm.Model.Transform)
+				if collision.Hit && collision.Distance < closestDist {
+					closestDist = collision.Distance
+					hitPos = collision.Point
+					hit = true
+				}
+			}
+		}
+
+		// Testamos contra os modelos de materiais
+		for _, m := range bm.MatModels {
+			if m.MeshCount > 0 {
+				meshes := unsafe.Slice(m.Meshes, m.MeshCount)
+				for i := int32(0); i < m.MeshCount; i++ {
+					collision := rl.GetRayCollisionMesh(ray, meshes[i], m.Transform)
+					if collision.Hit && collision.Distance < closestDist {
+						closestDist = collision.Distance
+						hitPos = collision.Point
+						hit = true
+					}
+				}
+			}
+		}
+
+		// NOVO: Testamos contra Props e Rampas (Instâncias)
+		for _, inst := range bm.Instances {
+			// Pegamos o modelo correspondente (Rampa ou Prop)
+			model, ok := r.Models3D[inst.ModelName]
+			if !ok {
+				continue
+			}
+
+			// Geramos a matriz de transformação da mesma forma que o PropManager
+			// (Nota: Isso garante que o teste de colisão seja feito na posição exata onde o modelo é desenhado)
+			scaleMat := rl.MatrixScale(inst.Scale, inst.Scale, inst.Scale)
+			rotMat := rl.MatrixRotateY(inst.Rotation * (math.Pi / 180.0))
+			transMat := rl.MatrixTranslate(inst.Position[0], inst.Position[1], inst.Position[2])
+			matrix := rl.MatrixMultiply(rl.MatrixMultiply(transMat, rotMat), scaleMat)
+
+			if model.MeshCount > 0 {
+				meshes := unsafe.Slice(model.Meshes, model.MeshCount)
+				for i := int32(0); i < model.MeshCount; i++ {
+					// Testamos contra cada mesh do modelo 3D usando a matriz da instância específica
+					collision := rl.GetRayCollisionMesh(ray, meshes[i], matrix)
+					if collision.Hit && collision.Distance < closestDist {
+						closestDist = collision.Distance
+						hitPos = collision.Point
+						hit = true
+					}
+				}
+			}
+		}
+	}
+
+	if hit {
+		dir := rl.Vector3Normalize(ray.Direction)
+		hitPos.X += dir.X * 0.01
+		hitPos.Y += dir.Y * 0.01
+		hitPos.Z += dir.Z * 0.01
+
+		return util.WorldToDFCoord(hitPos), true
+	}
+
+	return util.DFCoord{}, false
+}
+
+// DrawSelection desenha um cubo de destaque no bloco selecionado.
+func (r *Renderer) DrawSelection(coord util.DFCoord) {
+	pos := util.DFToWorldCenter(coord)
+	// Ajustamos para o centro vertical do bloco (DF Z + 0.5)
+	pos.Y += 0.5
+	rl.DrawCubeWires(pos, 1.01, 1.01, 1.01, rl.Yellow)
+}
+
 func isPlantModel(modelName string) bool {
 	return modelName == "shrub" || modelName == "tree_body" || modelName == "tree_trunk" ||
 		modelName == "tree_branches" || modelName == "tree_twigs" || modelName == "branches" ||

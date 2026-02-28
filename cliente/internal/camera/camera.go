@@ -175,8 +175,8 @@ func (c *CameraController) HandleInput(dt float32) bool {
 		}
 	}
 
-	// Rotação com botão direito (Orbit)
-	if rl.IsMouseButtonDown(rl.MouseRightButton) {
+	// Rotação com botão esquerdo (Orbit)
+	if rl.IsMouseButtonDown(rl.MouseLeftButton) {
 		delta := rl.GetMouseDelta()
 		if delta.X != 0 || delta.Y != 0 {
 			moved = true
