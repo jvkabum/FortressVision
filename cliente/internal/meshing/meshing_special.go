@@ -9,21 +9,35 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// addRamp renderiza a rampa usando o sistema de material para garantir shaders sólidos (Fase 34: Fix Final)
 func (m *BlockMesher) addRamp(coord util.DFCoord, tile *mapdata.Tile, color [4]uint8, res *Result) {
 	pos := util.DFToWorldPos(coord)
 	tile.CalculateRampType()
-	rampType := tile.RampType
+	rampType := int(tile.RampType)
 	if rampType <= 0 || rampType > 26 {
 		rampType = 1
 	}
+
 	modelName := fmt.Sprintf("ramp_%d", rampType)
 
+	if m.AssetMgr != nil {
+		entry := m.AssetMgr.GetTileMesh("RAMP:*:*:*:*")
+		if entry != nil {
+			sub := m.AssetMgr.GetSubObjectForRamp(entry, rampType)
+			if sub != nil && sub.File != "" {
+				modelName = sub.File
+			}
+		}
+	}
+
+	// Adicionamos como ModelInstance, mas vamos garantir que o Renderer NÃO use shaders de planta para ela
 	res.ModelInstances = append(res.ModelInstances, ModelInstance{
 		ModelName:   modelName,
 		TextureName: m.MatStore.GetTextureName(tile.MaterialCategory()),
 		Position:    [3]float32{pos.X + 0.5, pos.Y, pos.Z - 0.5},
 		Scale:       1.0,
 		Color:       color,
+		IsRamp:      true, // Nova flag para o Renderer
 	})
 }
 

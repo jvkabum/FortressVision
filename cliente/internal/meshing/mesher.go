@@ -58,6 +58,7 @@ type ModelInstance struct {
 	Scale       float32    // Escala
 	Rotation    float32    // Rotação em graus (eixo Y)
 	Color       [4]uint8   // Cor/tint
+	IsRamp      bool       // Se verdadeiro, usa o TerrainShader em vez de PlantShader
 }
 
 // Result contém os dados de geometria gerados para um bloco.

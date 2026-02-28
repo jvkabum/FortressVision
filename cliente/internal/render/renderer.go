@@ -19,16 +19,17 @@ import (
 
 // Shaders e struct BlockModel movidos para arquivos separados (shaders.go e block_model.go)
 
-// Renderer gerencia o upload e renderização de malhas na GPU.
 type Renderer struct {
 	mu     sync.RWMutex
 	Models map[util.DFCoord]*BlockModel
-	// Shaders
-	WaterShader   rl.Shader
-	PlantShader   rl.Shader
-	TerrainShader rl.Shader
 
-	// Uniforms
+	// Shaders e Uniforms
+	TerrainShader          rl.Shader
+	TerrainInstancedShader rl.Shader
+	PlantShader            rl.Shader
+	PlantInstancedShader   rl.Shader
+	WaterShader            rl.Shader
+
 	timeLoc        int32
 	waterTimeLoc   int32
 	waterCamPosLoc int32
@@ -50,6 +51,8 @@ type Renderer struct {
 
 	// Fila de modelos para purga (evita stutter)
 	purgeQueue []util.DFCoord
+
+	PropMgr *PropManager // Sistema de GPU Instancing (Fase 33)
 }
 
 // NewRenderer cria um novo renderizador.
@@ -73,7 +76,9 @@ func NewRenderer() *Renderer {
 	// Tenta carregar os Shaders Customizados
 	if rl.IsWindowReady() {
 		r.TerrainShader = rl.LoadShaderFromMemory(terrainVertexShader, terrainFragmentShader)
+		r.TerrainInstancedShader = rl.LoadShaderFromMemory(terrainInstancedVertexShader, terrainFragmentShader)
 		r.PlantShader = rl.LoadShaderFromMemory(plantVertexShader, plantFragmentShader)
+		r.PlantInstancedShader = rl.LoadShaderFromMemory(plantInstancedVertexShader, plantFragmentShader)
 		r.WaterShader = rl.LoadShaderFromMemory(waterVertexShader, waterFragmentShader)
 
 		// Registrar localizações de uniforms padrão para que Raylib preencha automaticamente
@@ -100,6 +105,8 @@ func NewRenderer() *Renderer {
 	}
 
 	r.Weather = NewParticleSystem(2000)
+
+	r.PropMgr = NewPropManager()
 
 	return r
 }
@@ -256,9 +263,11 @@ func (r *Renderer) freeMeshRAM(mesh *rl.Mesh) {
 
 // Draw renderiza os blocos que estão dentro do raio de visão da câmera.
 // Blocos no focusZ ignoram o culling de distância horizontal para manter o chão sempre visível.
-func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
+func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
+	camPos := camera3d.Position
 
 	// Update da variavel global de tempo nos shaders
 	timeVal := float32(rl.GetTime())
@@ -284,6 +293,12 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 		if !bm.Active {
 			continue
 		}
+		// Culling Vertical de Terreno: Ignora chunks muito distantes verticalmente (Fase 33)
+		diffZ := util.Abs(bm.Origin.Z - focusZ)
+		if diffZ > 32 {
+			continue
+		}
+
 		distSq := util.DistSq(camPos, rl.Vector3{X: float32(bm.Origin.X), Y: camPos.Y, Z: float32(-bm.Origin.Y)})
 		if bm.Origin.Z != focusZ && distSq > viewRadiusSq {
 			continue
@@ -299,12 +314,19 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 		}
 	}
 
-	// PASS 1.5: VEGETACAO (Otimizado por Modelo)
+	// PASS 1.5: VEGETACAO (GPU INSTANCING - Ultra Performance)
 	rl.DisableDepthMask()
+	r.PropMgr.Clear()
 	const instViewRadiusSq = 90.0 * 90.0
 
 	for _, bm := range r.Models {
 		if !bm.Active || len(bm.Instances) == 0 {
+			continue
+		}
+
+		// Culling Vertical de Vegetação: AGRESSIVO (+/- 12 níveis)
+		diffZ := util.Abs(bm.Origin.Z - focusZ)
+		if diffZ > 12 {
 			continue
 		}
 
@@ -315,48 +337,38 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 		}
 
 		for _, inst := range bm.Instances {
-			pos := rl.Vector3{inst.Position[0], inst.Position[1], inst.Position[2]}
-
-			// Culling de distância individual
+			pos := rl.Vector3{X: inst.Position[0], Y: inst.Position[1], Z: inst.Position[2]}
 			if util.DistSq(camPos, pos) > instViewRadiusSq {
 				continue
 			}
 
 			model3d, ok := r.Models3D[inst.ModelName]
-			if !ok {
+			if !ok || model3d.MeshCount == 0 {
 				continue
 			}
 
-			// Seleção de shader e vinculação de textura
-			if model3d.MaterialCount > 0 {
-				materials := unsafe.Slice(model3d.Materials, model3d.MaterialCount)
-				shader := r.TerrainShader
-				name := inst.ModelName
+			// Preparamos o material e shader para este tipo de prop (INSTANCED)
+			material := unsafe.Slice(model3d.Materials, model3d.MaterialCount)[0]
+			shader := r.TerrainInstancedShader
+			if isPlantModel(inst.ModelName) && !inst.IsRamp {
+				shader = r.PlantInstancedShader
+			}
+			material.Shader = shader
 
-				// Detecção de plantas
-				isPlant := (name == "shrub" || name == "tree_body" || name == "tree_trunk" ||
-					name == "tree_branches" || name == "tree_twigs" || name == "branches" ||
-					name == "mushroom" || name == "sapling" || (len(name) > 12 && name[:12] == "tree_branch_"))
-
-				if isPlant {
-					shader = r.PlantShader
-				}
-
-				if materials[0].Shader.ID != shader.ID {
-					materials[0].Shader = shader
-				}
-
-				if inst.TextureName != "" {
-					if tex, ok := r.Textures[inst.TextureName]; ok {
-						rl.SetMaterialTexture(&materials[0], rl.MapDiffuse, tex)
-					}
+			// Aplica textura
+			if inst.TextureName != "" {
+				if tex, ok := r.Textures[inst.TextureName]; ok {
+					rl.SetMaterialTexture(&material, rl.MapDiffuse, tex)
 				}
 			}
 
-			tintColor := rl.NewColor(inst.Color[0], inst.Color[1], inst.Color[2], 255)
-			rl.DrawModelEx(model3d, pos, rl.Vector3{0, 1, 0}, inst.Rotation, rl.Vector3{inst.Scale, inst.Scale, inst.Scale}, tintColor)
+			// Adiciona ao lote de instanciamento global
+			r.PropMgr.AddInstance(inst, unsafe.Slice(model3d.Meshes, model3d.MeshCount)[0], material)
 		}
 	}
+
+	// Desenha tudo em lotes otimizados (1 draw call por tipo)
+	r.PropMgr.DrawAll(camera3d)
 	rl.EnableDepthMask()
 
 	// PASS 2: LIQUIDOS
@@ -414,4 +426,9 @@ func (r *Renderer) Unload() {
 		}
 	}
 	r.Models = make(map[util.DFCoord]*BlockModel)
+}
+func isPlantModel(modelName string) bool {
+	return modelName == "shrub" || modelName == "tree_body" || modelName == "tree_trunk" ||
+		modelName == "tree_branches" || modelName == "tree_twigs" || modelName == "branches" ||
+		modelName == "mushroom" || modelName == "sapling" || (len(modelName) > 12 && modelName[:12] == "tree_branch_")
 }

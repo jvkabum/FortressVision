@@ -19,5 +19,5 @@
   "zoom_speed": 5,
   "show_debug_info": true,
   "show_grid": false,
-  "wireframe_mode": false
+  "wireframe_mode": true
 }

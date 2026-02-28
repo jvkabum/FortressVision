@@ -1,6 +1,7 @@
 package meshing
 
 import (
+	"FortressVision/cliente/internal/assets"
 	"FortressVision/shared/mapdata"
 	"FortressVision/shared/pkg/dfproto"
 	"FortressVision/shared/util"
@@ -14,18 +15,20 @@ type BlockMesher struct {
 	results     chan Result
 	stop        chan struct{}
 	MatStore    *mapdata.MaterialStore
+	AssetMgr    *assets.Manager
 	ResultStore *ResultStore
 	pending     map[util.DFCoord]bool
 	pendingMu   sync.Mutex
 }
 
 // NewBlockMesher cria e inicia um novo mesher.
-func NewBlockMesher(workers int, matStore *mapdata.MaterialStore, resultStore *ResultStore) *BlockMesher {
+func NewBlockMesher(workers int, matStore *mapdata.MaterialStore, assetMgr *assets.Manager, resultStore *ResultStore) *BlockMesher {
 	m := &BlockMesher{
 		requests:    make(chan Request, 2000),
 		results:     make(chan Result, 2000),
 		stop:        make(chan struct{}),
 		MatStore:    matStore,
+		AssetMgr:    assetMgr,
 		ResultStore: resultStore,
 		pending:     make(map[util.DFCoord]bool),
 	}

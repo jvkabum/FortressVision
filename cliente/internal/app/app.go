@@ -134,7 +134,7 @@ func (a *App) Run() {
 
 	log.Printf("[App] Iniciando Mesher com %d workers (CPU Cores: %d)", workers, runtime.NumCPU())
 	a.renderer = render.NewRenderer()
-	a.mesher = meshing.NewBlockMesher(workers, a.matStore, a.resultStore)
+	a.mesher = meshing.NewBlockMesher(workers, a.matStore, a.renderer.AssetMgr, a.resultStore)
 
 	// Iniciar threads de background
 	go a.connectServer()
@@ -219,7 +219,7 @@ func (a *App) connectServer() {
 				Origin:   origin,
 				Data:     a.mapStore,
 				FocusZ:   int(a.mapCenter.Z),
-				MaxDepth: 130,
+				MaxDepth: 48,
 				MTime:    chunk.MTime,
 			})
 		}
@@ -520,7 +520,7 @@ func (a *App) drawScene() {
 
 	// Renderizar modelos do mapa real
 	if a.renderer != nil {
-		a.renderer.Draw(a.Cam.RLCamera.Position, a.mapCenter.Z)
+		a.renderer.Draw(a.Cam.RLCamera, a.mapCenter.Z)
 	}
 
 	rl.EndMode3D()

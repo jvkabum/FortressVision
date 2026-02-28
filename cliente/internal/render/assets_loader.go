@@ -48,12 +48,12 @@ func (r *Renderer) loadModels() {
 			name string
 			path string
 		}{
-			{"shrub", "assets/models/environment/shrub.glb"},
+			{"shrub", "assets/models/environment/Foliage_New.obj"},
 			{"tree_trunk", "assets/models/environment/TreeTrunkPillar.obj"},
 			{"tree_branches", "assets/models/environment/TreeBranches.obj"},
 			{"tree_twigs", "assets/models/environment/TreeTwigs.obj"},
 			{"branches", "assets/models/environment/Branches.obj"},
-			{"mushroom", "assets/models/environment/SAPLING.obj"},
+			{"mushroom", "assets/models/environment/Foliage_Small_1.obj"},
 		}
 		for _, m := range models {
 			r.loadSingleModel(m.name, m.path)
@@ -119,8 +119,11 @@ func (r *Renderer) loadModels() {
 func (r *Renderer) loadSingleModel(name, path string) {
 	model := rl.LoadModel(path)
 	if model.MeshCount > 0 {
+		// Usamos o 'name' (que vem do campo 'File' do JSON ou do manual) como chave
 		r.Models3D[name] = model
-		log.Printf("[Renderer] Modelo carregado: %s", path)
+		log.Printf("[Renderer] Modelo carregado: %s (Key: %s)", path, name)
+	} else {
+		log.Printf("[Renderer] FALHA ao carregar modelo: %s", path)
 	}
 }
 

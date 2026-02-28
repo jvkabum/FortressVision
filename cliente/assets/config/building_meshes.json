@@ -1,430 +1,430 @@
 {
-    "buildingMeshes": [
+  "buildingMeshes": [
+    {
+      "file": "props/Unknown.obj",
+      "tokens": [
+        "*"
+      ],
+      "comment": "Fallback para buildings desconhecidos"
+    },
+    {
+      "file": "furniture/Coffin.obj",
+      "rotation": "AwayFromWall",
+      "tokens": [
+        "Coffin"
+      ]
+    },
+    {
+      "file": "furniture/Slab.obj",
+      "rotation": "AwayFromWall",
+      "tokens": [
+        "Slab"
+      ]
+    },
+    {
+      "file": "furniture/Chair.obj",
+      "tokens": [
+        "Chair"
+      ]
+    },
+    {
+      "file": "furniture/NestBox.obj",
+      "rotation": "AwayFromWall",
+      "tokens": [
+        "NestBox"
+      ],
+      "textures": {
+        "pattern": "NestBox_P.png",
+        "normal": "NestBox_N.png",
+        "alpha": "NestBox_A.png",
+        "metallic": "NestBox_M.png"
+      }
+    },
+    {
+      "file": "furniture/Bed_Sheet.obj",
+      "rotation": "AwayFromWall",
+      "tokens": [
+        "Bed"
+      ],
+      "textures": {
+        "pattern": "Bed_Sheet_P.png",
+        "specular": "Bed_Sheet_S.png",
+        "normal": "Bed_Sheet_N.png",
+        "occlusion": "Bed_Sheet_O.png",
+        "alpha": "Opaque_A.png",
+        "metallic": "Bed_Sheet_M.png",
+        "illumination": "Bed_Sheet_I.png"
+      }
+    },
+    {
+      "file": "furniture/Table.obj",
+      "tokens": [
+        "Table"
+      ]
+    },
+    {
+      "file": "architecture/Door.obj",
+      "rotation": "Door",
+      "tokens": [
+        "Door"
+      ],
+      "textures": {
+        "normal": "Door_N.png",
+        "occlusion": "Door_O.png",
+        "alpha": "Opaque_A.png"
+      }
+    },
+    {
+      "file": "architecture/Hatch.obj",
+      "tokens": [
+        "Hatch"
+      ],
+      "textures": {
+        "normal": "Hatch_N.png",
+        "occlusion": "Hatch_O.png",
+        "alpha": "Hatch_A.png",
+        "metallic": "Hatch_A.png",
+        "pattern": "Hatch_P.png",
+        "specular": "Hatch_P.png"
+      }
+    },
+    {
+      "file": "furniture/Box.obj",
+      "tokens": [
+        "Box"
+      ]
+    },
+    {
+      "file": "furniture/built_cabinet_0.obj",
+      "rotation": "AwayFromWall",
+      "tokens": [
+        "Cabinet"
+      ],
+      "textures": {
+        "normal": "built_cabinet_0_N.png",
+        "occlusion": "built_cabinet_0_O.png",
+        "alpha": "built_cabinet_0_A.png"
+      }
+    },
+    {
+      "file": "furniture/Statue.obj",
+      "tokens": [
+        "Statue"
+      ]
+    },
+    {
+      "file": "architecture/Window.obj",
+      "tokens": [
+        "WindowGlass",
+        "WindowGem"
+      ]
+    },
+    {
+      "file": "architecture/Bridge.obj",
+      "tokens": [
+        "Bridge",
+        "RoadPaved"
+      ]
+    },
+    {
+      "file": "architecture/Support.obj",
+      "tokens": [
+        "Support"
+      ]
+    },
+    {
+      "file": "machinery/ScrewPump_a.obj",
+      "tokens": [
+        "ScrewPump"
+      ],
+      "subObjects": [
         {
-            "file": "architecture/Unknown.obj",
-            "tokens": [
-                "*"
-            ],
-            "comment": "Fallback para buildings desconhecidos"
+          "file": "machinery/ScrewPump_a.obj",
+          "rotation": "BuildingDirection",
+          "position": {
+            "x": 0,
+            "y": 1
+          }
         },
         {
-            "file": "architecture/Coffin.obj",
-            "rotation": "AwayFromWall",
-            "tokens": [
-                "Coffin"
-            ]
-        },
-        {
-            "file": "architecture/Slab.obj",
-            "rotation": "AwayFromWall",
-            "tokens": [
-                "Slab"
-            ]
-        },
-        {
-            "file": "architecture/Chair.obj",
-            "tokens": [
-                "Chair"
-            ]
-        },
-        {
-            "file": "architecture/NestBox.obj",
-            "rotation": "AwayFromWall",
-            "tokens": [
-                "NestBox"
-            ],
-            "textures": {
-                "pattern": "NestBox_P.png",
-                "normal": "NestBox_N.png",
-                "alpha": "NestBox_A.png",
-                "metallic": "NestBox_M.png"
-            }
-        },
-        {
-            "file": "architecture/Bed_Sheet.obj",
-            "rotation": "AwayFromWall",
-            "tokens": [
-                "Bed"
-            ],
-            "textures": {
-                "pattern": "Bed_Sheet_P.png",
-                "specular": "Bed_Sheet_S.png",
-                "normal": "Bed_Sheet_N.png",
-                "occlusion": "Bed_Sheet_O.png",
-                "alpha": "Opaque_A.png",
-                "metallic": "Bed_Sheet_M.png",
-                "illumination": "Bed_Sheet_I.png"
-            }
-        },
-        {
-            "file": "architecture/Table.obj",
-            "tokens": [
-                "Table"
-            ]
-        },
-        {
-            "file": "architecture/Door.obj",
-            "rotation": "Door",
-            "tokens": [
-                "Door"
-            ],
-            "textures": {
-                "normal": "Door_N.png",
-                "occlusion": "Door_O.png",
-                "alpha": "Opaque_A.png"
-            }
-        },
-        {
-            "file": "architecture/Hatch.obj",
-            "tokens": [
-                "Hatch"
-            ],
-            "textures": {
-                "normal": "Hatch_N.png",
-                "occlusion": "Hatch_O.png",
-                "alpha": "Hatch_A.png",
-                "metallic": "Hatch_A.png",
-                "pattern": "Hatch_P.png",
-                "specular": "Hatch_P.png"
-            }
-        },
-        {
-            "file": "items/Box.obj",
-            "tokens": [
-                "Box"
-            ]
-        },
-        {
-            "file": "architecture/built_cabinet_0.obj",
-            "rotation": "AwayFromWall",
-            "tokens": [
-                "Cabinet"
-            ],
-            "textures": {
-                "normal": "built_cabinet_0_N.png",
-                "occlusion": "built_cabinet_0_O.png",
-                "alpha": "built_cabinet_0_A.png"
-            }
-        },
-        {
-            "file": "architecture/Statue.obj",
-            "tokens": [
-                "Statue"
-            ]
-        },
-        {
-            "file": "architecture/Window.obj",
-            "tokens": [
-                "WindowGlass",
-                "WindowGem"
-            ]
-        },
-        {
-            "file": "architecture/Bridge.obj",
-            "tokens": [
-                "Bridge",
-                "RoadPaved"
-            ]
-        },
-        {
-            "file": "architecture/Support.obj",
-            "tokens": [
-                "Support"
-            ]
-        },
-        {
-            "file": "mechanics/ScrewPump_a.obj",
-            "tokens": [
-                "ScrewPump"
-            ],
-            "subObjects": [
-                {
-                    "file": "mechanics/ScrewPump_a.obj",
-                    "rotation": "BuildingDirection",
-                    "position": {
-                        "x": 0,
-                        "y": 1
-                    }
-                },
-                {
-                    "file": "mechanics/ScrewPump_b.obj",
-                    "rotation": "BuildingDirection",
-                    "position": {
-                        "x": 0,
-                        "y": 0
-                    }
-                }
-            ]
-        },
-        {
-            "file": "mechanics/WaterWheel.obj",
-            "tokens": [
-                "WaterWheel"
-            ],
-            "subObjects": [
-                {
-                    "file": "mechanics/WaterWheel.obj",
-                    "rotation": "BuildingDirection",
-                    "position": {
-                        "x": 0,
-                        "y": 1
-                    }
-                }
-            ]
-        },
-        {
-            "file": "mechanics/Windmill.obj",
-            "tokens": [
-                "Windmill"
-            ],
-            "subObjects": [
-                {
-                    "file": "mechanics/Windmill.obj",
-                    "rotation": "BuildingDirection",
-                    "position": {
-                        "x": 1,
-                        "y": 1
-                    }
-                }
-            ]
-        },
-        {
-            "file": "mechanics/AxleHorizontal.obj",
-            "rotation": "BuildingDirection",
-            "tokens": [
-                "AxleHorizontal"
-            ]
-        },
-        {
-            "file": "mechanics/AxleVertical.obj",
-            "tokens": [
-                "AxleVertical"
-            ]
-        },
-        {
-            "file": "architecture/Well.obj",
-            "tokens": [
-                "Well"
-            ]
-        },
-        {
-            "file": "mechanics/GearAssembly.obj",
-            "tokens": [
-                "GearAssembly"
-            ]
-        },
-        {
-            "file": "architecture/WorkshopCounter.obj",
-            "tokens": [
-                "Workshop_MetalsmithsForge",
-                "Workshop_MagmaForge"
-            ],
-            "subObjects": [
-                {
-                    "file": "architecture/WorkshopCounter.obj",
-                    "position": {
-                        "x": 1,
-                        "y": 0
-                    }
-                },
-                {
-                    "file": "architecture/WorkshopCounter.obj",
-                    "position": {
-                        "x": 1,
-                        "y": 2
-                    }
-                }
-            ]
-        },
-        {
-            "file": "architecture/Furnace_Oven.obj",
-            "tokens": [
-                "Furnace"
-            ],
-            "subObjects": [
-                {
-                    "file": "architecture/Furnace_Oven.obj",
-                    "position": {
-                        "x": 1,
-                        "y": 0
-                    },
-                    "textures": {
-                        "normal": "Furnace_Oven_N.png",
-                        "occlusion": "Furnace_Oven_O.png",
-                        "alpha": "Opaque_A.png"
-                    }
-                },
-                {
-                    "file": "architecture/Furnace_Catchment.obj",
-                    "position": {
-                        "x": 2,
-                        "y": 0
-                    },
-                    "textures": {
-                        "normal": "Furnace_Catchment_N.png",
-                        "occlusion": "Furnace_Catchment_O.png",
-                        "alpha": "Opaque_A.png"
-                    }
-                }
-            ]
-        },
-        {
-            "file": "architecture/WorkshopCarpenters.obj",
-            "tokens": [
-                "Workshop_Carpenters"
-            ],
-            "subObjects": [
-                {
-                    "file": "architecture/WorkshopCarpenters.obj",
-                    "position": {
-                        "x": 1,
-                        "y": 1
-                    },
-                    "textures": {
-                        "pattern": "WorkshopCarpenters_P.png",
-                        "specular": "WorkshopCarpenters_M.png",
-                        "normal": "Flat_N.png",
-                        "occlusion": "WorkshopCarpenters_O.png",
-                        "alpha": "Opaque_A.png",
-                        "metallic": "WorkshopCarpenters_M.png",
-                        "illumination": "black.png"
-                    }
-                }
-            ]
-        },
-        {
-            "file": "architecture/Still.obj",
-            "tokens": [
-                "Workshop_Still"
-            ],
-            "subObjects": [
-                {
-                    "file": "architecture/Still.obj",
-                    "position": {
-                        "x": 1,
-                        "y": 1
-                    },
-                    "textures": {
-                        "normal": "Flat_N.png",
-                        "occlusion": "Still_O.png",
-                        "alpha": "Opaque_A.png",
-                        "pattern": "Still_P.png",
-                        "specular": "Medium_S.png",
-                        "metallic": "Still_M.png",
-                        "illumination": "black.png"
-                    }
-                }
-            ]
-        },
-        {
-            "file": "architecture/WorkshopAshery.obj",
-            "tokens": [
-                "Workshop_Ashery"
-            ],
-            "subObjects": [
-                {
-                    "file": "architecture/WorkshopAshery.obj",
-                    "position": {
-                        "x": 1,
-                        "y": 1
-                    },
-                    "textures": {
-                        "pattern": "WorkshopAshery_P.png",
-                        "specular": "Medium_S.png",
-                        "normal": "Flat_N.png",
-                        "occlusion": "WorkshopAshery_O.png",
-                        "alpha": "Opaque_A.png"
-                    }
-                }
-            ]
-        },
-        {
-            "file": "architecture/Bridge.obj",
-            "tokens": [
-                "TradeDepot"
-            ],
-            "subObjects": [
-                {
-                    "file": "architecture/Support.obj",
-                    "position": {
-                        "x": 0,
-                        "y": 0
-                    }
-                },
-                {
-                    "file": "architecture/Support.obj",
-                    "position": {
-                        "x": 4,
-                        "y": 0
-                    }
-                },
-                {
-                    "file": "architecture/Support.obj",
-                    "position": {
-                        "x": 0,
-                        "y": 4
-                    }
-                },
-                {
-                    "file": "architecture/Support.obj",
-                    "position": {
-                        "x": 4,
-                        "y": 4
-                    }
-                },
-                {
-                    "file": "architecture/Support.obj",
-                    "position": {
-                        "x": 2,
-                        "y": 2
-                    }
-                }
-            ]
-        },
-        {
-            "file": "architecture/Stockpile.obj",
-            "tokens": [
-                "Stockpile",
-                "Civzone"
-            ],
-            "textures": {
-                "normal": "Flat_N.png",
-                "occlusion": "Flat_O.png",
-                "alpha": "Diagonals.png"
-            }
-        },
-        {
-            "file": "items/Spike.obj",
-            "tokens": [
-                "Weapon"
-            ]
-        },
-        {
-            "file": "environment/FarmPlot.obj",
-            "tokens": [
-                "FarmPlot"
-            ]
-        },
-        {
-            "file": "items/WeaponRack.obj",
-            "rotation": "AwayFromWall",
-            "tokens": [
-                "Weaponrack"
-            ]
-        },
-        {
-            "file": "items/Armorstand.obj",
-            "rotation": "AwayFromWall",
-            "tokens": [
-                "Armorstand"
-            ]
-        },
-        {
-            "file": "mechanics/Trap_Lever.obj",
-            "rotation": "AwayFromWall",
-            "tokens": [
-                "Trap_Lever"
-            ]
+          "file": "machinery/ScrewPump_b.obj",
+          "rotation": "BuildingDirection",
+          "position": {
+            "x": 0,
+            "y": 0
+          }
         }
-    ]
+      ]
+    },
+    {
+      "file": "machinery/WaterWheel.obj",
+      "tokens": [
+        "WaterWheel"
+      ],
+      "subObjects": [
+        {
+          "file": "machinery/WaterWheel.obj",
+          "rotation": "BuildingDirection",
+          "position": {
+            "x": 0,
+            "y": 1
+          }
+        }
+      ]
+    },
+    {
+      "file": "machinery/Windmill.obj",
+      "tokens": [
+        "Windmill"
+      ],
+      "subObjects": [
+        {
+          "file": "machinery/Windmill.obj",
+          "rotation": "BuildingDirection",
+          "position": {
+            "x": 1,
+            "y": 1
+          }
+        }
+      ]
+    },
+    {
+      "file": "machinery/AxleHorizontal.obj",
+      "rotation": "BuildingDirection",
+      "tokens": [
+        "AxleHorizontal"
+      ]
+    },
+    {
+      "file": "machinery/AxleVertical.obj",
+      "tokens": [
+        "AxleVertical"
+      ]
+    },
+    {
+      "file": "architecture/Well.obj",
+      "tokens": [
+        "Well"
+      ]
+    },
+    {
+      "file": "machinery/GearAssembly.obj",
+      "tokens": [
+        "GearAssembly"
+      ]
+    },
+    {
+      "file": "workshops/WorkshopCounter.obj",
+      "tokens": [
+        "Workshop_MetalsmithsForge",
+        "Workshop_MagmaForge"
+      ],
+      "subObjects": [
+        {
+          "file": "workshops/WorkshopCounter.obj",
+          "position": {
+            "x": 1,
+            "y": 0
+          }
+        },
+        {
+          "file": "workshops/WorkshopCounter.obj",
+          "position": {
+            "x": 1,
+            "y": 2
+          }
+        }
+      ]
+    },
+    {
+      "file": "workshops/Furnace_Oven.obj",
+      "tokens": [
+        "Furnace"
+      ],
+      "subObjects": [
+        {
+          "file": "workshops/Furnace_Oven.obj",
+          "position": {
+            "x": 1,
+            "y": 0
+          },
+          "textures": {
+            "normal": "Furnace_Oven_N.png",
+            "occlusion": "Furnace_Oven_O.png",
+            "alpha": "Opaque_A.png"
+          }
+        },
+        {
+          "file": "workshops/Furnace_Catchment.obj",
+          "position": {
+            "x": 2,
+            "y": 0
+          },
+          "textures": {
+            "normal": "Furnace_Catchment_N.png",
+            "occlusion": "Furnace_Catchment_O.png",
+            "alpha": "Opaque_A.png"
+          }
+        }
+      ]
+    },
+    {
+      "file": "workshops/WorkshopCarpenters.obj",
+      "tokens": [
+        "Workshop_Carpenters"
+      ],
+      "subObjects": [
+        {
+          "file": "workshops/WorkshopCarpenters.obj",
+          "position": {
+            "x": 1,
+            "y": 1
+          },
+          "textures": {
+            "pattern": "WorkshopCarpenters_P.png",
+            "specular": "WorkshopCarpenters_M.png",
+            "normal": "Flat_N.png",
+            "occlusion": "WorkshopCarpenters_O.png",
+            "alpha": "Opaque_A.png",
+            "metallic": "WorkshopCarpenters_M.png",
+            "illumination": "black.png"
+          }
+        }
+      ]
+    },
+    {
+      "file": "workshops/Still.obj",
+      "tokens": [
+        "Workshop_Still"
+      ],
+      "subObjects": [
+        {
+          "file": "workshops/Still.obj",
+          "position": {
+            "x": 1,
+            "y": 1
+          },
+          "textures": {
+            "normal": "Flat_N.png",
+            "occlusion": "Still_O.png",
+            "alpha": "Opaque_A.png",
+            "pattern": "Still_P.png",
+            "specular": "Medium_S.png",
+            "metallic": "Still_M.png",
+            "illumination": "black.png"
+          }
+        }
+      ]
+    },
+    {
+      "file": "workshops/WorkshopAshery.obj",
+      "tokens": [
+        "Workshop_Ashery"
+      ],
+      "subObjects": [
+        {
+          "file": "workshops/WorkshopAshery.obj",
+          "position": {
+            "x": 1,
+            "y": 1
+          },
+          "textures": {
+            "pattern": "WorkshopAshery_P.png",
+            "specular": "Medium_S.png",
+            "normal": "Flat_N.png",
+            "occlusion": "WorkshopAshery_O.png",
+            "alpha": "Opaque_A.png"
+          }
+        }
+      ]
+    },
+    {
+      "file": "architecture/Bridge.obj",
+      "tokens": [
+        "TradeDepot"
+      ],
+      "subObjects": [
+        {
+          "file": "architecture/Support.obj",
+          "position": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "file": "architecture/Support.obj",
+          "position": {
+            "x": 4,
+            "y": 0
+          }
+        },
+        {
+          "file": "architecture/Support.obj",
+          "position": {
+            "x": 0,
+            "y": 4
+          }
+        },
+        {
+          "file": "architecture/Support.obj",
+          "position": {
+            "x": 4,
+            "y": 4
+          }
+        },
+        {
+          "file": "architecture/Support.obj",
+          "position": {
+            "x": 2,
+            "y": 2
+          }
+        }
+      ]
+    },
+    {
+      "file": "ui/Stockpile.obj",
+      "tokens": [
+        "Stockpile",
+        "Civzone"
+      ],
+      "textures": {
+        "normal": "Flat_N.png",
+        "occlusion": "Flat_O.png",
+        "alpha": "Diagonals.png"
+      }
+    },
+    {
+      "file": "machinery/Spike.obj",
+      "tokens": [
+        "Weapon"
+      ]
+    },
+    {
+      "file": "furniture/FarmPlot.obj",
+      "tokens": [
+        "FarmPlot"
+      ]
+    },
+    {
+      "file": "furniture/WeaponRack.obj",
+      "rotation": "AwayFromWall",
+      "tokens": [
+        "Weaponrack"
+      ]
+    },
+    {
+      "file": "furniture/Armorstand.obj",
+      "rotation": "AwayFromWall",
+      "tokens": [
+        "Armorstand"
+      ]
+    },
+    {
+      "file": "machinery/Trap_Lever.obj",
+      "rotation": "AwayFromWall",
+      "tokens": [
+        "Trap_Lever"
+      ]
+    }
+  ]
 }

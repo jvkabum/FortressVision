@@ -179,15 +179,33 @@ void main() {
     fragNormal = vertexNormal;
     fragHeight = vertexPosition.y;
     
-    vec3 pos = vertexPosition;
-    // Animação de vento: balanço horizontal baseado na altura (Y)
-    float windStrength = 0.15;
-    float freq = 2.0;
-    float move = sin(time * freq + pos.x * 0.5 + pos.z * 0.5) * windStrength * pos.y;
-    pos.x += move;
-    pos.z += move * 0.3;
+    gl_Position = mvp * vec4(vertexPosition, 1.0);
+}
+`
 
-    gl_Position = mvp * vec4(pos, 1.0);
+const plantInstancedVertexShader = `
+#version 330
+in vec3 vertexPosition;
+in vec2 vertexTexCoord;
+in vec3 vertexNormal;
+in vec4 vertexColor;
+in mat4 instanceTransform; // Atributo de instanciamento (Fase 33)
+uniform mat4 mvp;
+uniform float time;
+
+out vec2 fragTexCoord;
+out vec4 fragColor;
+out vec3 fragNormal;
+out float fragHeight;
+
+void main() {
+    fragTexCoord = vertexTexCoord;
+    fragColor = vertexColor;
+    fragNormal = vertexNormal;
+    fragHeight = vertexPosition.y;
+    
+    // Calculamos a posição final multiplicando pela matriz da instância
+    gl_Position = mvp * instanceTransform * vec4(vertexPosition, 1.0);
 }
 `
 
@@ -245,6 +263,30 @@ void main() {
     fragNormal = vertexNormal;
     fragHeight = vertexPosition.y;
     gl_Position = mvp * vec4(vertexPosition, 1.0);
+}
+`
+
+const terrainInstancedVertexShader = `
+#version 330
+in vec3 vertexPosition;
+in vec2 vertexTexCoord;
+in vec3 vertexNormal;
+in vec4 vertexColor;
+in mat4 instanceTransform;
+
+uniform mat4 mvp;
+
+out vec2 fragTexCoord;
+out vec4 fragColor;
+out vec3 fragNormal;
+out float fragHeight;
+
+void main() {
+    fragTexCoord = vertexTexCoord;
+    fragColor = vertexColor;
+    fragNormal = vertexNormal;
+    fragHeight = vertexPosition.y;
+    gl_Position = mvp * instanceTransform * vec4(vertexPosition, 1.0);
 }
 `
 

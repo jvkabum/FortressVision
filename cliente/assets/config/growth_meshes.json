@@ -1,106 +1,106 @@
 {
-    "growthMeshes": [
+  "growthMeshes": [
+    {
+      "file": "plants/Foliage_New.obj",
+      "rotation": "TreeRoundTall",
+      "tokens": [
+        "*:LEAVES:*",
+        "*:FEATHERS:*"
+      ],
+      "textures": {
+        "normal": "Leaves_N.png",
+        "occlusion": "Leaves_O.png",
+        "alpha": "Leaves_A.png"
+      },
+      "subObjects": [
         {
-            "file": "environment/Foliage_New.obj",
-            "rotation": "TreeRoundTall",
-            "tokens": [
-                "*:LEAVES:*",
-                "*:FEATHERS:*"
-            ],
-            "textures": {
-                "normal": "Leaves_N.png",
-                "occlusion": "Leaves_O.png",
-                "alpha": "Leaves_A.png"
-            },
-            "subObjects": [
-                {
-                    "file": "environment/SAPLING.obj",
-                    "rotation": "Random",
-                    "tileToken": "SAPLING:*:*:*:*",
-                    "textures": {
-                        "normal": "Leaves_N.png",
-                        "occlusion": "Leaves_O.png",
-                        "alpha": "Leaves_A.png"
-                    }
-                },
-                {
-                    "file": "environment/BUSH.obj",
-                    "rotation": "Random",
-                    "tileToken": "SHRUB:*:*:*:*",
-                    "textures": {
-                        "normal": "Leaves_N.png",
-                        "occlusion": "Leaves_O.png",
-                        "alpha": "Leaves_A.png"
-                    }
-                }
-            ]
+          "file": "plants/SAPLING.obj",
+          "rotation": "Random",
+          "tileToken": "SAPLING:*:*:*:*",
+          "textures": {
+            "normal": "Leaves_N.png",
+            "occlusion": "Leaves_O.png",
+            "alpha": "Leaves_A.png"
+          }
         },
         {
-            "file": "environment/Fruit.obj",
-            "rotation": "Random90",
-            "tokens": [
-                "*:CONE:*",
-                "*:FRUIT:*",
-                "*:NUT:*",
-                "*:POLLEN_CONE:*",
-                "*:SEED_CONE:*",
-                "*:SEED:*"
-            ],
-            "textures": {
-                "normal": "Flat_N.png",
-                "occlusion": "Flat_O.png",
-                "alpha": "Opaque_A.png"
-            }
-        },
-        {
-            "file": "environment/Palm_Leaves.obj",
-            "rotation": "Random",
-            "tokens": [
-                "DATE_PALM:LEAVES:*",
-                "PALM:LEAVES:*",
-                "ABACA:LEAVES:*",
-                "BANANA:LEAVES:*"
-            ],
-            "textures": {
-                "normal": "Palm_N.png",
-                "occlusion": "Palm_O.png",
-                "alpha": "Palm_A.png"
-            }
-        },
-        {
-            "file": "environment/Foliage_New_Layer2.obj",
-            "rotation": "TreeRoundTall",
-            "tokens": [
-                "*:FLOWER:*",
-                "*:FLOWERS:*"
-            ],
-            "textures": {
-                "normal": "Flowers_N.png",
-                "occlusion": "Flowers_O.png",
-                "alpha": "Flowers_A.png"
-            },
-            "subObjects": [
-                {
-                    "file": "environment/SAPLING.obj",
-                    "rotation": "Random",
-                    "tileToken": "SAPLING:*:*:*:*",
-                    "textures": {
-                        "normal": "Leaves_N.png",
-                        "occlusion": "Leaves_O.png",
-                        "alpha": "Leaves_A.png"
-                    }
-                },
-                {
-                    "file": "environment/BUSH.obj",
-                    "rotation": "Random",
-                    "tileToken": "SHRUB:*:*:*:*",
-                    "textures": {
-                        "normal": "Leaves_N.png",
-                        "occlusion": "Leaves_O.png",
-                        "alpha": "Leaves_A.png"
-                    }
-                }
-            ]
+          "file": "plants/BUSH.obj",
+          "rotation": "Random",
+          "tileToken": "SHRUB:*:*:*:*",
+          "textures": {
+            "normal": "Leaves_N.png",
+            "occlusion": "Leaves_O.png",
+            "alpha": "Leaves_A.png"
+          }
         }
-    ]
+      ]
+    },
+    {
+      "file": "plants/Fruit.obj",
+      "rotation": "Random90",
+      "tokens": [
+        "*:CONE:*",
+        "*:FRUIT:*",
+        "*:NUT:*",
+        "*:POLLEN_CONE:*",
+        "*:SEED_CONE:*",
+        "*:SEED:*"
+      ],
+      "textures": {
+        "normal": "Flat_N.png",
+        "occlusion": "Flat_O.png",
+        "alpha": "Opaque_A.png"
+      }
+    },
+    {
+      "file": "plants/Palm_Leaves.obj",
+      "rotation": "Random",
+      "tokens": [
+        "DATE_PALM:LEAVES:*",
+        "PALM:LEAVES:*",
+        "ABACA:LEAVES:*",
+        "BANANA:LEAVES:*"
+      ],
+      "textures": {
+        "normal": "Palm_N.png",
+        "occlusion": "Palm_O.png",
+        "alpha": "Palm_A.png"
+      }
+    },
+    {
+      "file": "plants/Foliage_New_Layer2.obj",
+      "rotation": "TreeRoundTall",
+      "tokens": [
+        "*:FLOWER:*",
+        "*:FLOWERS:*"
+      ],
+      "textures": {
+        "normal": "Flowers_N.png",
+        "occlusion": "Flowers_O.png",
+        "alpha": "Flowers_A.png"
+      },
+      "subObjects": [
+        {
+          "file": "plants/SAPLING.obj",
+          "rotation": "Random",
+          "tileToken": "SAPLING:*:*:*:*",
+          "textures": {
+            "normal": "Leaves_N.png",
+            "occlusion": "Leaves_O.png",
+            "alpha": "Leaves_A.png"
+          }
+        },
+        {
+          "file": "plants/BUSH.obj",
+          "rotation": "Random",
+          "tileToken": "SHRUB:*:*:*:*",
+          "textures": {
+            "normal": "Leaves_N.png",
+            "occlusion": "Leaves_O.png",
+            "alpha": "Leaves_A.png"
+          }
+        }
+      ]
+    }
+  ]
 }
