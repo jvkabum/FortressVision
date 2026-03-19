@@ -13,7 +13,8 @@ import (
 type TiletypeShape int32
 
 const (
-	ShapeNoShape       TiletypeShape = 0
+	ShapeNoShape       TiletypeShape = -1
+	ShapeEmpty         TiletypeShape = 0
 	ShapeFloor         TiletypeShape = 1
 	ShapeBoulder       TiletypeShape = 2
 	ShapePebbles       TiletypeShape = 3
@@ -29,41 +30,43 @@ const (
 	ShapeTreeShape     TiletypeShape = 13
 	ShapeSapling       TiletypeShape = 14
 	ShapeShrub         TiletypeShape = 15
-	ShapeEmpty         TiletypeShape = 16
-	ShapeEndlessPit    TiletypeShape = 17
-	ShapeBranch        TiletypeShape = 18
-	ShapeTrunkBranch   TiletypeShape = 19
-	ShapeTwig          TiletypeShape = 20
+	ShapeEndlessPit    TiletypeShape = 16
+	ShapeBranch        TiletypeShape = 17
+	ShapeTrunkBranch   TiletypeShape = 18
+	ShapeTwig          TiletypeShape = 19
 )
 
 // TiletypeMaterial - material do tiletype
 type TiletypeMaterial int32
 
 const (
-	TilematNoMaterial   TiletypeMaterial = 0
-	TilematStone        TiletypeMaterial = 1
-	TilematSoil         TiletypeMaterial = 2
-	TilematGrassLight   TiletypeMaterial = 3 // grass_light, grass_dark, grass_dry, grass_dead
-	TilematPlant        TiletypeMaterial = 4
-	TilematTreeMaterial TiletypeMaterial = 5
-	TilematLavaStone    TiletypeMaterial = 6
-	TilematMineral      TiletypeMaterial = 7
-	TilematFrozenLiquid TiletypeMaterial = 8
-	TilematConstruction TiletypeMaterial = 9
-	TilematGrassDark    TiletypeMaterial = 10
-	TilematGrassDry     TiletypeMaterial = 11
-	TilematGrassDead    TiletypeMaterial = 12
-	TilematHFS          TiletypeMaterial = 13 // hellstone, adamantine, etc
-	TilematMagma        TiletypeMaterial = 14
-	TilematDriftwood    TiletypeMaterial = 15
-	TilematCampfire     TiletypeMaterial = 16
-	TilematFire         TiletypeMaterial = 17
-	TilematPool         TiletypeMaterial = 18
-	TilematBrookShore   TiletypeMaterial = 19
-	TilematRiverShore   TiletypeMaterial = 20
-	TilematMushroom     TiletypeMaterial = 21
-	TilematUnderworld   TiletypeMaterial = 22
-	TilematFeature      TiletypeMaterial = 23
+	TilematNoMaterial   TiletypeMaterial = -1
+	TilematAir          TiletypeMaterial = 0
+	TilematSoil         TiletypeMaterial = 1
+	TilematStone        TiletypeMaterial = 2
+	TilematFeature      TiletypeMaterial = 3
+	TilematLavaStone    TiletypeMaterial = 4
+	TilematMineral      TiletypeMaterial = 5
+	TilematFrozenLiquid TiletypeMaterial = 6
+	TilematConstruction TiletypeMaterial = 7
+	TilematGrassLight   TiletypeMaterial = 8
+	TilematGrassDark    TiletypeMaterial = 9
+	TilematGrassDry     TiletypeMaterial = 10
+	TilematGrassDead    TiletypeMaterial = 11
+	TilematPlant        TiletypeMaterial = 12
+	TilematHFS          TiletypeMaterial = 13
+	TilematCampfire     TiletypeMaterial = 14
+	TilematFire         TiletypeMaterial = 15
+	TilematAshes        TiletypeMaterial = 16
+	TilematMagma        TiletypeMaterial = 17
+	TilematDriftwood    TiletypeMaterial = 18
+	TilematPool         TiletypeMaterial = 19
+	TilematBrook        TiletypeMaterial = 20
+	TilematRiver        TiletypeMaterial = 21
+	TilematRoot         TiletypeMaterial = 22
+	TilematTreeMaterial TiletypeMaterial = 23
+	TilematMushroom     TiletypeMaterial = 24
+	TilematUnderworld   TiletypeMaterial = 25
 )
 
 // TileDigDesignation

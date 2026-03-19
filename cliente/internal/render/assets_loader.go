@@ -9,10 +9,17 @@ import (
 
 func (r *Renderer) loadTextures() {
 	// Texturas de blocos/terreno
-	blocks := []string{"stone", "grass", "wood", "marble", "ore", "plant"}
-	for _, name := range blocks {
-		path := fmt.Sprintf("assets/textures/blocks/%s.png", name)
-		r.loadSingleTexture(name, path)
+	blocks := []struct{ key, file string }{
+		{"stone", "Stone"},
+		{"grass", "Grass"},
+		{"wood", "Wood"},
+		{"marble", "Marble"},
+		{"ore", "ore"},
+		{"plant", "plant"},
+	}
+	for _, b := range blocks {
+		path := fmt.Sprintf("assets/textures/blocks/%s.png", b.file)
+		r.loadSingleTexture(b.key, path)
 	}
 
 	// Texturas de itens

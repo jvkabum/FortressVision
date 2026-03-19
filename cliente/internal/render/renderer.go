@@ -12,6 +12,7 @@ import (
 	"unsafe"
 
 	"FortressVision/cliente/internal/assets"
+	"FortressVision/cliente/internal/liquid"
 	"FortressVision/cliente/internal/meshing"
 	"FortressVision/shared/util"
 
@@ -30,6 +31,7 @@ type Renderer struct {
 	PlantShader            rl.Shader
 	PlantInstancedShader   rl.Shader
 	WaterShader            rl.Shader
+	ModelShader            rl.Shader
 
 	timeLoc        int32
 	waterTimeLoc   int32
@@ -37,6 +39,7 @@ type Renderer struct {
 	plantTimeLoc   int32
 	terrainTimeLoc int32
 	snowAmountLoc  int32
+	modelMatLoc    int32
 
 	// Texturas Premium
 	Textures map[string]rl.Texture2D
@@ -84,6 +87,17 @@ func NewRenderer() *Renderer {
 		r.PlantInstancedShader = rl.LoadShaderFromMemory(plantInstancedVertexShader, plantFragmentShader)
 		r.WaterShader = rl.LoadShaderFromMemory(waterVertexShader, waterFragmentShader)
 
+		r.terrainTimeLoc = rl.GetShaderLocation(r.TerrainShader, "time")
+		r.snowAmountLoc = rl.GetShaderLocation(r.TerrainShader, "snowAmount")
+
+		// Carregar shader dedicado para modelos (Rampas, Escadas)
+		r.ModelShader = rl.LoadShaderFromMemory(modelVertexShader, terrainFragmentShader)
+		r.modelMatLoc = rl.GetShaderLocation(r.ModelShader, "matModel")
+
+		r.plantTimeLoc = rl.GetShaderLocation(r.PlantShader, "time")
+		r.waterTimeLoc = rl.GetShaderLocation(r.WaterShader, "time")
+		r.waterCamPosLoc = rl.GetShaderLocation(r.WaterShader, "camPos")
+
 		// Registrar localizações de uniforms padrão para que Raylib preencha automaticamente
 		// Locs é um ponteiro bruto (*int32) que aponta para um array em C (32 floats)
 		locsT := unsafe.Slice(r.TerrainShader.Locs, 32)
@@ -102,11 +116,7 @@ func NewRenderer() *Renderer {
 		locsPI[0] = rl.GetShaderLocation(r.PlantInstancedShader, "texture0")
 		locsPI[12] = rl.GetShaderLocation(r.PlantInstancedShader, "colDiffuse")
 
-		r.terrainTimeLoc = rl.GetShaderLocation(r.TerrainShader, "time")
-		r.snowAmountLoc = rl.GetShaderLocation(r.TerrainShader, "snowAmount")
-		r.plantTimeLoc = rl.GetShaderLocation(r.PlantShader, "time")
-		r.waterTimeLoc = rl.GetShaderLocation(r.WaterShader, "time")
-		r.waterCamPosLoc = rl.GetShaderLocation(r.WaterShader, "camPos")
+		liquid.TraceDebug("WaterShader carregado com sucesso (verificar ID no console se disponivel)")
 
 		// Carregar Texturas Premium
 		r.loadTextures()
@@ -171,11 +181,6 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		Instances: res.ModelInstances,
 	}
 
-	if len(res.ModelInstances) > 0 {
-		log.Printf("[Renderer] Recebidas %d instâncias para o chunk %s (Primeira rampa: %v)",
-			len(res.ModelInstances), res.Origin.String(), res.ModelInstances[0].IsRamp)
-	}
-
 	if len(res.Terreno.Vertices) > 0 {
 		mesh := r.geometryToMesh(res.Terreno)
 		rl.UploadMesh(&mesh, false)
@@ -207,9 +212,10 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 	if len(res.Liquidos.Vertices) > 0 {
 		mesh := r.geometryToMesh(res.Liquidos)
 		rl.UploadMesh(&mesh, false)
-		r.freeMeshRAM(&mesh)
+		// r.freeMeshRAM(&mesh) // DESATIVADO para teste (estilo terreno)
 		bm.LiquidModel = rl.LoadModelFromMesh(mesh)
 		bm.HasLiquid = true
+		liquid.TraceUpload(res.Origin.X, res.Origin.Y, res.Origin.Z, len(res.Liquidos.Vertices)/3)
 		if r.WaterShader.ID != 0 && bm.LiquidModel.MaterialCount > 0 {
 			materials := unsafe.Slice(bm.LiquidModel.Materials, bm.LiquidModel.MaterialCount)
 			materials[0].Shader = r.WaterShader
@@ -316,9 +322,14 @@ func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 		if !bm.Active {
 			continue
 		}
-		// Culling Vertical de Terreno: Relaxado (+/- 128 níveis) para ver buracos profundos
+		// Z-Slicing (Estilo Timberborn): Ocultar tudo o que está acima do nível focado
+		if bm.Origin.Z > focusZ {
+			continue
+		}
+
+		// Culling Vertical de Terreno: Relaxado para ver buracos profundos
 		diffZ := util.Abs(bm.Origin.Z - focusZ)
-		if diffZ > 128 {
+		if diffZ > 64 {
 			continue
 		}
 
@@ -347,9 +358,14 @@ func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 			continue
 		}
 
-		// Culling Vertical de Props/Rampas: Relaxado (+/- 64 níveis)
+		// Z-Slicing para Props
+		if bm.Origin.Z > focusZ {
+			continue
+		}
+
+		// Culling Vertical de Props/Rampas: Relaxado
 		diffZ := util.Abs(bm.Origin.Z - focusZ)
-		if diffZ > 64 {
+		if diffZ > 32 {
 			continue
 		}
 
@@ -366,7 +382,10 @@ func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 			}
 
 			model3d, ok := r.Models3D[inst.ModelName]
-			if !ok || model3d.MeshCount == 0 {
+			if !ok {
+				continue
+			}
+			if model3d.MeshCount == 0 {
 				continue
 			}
 
@@ -385,8 +404,28 @@ func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 				}
 			}
 
-			// Adiciona ao lote de instanciamento global
-			r.PropMgr.AddInstance(inst, unsafe.Slice(model3d.Meshes, model3d.MeshCount)[0], material)
+			// Se for rampa, desenhamos direto para teste de visibilidade (Fase 45)
+			if inst.IsRamp {
+				pos := rl.Vector3{X: inst.Position[0], Y: inst.Position[1], Z: inst.Position[2]}
+
+				// Usar ModelShader dedicado para rampas (Fase 51)
+				materials := unsafe.Slice(model3d.Materials, model3d.MaterialCount)
+				if inst.TextureName != "" {
+					if tex, ok := r.Textures[inst.TextureName]; ok {
+						rl.SetMaterialTexture(&materials[0], rl.MapDiffuse, tex)
+					}
+				}
+				materials[0].Shader = r.ModelShader
+				
+				// Escala Gold Standard (0.5/0.3/0.5)
+				c := rl.Color{R: inst.Color[0], G: inst.Color[1], B: inst.Color[2], A: inst.Color[3]}
+				rl.DrawModelEx(model3d, pos, rl.Vector3{X: 0, Y: 1, Z: 0}, inst.Rotation, rl.Vector3{X: 0.5, Y: 0.3, Z: 0.5}, c)
+				continue
+			}
+
+			// ADICIONA À FILA DE DESENHO (Fase 44: Fix Ramps)
+			meshes := unsafe.Slice(model3d.Meshes, model3d.MeshCount)
+			r.PropMgr.AddInstance(inst, meshes[0], material)
 		}
 	}
 
@@ -395,11 +434,22 @@ func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 
 	// PASS 2: LIQUIDOS
 	rl.BeginBlendMode(rl.BlendAlpha)
-	for _, bm := range r.Models {
+	// Enviar uniformes globais para a água uma vez por frame
+	if r.WaterShader.ID != 0 {
+		rl.SetShaderValue(r.WaterShader, r.waterTimeLoc, []float32{float32(rl.GetTime())}, rl.ShaderUniformFloat)
+		rl.SetShaderValue(r.WaterShader, r.waterCamPosLoc, []float32{camera3d.Position.X, camera3d.Position.Y, camera3d.Position.Z}, rl.ShaderUniformVec3)
+	}
+	for origin, bm := range r.Models {
 		if !bm.Active || !bm.HasLiquid {
 			continue
 		}
-		rl.DrawModel(bm.LiquidModel, rl.Vector3{0, 0, 0}, 1.0, rl.White)
+
+		// Z-Slicing para Líquidos
+		if origin.Z > focusZ {
+			continue
+		}
+		liquid.TraceDraw(origin.X, origin.Y, origin.Z)
+		rl.DrawModel(bm.LiquidModel, rl.Vector3{X: 0, Y: 0, Z: 0}, 1.0, rl.White)
 	}
 	rl.EndBlendMode()
 

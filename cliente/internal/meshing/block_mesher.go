@@ -2,10 +2,11 @@ package meshing
 
 import (
 	"FortressVision/cliente/internal/assets"
+	"FortressVision/cliente/internal/liquid"
 	"FortressVision/shared/mapdata"
 	"FortressVision/shared/pkg/dfproto"
 	"FortressVision/shared/util"
-	"log" // Added based on the provided Code Edit
+	"log"
 	"sync"
 )
 
@@ -165,75 +166,72 @@ func (m *BlockMesher) runGreedyMesher2D(req Request, getBuffer func(string) *Mes
 
 		for yy := int32(0); yy < 16; yy++ {
 			for xx := int32(0); xx < 16; xx++ {
+				// Heartbeat corrigido: loga apenas no início de cada linha do chunk para não inundar
+				if xx == 0 {
+					liquid.TraceHeartbeat(req.Origin.X, req.Origin.Y, req.Origin.Z, int32(faceDir))
+				}
 				worldCoord := util.NewDFCoord(req.Origin.X+xx, req.Origin.Y+yy, currentZ)
 				tile := req.Data.GetTile(worldCoord)
 
-				if tile == nil || tile.Hidden || tile.Shape() == dfproto.ShapeNoShape {
+				if tile == nil {
 					continue
 				}
 
-				// Líquidos e Objetos Especiais (Rampas/Escadas) não entram no Greedy Meshing Comum
-				// Líquidos são processados apenas uma vez (na primeira face iterada)
-				// Líquidos e Objetos Especiais (Rampas/Escadas/Vegetação)
-				// Processamos modelos 3D apenas UMA VEZ por tile (escolhemos DirUp arbitrariamente)
+				// MOVE PARA CIMA DO CHECK DE tile.Hidden: Água deve ser visível mesmo se o solo estiver oculto!
 				if faceDir == util.DirUp {
-					GenerateLiquidGeometry(tile, liquidBuffer)
+					// 1. LÍQUIDOS (Água e Magma unificados - Fase 40)
+					if tile.WaterLevel > 0 || tile.MagmaLevel > 0 {
+						liquid.TraceMesher(worldCoord.X, worldCoord.Y, worldCoord.Z, tile.WaterLevel, tile.MagmaLevel, tile.Hidden)
+						GenerateLiquidGeometry(tile, liquidBuffer)
+					}
 
+					// 2. OBJETOS ESPECIAIS (Rampas, Escadas, Vegetação)
+					// Estes devem ser processados mesmo se o terreno base estiver 'Hidden'
 					shape := tile.Shape()
-					if shape == dfproto.ShapeRamp {
-						rlColor := m.MatStore.GetTileColor(tile)
-						m.addRamp(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, res)
-						continue
-					}
-					if shape == dfproto.ShapeStairUp || shape == dfproto.ShapeStairDown || shape == dfproto.ShapeStairUpDown {
-						texName := m.MatStore.GetTextureName(tile.MaterialCategory())
-						rlColor := m.MatStore.GetTileColor(tile)
-						m.addStairs(worldCoord, shape, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer(texName), req.Data)
-						continue
-					}
-					// Árvores e vegetação 3D (Lógica Armok Vision Refinada)
-					if shape == dfproto.ShapeTrunkBranch {
-						rlColor := m.MatStore.GetTileColor(tile)
-						// Tronco: usamos o modelo sólido (pillar)
-						// addTrunk agora usará "tree_trunk" (pillar) para o corpo e TREE.obj apenas na base se necessário
-						m.addTrunk(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer, res, req.Data)
-						continue
-					}
-					if shape == dfproto.ShapeTreeShape {
-						// Copa: volumosa mas leve. Em vez do TREE.obj massivo em cada bloco, usamos raminhos esparsos.
-						// Estratégia: Desenha 1 em cada 4 tiles (padrão xadrez 3D esparso)
-						if (worldCoord.X%2 == 0) && (worldCoord.Y%2 == 0) && (worldCoord.Z%2 != 0) {
+					if shape != dfproto.ShapeNoShape {
+						if shape == dfproto.ShapeRamp {
+							rlColor := m.MatStore.GetTileColor(tile)
+							m.addRamp(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, res)
+						} else if shape == dfproto.ShapeStairUp || shape == dfproto.ShapeStairDown || shape == dfproto.ShapeStairUpDown {
+							texName := m.MatStore.GetTextureName(tile.MaterialCategory())
+							rlColor := m.MatStore.GetTileColor(tile)
+							m.addStairs(worldCoord, shape, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer(texName), req.Data)
+						} else if shape == dfproto.ShapeTrunkBranch {
+							rlColor := m.MatStore.GetTileColor(tile)
+							m.addTrunk(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer, res, req.Data)
+						} else if shape == dfproto.ShapeTreeShape {
+							if (worldCoord.X%2 == 0) && (worldCoord.Y%2 == 0) && (worldCoord.Z%2 != 0) {
+								rlColor := m.MatStore.GetTileColor(tile)
+								m.addTwig(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer, res, req.Data)
+							}
+						} else if shape == dfproto.ShapeBranch {
+							rlColor := m.MatStore.GetTileColor(tile)
+							m.addBranch(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer, res, req.Data)
+						} else if shape == dfproto.ShapeTwig {
 							rlColor := m.MatStore.GetTileColor(tile)
 							m.addTwig(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer, res, req.Data)
+						} else if shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
+							rlColor := m.MatStore.GetTileColor(tile)
+							m.addShrub(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, res)
 						}
-						continue
 					}
-					if shape == dfproto.ShapeBranch {
-						rlColor := m.MatStore.GetTileColor(tile)
-						m.addBranch(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer, res, req.Data)
-						continue
-					}
-					if shape == dfproto.ShapeTwig {
-						rlColor := m.MatStore.GetTileColor(tile)
-						m.addTwig(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, getBuffer, res, req.Data)
-						continue
-					}
-					if shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
-						rlColor := m.MatStore.GetTileColor(tile)
-						m.addShrub(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, res)
-						// Solo sob arbusto será gerado pelo greedy mesher se for floor
-					}
-					// Gramas (Baseado no GrassPercent)
+
+					// 3. GRAMAS
 					if tile.GrassPercent > 0 {
 						m.addGrass(worldCoord, tile, res)
 					}
+				}
+
+				if tile.Hidden {
+					continue
 				}
 
 				// Se a face deve ser desenhada, adicionamos à máscara
 				if m.shouldDrawFace(tile, faceDir) {
 					// Pular formas que não são cubos padrão
 					shape := tile.Shape()
-					if shape != dfproto.ShapeWall && shape != dfproto.ShapeFloor && shape != dfproto.ShapeFortification {
+					if shape != dfproto.ShapeWall && shape != dfproto.ShapeFloor && shape != dfproto.ShapeFortification &&
+						shape != dfproto.ShapeBoulder && shape != dfproto.ShapePebbles {
 						continue
 					}
 

@@ -180,7 +180,8 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 		chunk = &Chunk{Origin: origin}
 		for y := 0; y < 16; y++ {
 			for x := 0; x < 16; x++ {
-				chunk.Tiles[x][y] = &Tile{}
+				tilePos := util.NewDFCoord(block.MapX+int32(x), block.MapY+int32(y), block.MapZ)
+				chunk.Tiles[x][y] = NewTile(s, tilePos)
 			}
 		}
 		s.Chunks[origin] = chunk

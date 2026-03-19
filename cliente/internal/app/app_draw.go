@@ -173,6 +173,12 @@ func (a *App) drawSelectedTileInfo() {
 	rl.DrawText(fmt.Sprintf("Coord: %v", a.SelectedCoord.String()), x+15, y+50, 16, rl.White)
 	rl.DrawText(fmt.Sprintf("TileType ID: %d", tile.TileType), x+15, y+70, 16, rl.LightGray)
 
+	// Se for rampa, mostrar o tipo calculado (Fase 42)
+	if tile.Shape() == dfproto.ShapeRamp {
+		tile.CalculateRampType()
+		rl.DrawText(fmt.Sprintf("Ramp Type: %d", tile.RampType), x+15, y+85, 14, rl.Orange)
+	}
+
 	// Material real (Fase 36)
 	matName := a.matStore.GetMaterialName(tile.Material)
 	rl.DrawText(fmt.Sprintf("Material: %s", matName), x+15, y+90, 16, rl.White)

@@ -7,6 +7,7 @@ import (
 	"runtime"
 
 	"FortressVision/cliente/internal/app"
+	"FortressVision/cliente/internal/liquid"
 	"FortressVision/shared/config"
 )
 
@@ -33,6 +34,10 @@ func main() {
 		log.SetOutput(f)
 		log.Println("--- INICIANDO FORTRESS VISION ---")
 	}
+
+	// Inicializar o Rastreador de Pipeline de Líquidos
+	liquid.InitTracer()
+	defer liquid.CloseTracer()
 
 	log.SetFlags(log.Ltime | log.Lshortfile)
 	log.Println("╔══════════════════════════════════════╗")

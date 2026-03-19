@@ -161,9 +161,9 @@ func (c *CameraController) SetMode(mode Mode) {
 // InputHandles processa entrada do usuário. Retorna true se houve input de movimento.
 func (c *CameraController) HandleInput(dt float32) bool {
 	moved := false
-	// Zoom com Scroll
+	// Zoom com Scroll (Desativado se ALT estiver pressionado - usado para Z-level)
 	wheel := rl.GetMouseWheelMove()
-	if wheel != 0 {
+	if wheel != 0 && !rl.IsKeyDown(rl.KeyLeftAlt) && !rl.IsKeyDown(rl.KeyRightAlt) {
 		moved = true
 		// Zoom logarítmico ou acelerado
 		c.TargetZoom -= wheel * c.ZoomSpeed

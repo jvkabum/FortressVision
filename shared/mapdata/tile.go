@@ -191,7 +191,7 @@ var rampblut = []byte{
 
 // CalculateRampType calcula o tipo de rampa baseado nos vizinhos.
 func (t *Tile) CalculateRampType() {
-	if t.Shape() != dfproto.ShapeRamp {
+	if t.container == nil || t.Shape() != dfproto.ShapeRamp {
 		t.RampType = 0
 		return
 	}

@@ -5,7 +5,7 @@ import (
 	"FortressVision/shared/pkg/dfproto"
 	"FortressVision/shared/util"
 	"fmt"
-	"log"
+	"strings"
 	"sync/atomic"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -22,7 +22,7 @@ func (m *BlockMesher) addRamp(coord util.DFCoord, tile *mapdata.Tile, color [4]u
 		rampType = 1
 	}
 
-	modelName := fmt.Sprintf("ramp_%d", rampType)
+	modelName := fmt.Sprintf("ramps/RAMP_%d.obj", rampType)
 
 	if m.AssetMgr != nil {
 		entry := m.AssetMgr.GetTileMesh("RAMP:*:*:*:*")
@@ -36,21 +36,20 @@ func (m *BlockMesher) addRamp(coord util.DFCoord, tile *mapdata.Tile, color [4]u
 
 	texName := m.MatStore.GetTextureName(tile.MaterialCategory())
 
-	// DEBUG: Log da primeira rampa encontrada
-	count := rampDebugCount.Add(1)
-	if count <= 5 {
-		log.Printf("[DEBUG RAMP] #%d tipo=%d modelo='%s' tex='%s' pos=(%.1f,%.1f,%.1f) assetMgr=%v",
-			count, rampType, modelName, texName, pos.X, pos.Y, pos.Z, m.AssetMgr != nil)
+	// Garantir que o nome do modelo seja consistente com o carregado no renderer.go
+	// (Caso o AssetMgr não tenha retornado um nome específico do JSON)
+	if !strings.Contains(modelName, "/") && !strings.HasPrefix(modelName, "ramps/") {
+		modelName = strings.ToLower(modelName)
 	}
 
 	// Adicionamos como ModelInstance, mas vamos garantir que o Renderer NÃO use shaders de planta para ela
 	res.ModelInstances = append(res.ModelInstances, ModelInstance{
 		ModelName:   modelName,
 		TextureName: texName,
-		Position:    [3]float32{pos.X + 0.5, pos.Y, pos.Z - 0.5},
-		Scale:       1.0,
-		Color:       color,
-		IsRamp:      true, // Nova flag para o Renderer
+		Position: [3]float32{pos.X + 0.5, pos.Y, pos.Z - 0.5},
+		Scale:    0.5,
+		Color:    color,
+		IsRamp:   true, // Nova flag para o Renderer
 	})
 }
 

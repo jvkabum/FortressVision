@@ -189,7 +189,7 @@ in vec3 vertexPosition;
 in vec2 vertexTexCoord;
 in vec3 vertexNormal;
 in vec4 vertexColor;
-in mat4 instanceTransform; // Atributo de instanciamento (Fase 33)
+in mat4 instanceTransform; 
 uniform mat4 mvp;
 uniform float time;
 
@@ -204,7 +204,6 @@ void main() {
     fragNormal = vertexNormal;
     fragHeight = vertexPosition.y;
     
-    // Calculamos a posição final multiplicando pela matriz da instância
     gl_Position = mvp * instanceTransform * vec4(vertexPosition, 1.0);
 }
 `
@@ -217,26 +216,23 @@ in vec3 fragNormal;
 in float fragHeight;
 
 uniform sampler2D texture0;
-uniform vec4 colDiffuse; // Raylib passa le tint/color aqui
+uniform vec4 colDiffuse; 
 uniform float time;
 
 out vec4 finalColor;
 
 void main() {
     vec4 texelColor = texture(texture0, fragTexCoord);
-    if (texelColor.a < 0.2) discard; 
+    if (texelColor.a < 0.1) texelColor = vec4(1.0, 1.0, 1.0, 1.0); 
 
-    // Iluminação básica
     vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
     float diff = max(dot(fragNormal, lightDir), 0.0);
     vec3 ambient = vec3(0.4, 0.4, 0.4);
     vec3 light = ambient + vec3(0.6) * diff;
 
-    // Combina textura, cor do vértice (AO) e tint (colDiffuse)
     vec4 color = texelColor * fragColor * colDiffuse;
     color.rgb *= light;
 
-    // Leve variação de cor baseada na altura
     color.rgb *= (0.8 + 0.2 * smoothstep(0.0, 1.0, fragHeight));
 
     finalColor = color;
@@ -249,19 +245,42 @@ in vec3 vertexPosition;
 in vec2 vertexTexCoord;
 in vec3 vertexNormal;
 in vec4 vertexColor;
-
 uniform mat4 mvp;
 
 out vec2 fragTexCoord;
 out vec4 fragColor;
 out vec3 fragNormal;
-out float fragHeight;
+out vec3 fragWorldPos;
 
 void main() {
     fragTexCoord = vertexTexCoord;
     fragColor = vertexColor;
     fragNormal = vertexNormal;
-    fragHeight = vertexPosition.y;
+    fragWorldPos = vertexPosition; // Terreno já está em Coords de Mundo
+    gl_Position = mvp * vec4(vertexPosition, 1.0);
+}
+`
+
+const modelVertexShader = `
+#version 330
+in vec3 vertexPosition;
+in vec2 vertexTexCoord;
+in vec3 vertexNormal;
+in vec4 vertexColor;
+uniform mat4 mvp;
+uniform mat4 matModel;
+
+out vec2 fragTexCoord;
+out vec4 fragColor;
+out vec3 fragNormal;
+out vec3 fragWorldPos;
+
+void main() {
+    fragTexCoord = vertexTexCoord;
+    fragColor = vertexColor;
+    fragNormal = normalize(vec3(matModel * vec4(vertexNormal, 0.0)));
+    vec4 worldPos = matModel * vec4(vertexPosition, 1.0);
+    fragWorldPos = worldPos.xyz;
     gl_Position = mvp * vec4(vertexPosition, 1.0);
 }
 `
@@ -279,14 +298,15 @@ uniform mat4 mvp;
 out vec2 fragTexCoord;
 out vec4 fragColor;
 out vec3 fragNormal;
-out float fragHeight;
+out vec3 fragWorldPos;
 
 void main() {
     fragTexCoord = vertexTexCoord;
     fragColor = vertexColor;
     fragNormal = vertexNormal;
-    fragHeight = vertexPosition.y;
-    gl_Position = mvp * instanceTransform * vec4(vertexPosition, 1.0);
+    vec4 worldPos = instanceTransform * vec4(vertexPosition, 1.0);
+    fragWorldPos = worldPos.xyz;
+    gl_Position = mvp * worldPos;
 }
 `
 
@@ -295,33 +315,44 @@ const terrainFragmentShader = `
 in vec2 fragTexCoord;
 in vec4 fragColor;
 in vec3 fragNormal;
-in float fragHeight;
+in vec3 fragWorldPos;
 
 uniform sampler2D texture0;
 uniform vec4 colDiffuse;
 uniform float time;
-uniform float snowAmount; // 0.0 a 1.0
+uniform float snowAmount; 
 
 out vec4 finalColor;
 
-// Função de ruído simples para "Ground Splatting" visual
 float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
 }
 
 void main() {
-    vec4 texelColor = texture(texture0, fragTexCoord);
-    if (texelColor.a < 0.1) discard; 
+    // TRIPLANAR MAPPING (Fase 47: Estilo Armok Vision)
+    vec3 blending = abs(fragNormal);
+    float total = blending.x + blending.y + blending.z;
+    if (total > 0.0) blending /= total;
+    else blending = vec3(0, 1, 0);
 
-    // Variação de cor baseada no ruído
-    float n = hash(floor(fragTexCoord * 10.0));
+    float scale = 1.0; // Tiling da textura
+    vec4 xTex = texture(texture0, fragWorldPos.yz * scale);
+    vec4 yTex = texture(texture0, fragWorldPos.xz * scale);
+    vec4 zTex = texture(texture0, fragWorldPos.xy * scale);
+
+    vec4 texelColor = xTex * blending.x + yTex * blending.y + zTex * blending.z;
+
+    // Se o alpha for muito baixo (bug de amostragem), mostra cor de debug magenta
+    if (texelColor.a < 0.01) texelColor = vec4(1.0, 0.0, 1.0, 1.0);
+
+    // Ruído baseado na posição de mundo para quebrar repetição
+    float n = hash(floor(fragWorldPos.xz * 10.0));
     vec4 mixedColor = texelColor * fragColor * colDiffuse;
     mixedColor.rgb *= (0.9 + 0.2 * n);
 
-    // Efeito de Neve
     float snowFactor = clamp(fragNormal.y, 0.0, 1.0);
     snowFactor = pow(snowFactor, 4.0) * snowAmount;
-    float snowNoise = hash(fragTexCoord * 5.0 + vec2(time * 0.01));
+    float snowNoise = hash(fragWorldPos.xz * 5.0 + vec2(time * 0.01));
     snowFactor *= (0.8 + 0.4 * snowNoise);
     
     mixedColor.rgb = mix(mixedColor.rgb, vec3(0.9, 0.95, 1.0), snowFactor);

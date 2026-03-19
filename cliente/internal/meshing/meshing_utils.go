@@ -82,7 +82,12 @@ func (m *BlockMesher) shouldDrawFace(tile *mapdata.Tile, dir util.Directions) bo
 		return false // Vizinho oculto é "vácuo preto sólido": NÃO desenha face contra ele
 	}
 	neighborShape := neighbor.Shape()
-	if neighborShape == dfproto.ShapeNoShape {
+	if neighborShape == dfproto.ShapeNoShape || neighborShape == dfproto.ShapeRamp || neighborShape == dfproto.ShapeRampTop {
+		// Se o vizinho for rampa ou vácuo, desenhamos a face apenas se formos um bloco sólido.
+		// Mas para simplificar e evitar Z-fighting com rampas, as rampas ocultam as faces dos vizinhos.
+		if neighborShape == dfproto.ShapeRamp || neighborShape == dfproto.ShapeRampTop {
+			return false
+		}
 		return true
 	}
 

@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"FortressVision/cliente/internal/client"
+	"FortressVision/cliente/internal/liquid"
 	"FortressVision/cliente/internal/meshing"
 	"FortressVision/shared/pkg/dfproto"
 	"FortressVision/shared/proto/fvnet"
@@ -54,6 +55,7 @@ func (a *App) connectServer() {
 		a.mapStore.Mu.RUnlock()
 
 		if exists && a.mesher != nil {
+			liquid.TraceEnqueue(origin.X, origin.Y, origin.Z, chunk.MTime)
 			a.mesher.Enqueue(meshing.Request{
 				Origin:   origin,
 				Data:     a.mapStore,

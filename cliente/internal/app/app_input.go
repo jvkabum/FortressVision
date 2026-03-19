@@ -37,6 +37,16 @@ func (a *App) updateCamera() {
 		a.updateMap(true) // Instant Z-Sync (Phase 29)
 	}
 
+	// Nível Z com ALT + Scroll (Estilo Timberborn)
+	if rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt) {
+		wheel := rl.GetMouseWheelMove()
+		if wheel != 0 {
+			a.mapCenter.Z += int32(wheel)
+			a.Cam.TargetLookAt.Y += float32(wheel) * util.GameScale
+			a.updateMap(true)
+		}
+	}
+
 	// Alternar projeção com P
 	if rl.IsKeyPressed(rl.KeyP) {
 		if a.Cam.Mode == camera.ModePerspective {
