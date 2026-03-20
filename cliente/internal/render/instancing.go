@@ -1,6 +1,7 @@
 package render
 
 import (
+	"FortressVision/cliente/internal/comp"
 	"FortressVision/cliente/internal/meshing"
 	"math"
 	"unsafe"
@@ -78,6 +79,39 @@ func (pm *PropManager) AddInstance(inst meshing.ModelInstance, mesh rl.Mesh, mat
 	// Ordem CORRETA (T * R * S) para Raylib/OpenGL:
 	// 1. Scale local -> 2. Rotate local -> 3. Translate to World
 	// No Raylib MatrixMultiply(A, B) é A * B. Queremos T * R * S.
+	matrix := rl.MatrixMultiply(rotMat, scaleMat)
+	matrix = rl.MatrixMultiply(transMat, matrix)
+
+	batch.Transforms = append(batch.Transforms, matrix)
+}
+
+// AddInstanceFromECS adiciona uma instância vinda do sistema de ECS (Ark)
+func (pm *PropManager) AddInstanceFromECS(pos *comp.Position, rend *comp.Renderable, rotation float32, scale float32, mesh rl.Mesh, material rl.Material, meshIndex int) {
+	key := rend.ModelName + ":" + rend.TextureName
+	batch, ok := pm.Batches[key]
+	if !ok {
+		batch = &PropBatch{
+			ModelName:   rend.ModelName,
+			TextureName: rend.TextureName,
+			Mesh:        mesh,
+			Material:    material,
+			Transforms:  make([]rl.Matrix, 0, 2048),
+			Visible:     make([]rl.Matrix, 0, 2048),
+		}
+		pm.Batches[key] = batch
+	}
+
+	// 1. Escala (S)
+	if scale == 0 {
+		scale = 1.0
+	}
+	scaleMat := rl.MatrixScale(scale, scale, scale)
+	// 2. Rotação (R)
+	rotMat := rl.MatrixRotateY(rotation * (math.Pi / 180.0))
+	// 3. Translação (T)
+	transMat := rl.MatrixTranslate(pos.X, pos.Y, pos.Z)
+
+	// Ordem CORRETA (T * R * S):
 	matrix := rl.MatrixMultiply(rotMat, scaleMat)
 	matrix = rl.MatrixMultiply(transMat, matrix)
 

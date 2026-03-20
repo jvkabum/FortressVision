@@ -15,7 +15,9 @@ import (
 	"FortressVision/cliente/internal/liquid"
 	"FortressVision/cliente/internal/meshing"
 	"FortressVision/shared/util"
+	"FortressVision/cliente/internal/comp"
 
+	"github.com/mlange-42/ark/ecs"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
@@ -59,6 +61,12 @@ type Renderer struct {
 	PropMgr *PropManager // Sistema de GPU Instancing (Fase 33)
 
 	debugInstCount int // DEBUG: contador frame para log temporário
+
+	// --- ECS (Ark) ---
+	World       ecs.World
+	queryPlants ecs.Filter4[comp.Position, comp.Renderable, comp.Rotation, comp.Scale]
+	// Mappers (otimizados para criação de entidades)
+	vegMapper *ecs.Map5[comp.Position, comp.Rotation, comp.Scale, comp.Renderable, comp.ChunkInfo]
 }
 
 // NewRenderer cria um novo renderizador.
@@ -68,7 +76,14 @@ func NewRenderer() *Renderer {
 		purgeQueue: make([]util.DFCoord, 0),
 		Textures:   make(map[string]rl.Texture2D),
 		Models3D:   make(map[string]rl.Model),
+		World:      *ecs.NewWorld(),
 	}
+
+	// Inicializar Helpers de Query Genéricos
+	r.queryPlants = *ecs.NewFilter4[comp.Position, comp.Renderable, comp.Rotation, comp.Scale](&r.World)
+	
+	// Inicializar Mappers
+	r.vegMapper = ecs.NewMap5[comp.Position, comp.Rotation, comp.Scale, comp.Renderable, comp.ChunkInfo](&r.World)
 
 	// Inicializar o Gerenciador de Assets (JSON)
 	mgr, err := assets.NewManager("assets/config")
@@ -156,6 +171,10 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// --- INTEGRAÇÃO ECS (Ark) ---
+	// 1. Limpar entidades antigas deste chunk
+	r.cleanupChunkEntities(res.Origin)
+
 	if old, ok := r.Models[res.Origin]; ok {
 		if old.Active {
 			rl.UnloadModel(old.Model)
@@ -178,7 +197,23 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		Active:    true,
 		MTime:     res.MTime,
 		MatModels: make(map[string]rl.Model),
-		Instances: res.ModelInstances,
+		Instances: res.ModelInstances, // Keep for now, but ECS will take over rendering
+	}
+
+	// 3. Criar entidades no ECS para cada instância enviada
+	for _, inst := range res.ModelInstances {
+		r.vegMapper.NewEntity(
+			&comp.Position{X: inst.Position[0], Y: inst.Position[1], Z: inst.Position[2]},
+			&comp.Rotation{Angle: inst.Rotation},
+			&comp.Scale{Value: inst.Scale},
+			&comp.Renderable{
+				ModelName:   inst.ModelName,
+				TextureName: inst.TextureName,
+				Color:       inst.Color,
+				IsRamp:      inst.IsRamp,
+			},
+			&comp.ChunkInfo{X: res.Origin.X, Y: res.Origin.Y, Z: res.Origin.Z},
+		)
 	}
 
 	if len(res.Terreno.Vertices) > 0 {
@@ -225,16 +260,43 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 	r.Models[res.Origin] = bm
 }
 
+func (r *Renderer) cleanupChunkEntities(origin util.DFCoord) {
+	// Filtro para encontrar todas as entidades que pertencem a este chunk
+	filter := ecs.NewFilter1[comp.ChunkInfo](&r.World)
+	query := filter.Query()
+	
+	var toRemove []ecs.Entity
+	for query.Next() {
+		cinfo := query.Get()
+		if cinfo.X == origin.X && cinfo.Y == origin.Y && cinfo.Z == origin.Z {
+			toRemove = append(toRemove, query.Entity())
+		}
+	}
+	query.Close()
+
+	for _, e := range toRemove {
+		r.World.RemoveEntity(e)
+	}
+}
+
 func (r *Renderer) geometryToMesh(data meshing.GeometryData) rl.Mesh {
 	var mesh rl.Mesh
+
+	// Se a malha usa Indices (EBO), o contagem de triângulos baseia-se nos índices
+	// Caso contrário (malhas unindexed), baseia-se nos vértices
 	vCount := int32(len(data.Vertices) / 3)
 	mesh.VertexCount = vCount
-	mesh.TriangleCount = vCount / 3
+	if len(data.Indices) > 0 {
+		mesh.TriangleCount = int32(len(data.Indices) / 3)
+	} else {
+		mesh.TriangleCount = vCount / 3
+	}
 
 	mesh.Vertices = nil
 	mesh.Normals = nil
 	mesh.Colors = nil
 	mesh.Texcoords = nil
+	mesh.Indices = nil
 
 	if len(data.Vertices) > 0 {
 		mesh.Vertices = (*float32)(r.copyToC(unsafe.Pointer(&data.Vertices[0]), len(data.Vertices)*4))
@@ -247,6 +309,9 @@ func (r *Renderer) geometryToMesh(data meshing.GeometryData) rl.Mesh {
 	}
 	if len(data.UVs) > 0 {
 		mesh.Texcoords = (*float32)(r.copyToC(unsafe.Pointer(&data.UVs[0]), len(data.UVs)*4))
+	}
+	if len(data.Indices) > 0 {
+		mesh.Indices = (*uint16)(r.copyToC(unsafe.Pointer(&data.Indices[0]), len(data.Indices)*2))
 	}
 	return mesh
 }
@@ -283,6 +348,10 @@ func (r *Renderer) freeMeshRAM(mesh *rl.Mesh) {
 		C.free(unsafe.Pointer(mesh.Texcoords))
 		mesh.Texcoords = nil
 	}
+	if mesh.Indices != nil {
+		C.free(unsafe.Pointer(mesh.Indices))
+		mesh.Indices = nil
+	}
 }
 
 // Draw renderiza os blocos que estão dentro do raio de visão da câmera.
@@ -290,6 +359,11 @@ func (r *Renderer) freeMeshRAM(mesh *rl.Mesh) {
 func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
+	// Desabilitar backface culling: No sistema de níveis, faces devem ser visíveis de todos os ângulos.
+	// O winding (0,2,1)+(0,3,2) faz algumas faces apontarem "para dentro", e o culling as descartaria
+	// quando vistas "por trás". Desabilitando, garantimos visibilidade total.
+	rl.DisableBackfaceCulling()
 
 	camPos := camera3d.Position
 
@@ -349,85 +423,78 @@ func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 		}
 	}
 
-	// PASS 1.5: VEGETACAO E RAMPAS (GPU INSTANCING - Ultra Performance)
+	// PASS 1.5: VEGETACAO E RAMPAS (ECS - Ark + GPU INSTANCING)
 	r.PropMgr.Clear()
-	const instViewRadiusSq = 90.0 * 90.0
+	const instViewRadiusSq = 150.0 * 150.0
 
-	for _, bm := range r.Models {
-		if !bm.Active || len(bm.Instances) == 0 {
+	// Usamos o Query do ECS para encontrar tudo que precisa ser desenhado
+	query := r.queryPlants.Query()
+	for query.Next() {
+		posComp, rendComp, rotComp, scaleComp := query.Get()
+
+		// Culling de distância
+		pos := rl.Vector3{X: posComp.X, Y: posComp.Y, Z: posComp.Z}
+		if util.DistSq(camPos, pos) > instViewRadiusSq {
 			continue
 		}
 
-		// Z-Slicing para Props
-		if bm.Origin.Z > focusZ {
+		// Z-Slicing (Baseado na posição Y do mundo, que é o Z do DF)
+		if int32(posComp.Y) > focusZ {
 			continue
 		}
 
-		// Culling Vertical de Props/Rampas: Relaxado
-		diffZ := util.Abs(bm.Origin.Z - focusZ)
-		if diffZ > 32 {
+		model3d, ok := r.Models3D[rendComp.ModelName]
+		if !ok {
+			continue
+		}
+		if model3d.MeshCount == 0 {
 			continue
 		}
 
-		// Culling de chunk rápido
-		// distSq := util.DistSq(camPos, rl.Vector3{X: float32(bm.Origin.X), Y: camPos.Y, Z: float32(-bm.Origin.Y)})
-		// if bm.Origin.Z != focusZ && distSq > viewRadiusSq {
-		// 	continue
-		// }
+		// Preparamos o material e shader (Simplificado por enquanto como no código original)
+		material := unsafe.Slice(model3d.Materials, model3d.MaterialCount)[0]
+		shader := r.TerrainInstancedShader
+		if isPlantModel(rendComp.ModelName) && !rendComp.IsRamp && r.PlantInstancedShader.ID != 0 {
+			shader = r.PlantInstancedShader
+		}
+		material.Shader = shader
 
-		for _, inst := range bm.Instances {
-			pos := rl.Vector3{X: inst.Position[0], Y: inst.Position[1], Z: inst.Position[2]}
-			if util.DistSq(camPos, pos) > instViewRadiusSq {
-				continue
+		if rendComp.TextureName != "" {
+			if tex, ok := r.Textures[rendComp.TextureName]; ok {
+				rl.SetMaterialTexture(&material, rl.MapDiffuse, tex)
 			}
+		}
 
-			model3d, ok := r.Models3D[inst.ModelName]
-			if !ok {
-				continue
-			}
-			if model3d.MeshCount == 0 {
-				continue
-			}
-
-			// Preparamos o material e shader para este tipo de prop (INSTANCED)
-			material := unsafe.Slice(model3d.Materials, model3d.MaterialCount)[0]
-			shader := r.TerrainInstancedShader
-			if isPlantModel(inst.ModelName) && !inst.IsRamp {
-				shader = r.PlantInstancedShader
-			}
-			material.Shader = shader
-
-			// Aplica textura
-			if inst.TextureName != "" {
-				if tex, ok := r.Textures[inst.TextureName]; ok {
-					rl.SetMaterialTexture(&material, rl.MapDiffuse, tex)
+		// Se for rampa, desenhamos direto para teste de visibilidade (Fase 45)
+		if rendComp.IsRamp {
+			// Usar ModelShader dedicado para rampas (Fase 51)
+			materials := unsafe.Slice(model3d.Materials, model3d.MaterialCount)
+			if rendComp.TextureName != "" {
+				if tex, ok := r.Textures[rendComp.TextureName]; ok {
+					rl.SetMaterialTexture(&materials[0], rl.MapDiffuse, tex)
 				}
 			}
+			materials[0].Shader = r.ModelShader
+			
+			// Escala Gold Standard (0.5/0.3/0.5)
+			c := rl.Color{R: rendComp.Color[0], G: rendComp.Color[1], B: rendComp.Color[2], A: rendComp.Color[3]}
+			rl.DrawModelEx(model3d, pos, rl.Vector3{X: 0, Y: 1, Z: 0}, rotComp.Angle, rl.Vector3{X: scaleComp.Value, Y: scaleComp.Value, Z: scaleComp.Value}, c)
+			continue
+		}
 
-			// Se for rampa, desenhamos direto para teste de visibilidade (Fase 45)
-			if inst.IsRamp {
-				pos := rl.Vector3{X: inst.Position[0], Y: inst.Position[1], Z: inst.Position[2]}
-
-				// Usar ModelShader dedicado para rampas (Fase 51)
-				materials := unsafe.Slice(model3d.Materials, model3d.MaterialCount)
-				if inst.TextureName != "" {
-					if tex, ok := r.Textures[inst.TextureName]; ok {
-						rl.SetMaterialTexture(&materials[0], rl.MapDiffuse, tex)
-					}
-				}
-				materials[0].Shader = r.ModelShader
-				
-				// Escala Gold Standard (0.5/0.3/0.5)
-				c := rl.Color{R: inst.Color[0], G: inst.Color[1], B: inst.Color[2], A: inst.Color[3]}
-				rl.DrawModelEx(model3d, pos, rl.Vector3{X: 0, Y: 1, Z: 0}, inst.Rotation, rl.Vector3{X: 0.5, Y: 0.3, Z: 0.5}, c)
-				continue
+		// Adiciona cada mesh do modelo à fila de instancing
+		meshes := unsafe.Slice(model3d.Meshes, model3d.MeshCount)
+		for i := 0; i < int(model3d.MeshCount); i++ {
+			meshMaterial := material
+			if int32(i) < model3d.MaterialCount {
+				meshMaterial = unsafe.Slice(model3d.Materials, model3d.MaterialCount)[i]
+				meshMaterial.Shader = material.Shader
 			}
-
-			// ADICIONA À FILA DE DESENHO (Fase 44: Fix Ramps)
-			meshes := unsafe.Slice(model3d.Meshes, model3d.MeshCount)
-			r.PropMgr.AddInstance(inst, meshes[0], material)
+			
+			r.PropMgr.AddInstanceFromECS(posComp, rendComp, rotComp.Angle, scaleComp.Value, meshes[i], meshMaterial, i)
 		}
 	}
+	query.Close()
 
 	// Desenha tudo em lotes otimizados (1 draw call por tipo)
 	r.PropMgr.DrawAll(camera3d)

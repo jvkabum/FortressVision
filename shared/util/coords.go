@@ -125,7 +125,7 @@ func WorldToDFCoord(pos rl.Vector3) DFCoord {
 }
 
 // Directions representa as direções cardinais e diagonais.
-type Directions uint16
+type Directions uint32
 
 const (
 	DirNone      Directions = 0
@@ -139,7 +139,15 @@ const (
 	DirWest
 	DirUp
 	DirDown
-	DirAll Directions = 0x0FFF
+	DirUpNorth
+	DirUpSouth
+	DirUpEast
+	DirUpWest
+	DirDownNorth
+	DirDownSouth
+	DirDownEast
+	DirDownWest
+	DirAll Directions = 0xFFFFFFFF
 )
 
 // Has verifica se uma direção está ativa.
@@ -159,6 +167,14 @@ var DirOffsets = map[Directions]DFCoord{
 	DirSouthWest: {X: -1, Y: 1, Z: 0},
 	DirUp:        {X: 0, Y: 0, Z: 1},
 	DirDown:      {X: 0, Y: 0, Z: -1},
+	DirUpNorth:   {X: 0, Y: -1, Z: 1},
+	DirUpSouth:   {X: 0, Y: 1, Z: 1},
+	DirUpEast:    {X: 1, Y: 0, Z: 1},
+	DirUpWest:    {X: -1, Y: 0, Z: 1},
+	DirDownNorth: {X: 0, Y: -1, Z: -1},
+	DirDownSouth: {X: 0, Y: 1, Z: -1},
+	DirDownEast:  {X: 1, Y: 0, Z: -1},
+	DirDownWest:  {X: -1, Y: 0, Z: -1},
 }
 
 // AddDir retorna uma nova coordenada deslocada na direção especificada.

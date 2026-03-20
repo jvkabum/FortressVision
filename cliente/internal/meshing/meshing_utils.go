@@ -67,6 +67,31 @@ func (m *BlockMesher) getQuadCornerColors(coord util.DFCoord, face util.Directio
 		c2 = applyAO(baseColor, getAO(util.DirNorth, util.DirEast, util.DirNorthEast))
 		c3 = applyAO(baseColor, getAO(util.DirSouth, util.DirEast, util.DirSouthEast))
 		c4 = applyAO(baseColor, getAO(util.DirSouth, util.DirWest, util.DirSouthWest))
+	case util.DirDown:
+		c1 = applyAO(baseColor, getAO(util.DirNorth, util.DirWest, util.DirNorthWest))
+		c2 = applyAO(baseColor, getAO(util.DirSouth, util.DirWest, util.DirSouthWest))
+		c3 = applyAO(baseColor, getAO(util.DirSouth, util.DirEast, util.DirSouthEast))
+		c4 = applyAO(baseColor, getAO(util.DirNorth, util.DirEast, util.DirNorthEast))
+	case util.DirNorth:
+		c1 = applyAO(baseColor, getAO(util.DirDown, util.DirWest, util.DirDownWest))
+		c2 = applyAO(baseColor, getAO(util.DirDown, util.DirEast, util.DirDownEast))
+		c3 = applyAO(baseColor, getAO(util.DirUp, util.DirEast, util.DirUpEast))
+		c4 = applyAO(baseColor, getAO(util.DirUp, util.DirWest, util.DirUpWest))
+	case util.DirSouth:
+		c1 = applyAO(baseColor, getAO(util.DirDown, util.DirEast, util.DirDownEast))
+		c2 = applyAO(baseColor, getAO(util.DirDown, util.DirWest, util.DirDownWest))
+		c3 = applyAO(baseColor, getAO(util.DirUp, util.DirWest, util.DirUpWest))
+		c4 = applyAO(baseColor, getAO(util.DirUp, util.DirEast, util.DirUpEast))
+	case util.DirWest:
+		c1 = applyAO(baseColor, getAO(util.DirDown, util.DirSouth, util.DirDownSouth))
+		c2 = applyAO(baseColor, getAO(util.DirDown, util.DirNorth, util.DirDownNorth))
+		c3 = applyAO(baseColor, getAO(util.DirUp, util.DirNorth, util.DirUpNorth))
+		c4 = applyAO(baseColor, getAO(util.DirUp, util.DirSouth, util.DirUpSouth))
+	case util.DirEast:
+		c1 = applyAO(baseColor, getAO(util.DirDown, util.DirNorth, util.DirDownNorth))
+		c2 = applyAO(baseColor, getAO(util.DirDown, util.DirSouth, util.DirDownSouth))
+		c3 = applyAO(baseColor, getAO(util.DirUp, util.DirSouth, util.DirUpSouth))
+		c4 = applyAO(baseColor, getAO(util.DirUp, util.DirNorth, util.DirUpNorth))
 	default:
 		return baseColor, baseColor, baseColor, baseColor
 	}
@@ -76,35 +101,32 @@ func (m *BlockMesher) getQuadCornerColors(coord util.DFCoord, face util.Directio
 func (m *BlockMesher) shouldDrawFace(tile *mapdata.Tile, dir util.Directions) bool {
 	neighbor := tile.GetNeighbor(dir)
 	if neighbor == nil {
-		return true // Borda do mapa: desenha
+		return true // Borda do mapa: sempre desenha
 	}
+
+	// Vizinho Hidden → sempre desenha (Hidden = vazio preto, precisa ver a parede)
 	if neighbor.Hidden {
-		return false // Vizinho oculto é "vácuo preto sólido": NÃO desenha face contra ele
+		return true
 	}
+
 	neighborShape := neighbor.Shape()
-	if neighborShape == dfproto.ShapeNoShape || neighborShape == dfproto.ShapeRamp || neighborShape == dfproto.ShapeRampTop {
-		// Se o vizinho for rampa ou vácuo, desenhamos a face apenas se formos um bloco sólido.
-		// Mas para simplificar e evitar Z-fighting com rampas, as rampas ocultam as faces dos vizinhos.
-		if neighborShape == dfproto.ShapeRamp || neighborShape == dfproto.ShapeRampTop {
-			return false
-		}
+
+	// Vizinho é vazio/ar → sempre desenha
+	if neighborShape == dfproto.ShapeNoShape {
 		return true
 	}
 
-	if (tile.Shape() == dfproto.ShapeWall || tile.Shape() == dfproto.ShapeFortification) &&
-		(neighborShape == dfproto.ShapeWall || neighborShape == dfproto.ShapeFortification) {
-		if tile.Shape() == dfproto.ShapeWall && neighborShape == dfproto.ShapeWall {
+	// ÚNICA otimização: ocultar face LATERAL entre duas Walls sólidas visíveis.
+	// NUNCA ocultar DirUp/DirDown — no sistema de níveis, o jogador precisa ver
+	// o teto (DirUp) e o chão (DirDown) do bloco no nível que está olhando.
+	if tile.Shape() == dfproto.ShapeWall && neighborShape == dfproto.ShapeWall {
+		if dir != util.DirUp && dir != util.DirDown {
 			return false
 		}
-		if dir == util.DirUp || dir == util.DirDown {
-			return false
-		}
-		return true
 	}
 
-	if dir == util.DirDown && tile.Shape() == dfproto.ShapeFloor && neighborShape == dfproto.ShapeWall {
-		return false
-	}
+	// Tudo que não é Wall-Wall: desenhar a face.
+	// Inclui: Rampas, Fortificações, Escadas, Floors, etc.
 	return true
 }
 

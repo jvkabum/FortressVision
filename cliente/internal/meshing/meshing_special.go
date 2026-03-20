@@ -61,53 +61,30 @@ func (m *BlockMesher) addStairs(coord util.DFCoord, shape dfproto.TiletypeShape,
 	steps := 4
 	stepH := float32(1.0) / float32(steps)
 	stepD := d / float32(steps)
-	sideColor := [4]uint8{uint8(float32(color[0]) * 0.8), uint8(float32(color[1]) * 0.8), uint8(float32(color[2]) * 0.8), color[3]}
 
 	for i := 0; i < steps; i++ {
 		curH := float32(i+1) * stepH
 		prevH := float32(i) * stepH
 		curZ := z - float32(i)*stepD
+		
+		// Posição base do degrau
+		stepPos := rl.Vector3{X: x, Y: y, Z: curZ}
 
-		buffer.AddFaceAOStandard(
-			[3]float32{x, y + curH, curZ}, color,
-			[3]float32{x, y + curH, curZ - stepD}, color,
-			[3]float32{x + w, y + curH, curZ - stepD}, color,
-			[3]float32{x + w, y + curH, curZ}, color,
-			[3]float32{0, 1, 0},
-		)
+		// Topo do degrau (sempre visível)
+		// Usamos addQuadFace para ganhar AO e UVs automáticos
+		m.addQuadFace(rl.Vector3{X: x, Y: y + prevH, Z: curZ}, w, stepD, stepH, util.DirUp, color, buffer, coord, data)
 
-		buffer.AddFace(
-			[3]float32{x, y + prevH, curZ},
-			[3]float32{x + w, y + prevH, curZ},
-			[3]float32{x + w, y + curH, curZ},
-			[3]float32{x, y + curH, curZ},
-			[3]float32{0, 0, 1}, sideColor,
-		)
-
-		buffer.AddFace(
-			[3]float32{x, y + prevH, curZ - stepD},
-			[3]float32{x, y + prevH, curZ},
-			[3]float32{x, y + curH, curZ},
-			[3]float32{x, y + curH, curZ - stepD},
-			[3]float32{-1, 0, 0}, sideColor,
-		)
-		buffer.AddFace(
-			[3]float32{x + w, y, curZ},
-			[3]float32{x + w, y, curZ - stepD},
-			[3]float32{x + w, y + curH, curZ - stepD},
-			[3]float32{x + w, y + curH, curZ},
-			[3]float32{1, 0, 0}, sideColor,
-		)
+		// Frente do degrau (Vertical)
+		m.addQuadFace(stepPos, w, stepD, curH, util.DirNorth, color, buffer, coord, data)
+		
+		// Laterais do degrau
+		m.addQuadFace(stepPos, w, stepD, curH, util.DirWest, color, buffer, coord, data)
+		m.addQuadFace(stepPos, w, stepD, curH, util.DirEast, color, buffer, coord, data)
 	}
 
+	// Face Inferior (se for escada que desce)
 	if shape == dfproto.ShapeStairDown || shape == dfproto.ShapeStairUpDown {
-		buffer.AddFace(
-			[3]float32{x, y, z},
-			[3]float32{x + w, y, z},
-			[3]float32{x + w, y, z - d},
-			[3]float32{x, y, z - d},
-			[3]float32{0, -1, 0}, color,
-		)
+		m.addQuadFace(rl.Vector3{X: x, Y: y, Z: z}, w, d, 1.0, util.DirDown, color, buffer, coord, data)
 	}
 }
 
@@ -116,21 +93,10 @@ func (m *BlockMesher) addFortification(coord util.DFCoord, color [4]uint8, buffe
 	x, y, z := pos.X, pos.Y, pos.Z
 	w, d := float32(1.0), float32(1.0)
 
-	m.addCubeGreedy(rl.Vector3{X: x, Y: y, Z: z}, w, 0.4, d, color, false, true, true, true, true, true, buffer, coord, data)
-	m.addCubeGreedy(rl.Vector3{X: x, Y: y + 0.7, Z: z}, w, 0.3, d, color, true, false, true, true, true, true, buffer, coord, data)
-
-	buffer.AddFace(
-		[3]float32{x, y + 0.7, z},
-		[3]float32{x + w, y + 0.7, z},
-		[3]float32{x + w, y + 0.7, z - d},
-		[3]float32{x, y + 0.7, z - d},
-		[3]float32{0, -1, 0}, color,
-	)
-	buffer.AddFace(
-		[3]float32{x, y + 0.4, z},
-		[3]float32{x, y + 0.4, z - d},
-		[3]float32{x + w, y + 0.4, z - d},
-		[3]float32{x + w, y + 0.4, z},
-		[3]float32{0, 1, 0}, color,
-	)
+	// Base da fortificação (altura 0.4)
+	m.addCubeGreedy(rl.Vector3{X: x, Y: y, Z: z}, w, 0.4, d, color, true, true, true, true, true, true, buffer, coord, data)
+	
+	// Topo da fortificação (altura 0.3, começando no 0.7)
+	m.addCubeGreedy(rl.Vector3{X: x, Y: y + 0.7, Z: z}, w, 0.3, d, color, true, true, true, true, true, true, buffer, coord, data)
 }
+

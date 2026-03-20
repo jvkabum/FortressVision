@@ -46,8 +46,8 @@ type Request struct {
 	Origin   util.DFCoord
 	Data     *mapdata.MapDataStore
 	MTime    int64 // Versão dos dados no momento da requisição
-	FocusZ   int   // Camada Z que a câmera está focando
-	MaxDepth int   // Quantas camadas abaixo verificar para oclusão
+	FocusZ   int   // Camada Z que a câmera está focando (usado para LOD futuro)
+	MaxDepth int   // Quantas camadas abaixo verificar para oclusão (usado para LOD futuro)
 }
 
 // ModelInstance representa uma instância de um modelo 3D no mundo.
@@ -64,9 +64,9 @@ type ModelInstance struct {
 // Result contém os dados de geometria gerados para um bloco.
 type Result struct {
 	Origin             util.DFCoord
-	Terreno            GeometryData // Legado (se não for usar textura)
+	Terreno            GeometryData            // Deprecated: Mantido por compatibilidade. Usar MaterialGeometries.
 	Liquidos           GeometryData
-	MaterialGeometries map[string]GeometryData // Nova geometria separada por nome de textura
+	MaterialGeometries map[string]GeometryData // Geometria separada por nome de textura (principal)
 	ModelInstances     []ModelInstance         // Instâncias de modelos 3D (arbustos, árvores, etc)
 	MTime              int64                   // Versão dos dados processados
 }
@@ -86,6 +86,8 @@ var meshBufferPool = sync.Pool{
 				Vertices: make([]float32, 0, 4096),
 				Normals:  make([]float32, 0, 4096),
 				Colors:   make([]uint8, 0, 4096),
+				UVs:      make([]float32, 0, 4096),
+				Indices:  make([]uint16, 0, 8192),
 			},
 		}
 	},
@@ -114,38 +116,41 @@ type MeshBuffer struct {
 	Geometry GeometryData
 }
 
-// AddFace adiciona uma face retangular (quad) ao buffer.
+// emitQuadIndices adiciona os 6 índices necessários para 2 triângulos de um quad.
+// Deve ser chamado APÓS adicionar exatamente 4 vértices ao buffer.
+// Winding Order: (0,2,1) + (0,3,2)
+func (b *MeshBuffer) emitQuadIndices(startIndex uint16) {
+	b.Geometry.Indices = append(b.Geometry.Indices,
+		startIndex+0, startIndex+2, startIndex+1,
+		startIndex+0, startIndex+3, startIndex+2,
+	)
+}
+
+// AddFace adiciona uma face retangular (quad) ao buffer usando índices.
 func (b *MeshBuffer) AddFace(v1, v2, v3, v4 [3]float32, n [3]float32, c [4]uint8) {
-	// Triângulo 1 (v1, v2, v3)
+	start := uint16(len(b.Geometry.Vertices) / 3)
 	b.addVertex(v1, n, c)
 	b.addVertex(v2, n, c)
 	b.addVertex(v3, n, c)
-
-	// Triângulo 2 (v1, v3, v4)
-	b.addVertex(v1, n, c)
-	b.addVertex(v3, n, c)
 	b.addVertex(v4, n, c)
+	b.emitQuadIndices(start)
 }
 
 func (b *MeshBuffer) addVertex(v [3]float32, n [3]float32, c [4]uint8) {
 	b.Geometry.Vertices = append(b.Geometry.Vertices, v[0], v[1], v[2])
 	b.Geometry.Normals = append(b.Geometry.Normals, n[0], n[1], n[2])
 	b.Geometry.Colors = append(b.Geometry.Colors, c[0], c[1], c[2], c[3])
-	// Default UV 0,0 for standard vertices
 	b.Geometry.UVs = append(b.Geometry.UVs, 0, 0)
 }
 
-// AddFaceUV adiciona uma face ao buffer suportando coordenadas de textura UV / custom variables.
+// AddFaceUV adiciona uma face ao buffer com UVs usando índices.
 func (b *MeshBuffer) AddFaceUV(v1, v2, v3, v4 [3]float32, uv1, uv2, uv3, uv4 [2]float32, n [3]float32, c [4]uint8) {
-	// Triângulo 1 (v1, v2, v3)
+	start := uint16(len(b.Geometry.Vertices) / 3)
 	b.addVertexUV(v1, uv1, n, c)
 	b.addVertexUV(v2, uv2, n, c)
 	b.addVertexUV(v3, uv3, n, c)
-
-	// Triângulo 2 (v1, v3, v4)
-	b.addVertexUV(v1, uv1, n, c)
-	b.addVertexUV(v3, uv3, n, c)
 	b.addVertexUV(v4, uv4, n, c)
+	b.emitQuadIndices(start)
 }
 
 func (b *MeshBuffer) addVertexUV(v [3]float32, uv [2]float32, n [3]float32, c [4]uint8) {
@@ -169,29 +174,22 @@ func (b *MeshBuffer) AddTriangleUV(v1, v2, v3 [3]float32, uv1, uv2, uv3 [2]float
 	b.addVertexUV(v3, uv3, normal, color)
 }
 
+// AddFaceAOStandard adiciona uma face com cores de AO pré-calculadas por vértice.
 func (b *MeshBuffer) AddFaceAOStandard(v1 [3]float32, c1 [4]uint8, v2 [3]float32, c2 [4]uint8, v3 [3]float32, c3 [4]uint8, v4 [3]float32, c4 [4]uint8, normal [3]float32) {
-	// Triângulo 1 (v1, v2, v3)
+	start := uint16(len(b.Geometry.Vertices) / 3)
 	b.addVertex(v1, normal, c1)
 	b.addVertex(v2, normal, c2)
 	b.addVertex(v3, normal, c3)
-
-	// Triângulo 2 (v1, v3, v4)
-	b.addVertex(v1, normal, c1)
-	b.addVertex(v3, normal, c3)
 	b.addVertex(v4, normal, c4)
+	b.emitQuadIndices(start)
 }
 
+// AddFaceUVStandard adiciona uma face com UVs e cores de AO pré-calculadas por vértice.
 func (b *MeshBuffer) AddFaceUVStandard(v1 [3]float32, uv1 [2]float32, c1 [4]uint8, v2 [3]float32, uv2 [2]float32, c2 [4]uint8, v3 [3]float32, uv3 [2]float32, c3 [4]uint8, v4 [3]float32, uv4 [2]float32, c4 [4]uint8, normal [3]float32) {
-	// Triângulo 1 (v1, v2, v3)
+	start := uint16(len(b.Geometry.Vertices) / 3)
 	b.addVertexUV(v1, uv1, normal, c1)
 	b.addVertexUV(v2, uv2, normal, c2)
 	b.addVertexUV(v3, uv3, normal, c3)
-
-	// Triângulo 2 (v1, v3, v4)
-	b.addVertexUV(v1, uv1, normal, c1)
-	b.addVertexUV(v3, uv3, normal, c3)
 	b.addVertexUV(v4, uv4, normal, c4)
+	b.emitQuadIndices(start)
 }
-
-// MeshBuffer auxilia na construção de malhas dinâmicas.
-// Agora atua apenas como um container, sem sistema de reset para evitar vazamento de memória Go -> C.

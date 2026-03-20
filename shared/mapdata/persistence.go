@@ -32,6 +32,12 @@ type WorldMetadata struct {
 	Value string
 }
 
+// DictionaryModel armazena blobs (payloads binários) estáticos, como protobufs de Tiletypes e Mats
+type DictionaryModel struct {
+	Key  string `gorm:"primaryKey"`
+	Data []byte
+}
+
 // MaterialModel armazena a cor de um material específico persistido
 type MaterialModel struct {
 	MatType  int32 `gorm:"primaryKey;autoIncrement:false"`
@@ -90,9 +96,9 @@ func (s *MapDataStore) OpenInitialize(worldName string) error {
 		return s.resetCorruptDatabase(dbPath, worldName)
 	}
 
-	// Migração automática das tabelas
-	if err := db.AutoMigrate(&ChunkModel{}, &WorldMetadata{}, &MaterialModel{}); err != nil {
-		return fmt.Errorf("falha na migração do banco: %w", err)
+	// Migração	// Auto-Migrate do Esquema
+	if err := db.AutoMigrate(&ChunkModel{}, &WorldMetadata{}, &MaterialModel{}, &DictionaryModel{}); err != nil {
+		log.Printf("[Persistence] Aviso: Falha ao migrar esquema principal: %v", err)
 	}
 
 	s.Mu.Lock()
@@ -105,6 +111,80 @@ func (s *MapDataStore) OpenInitialize(worldName string) error {
 
 	log.Printf("[Persistence] Banco de dados SQLite aberto e íntegro: %s", dbPath)
 	return nil
+}
+
+// SaveMapInfo persiste as dimensões do mapa no banco
+func (s *MapDataStore) SaveMapInfo(info *dfproto.MapInfo) error {
+	if s.DB == nil {
+		return fmt.Errorf("banco não inicializado")
+	}
+	s.DB.Save(&WorldMetadata{Key: "MapSizeX", Value: fmt.Sprint(info.BlockSizeX)})
+	s.DB.Save(&WorldMetadata{Key: "MapSizeY", Value: fmt.Sprint(info.BlockSizeY)})
+	s.DB.Save(&WorldMetadata{Key: "MapSizeZ", Value: fmt.Sprint(info.BlockSizeZ)})
+	return nil
+}
+
+// GetMapInfo carrega as dimensões do mapa do banco
+func (s *MapDataStore) GetMapInfo() (x, y, z int32, err error) {
+	if s.DB == nil {
+		return 0, 0, 0, fmt.Errorf("banco não inicializado")
+	}
+	var metaX, metaY, metaZ WorldMetadata
+	s.DB.First(&metaX, "key = ?", "MapSizeX")
+	s.DB.First(&metaY, "key = ?", "MapSizeY")
+	s.DB.First(&metaZ, "key = ?", "MapSizeZ")
+
+	fmt.Sscan(metaX.Value, &x)
+	fmt.Sscan(metaY.Value, &y)
+	fmt.Sscan(metaZ.Value, &z)
+
+	if x == 0 || y == 0 || z == 0 {
+		// Heurística de Emergência: Tenta calcular a partir dos chunks salvos,
+		// IGNORES is_empty=1 (phantom chunks) to avoid extreme X/Y boundaries.
+		log.Println("[Persistence] MapInfo ausente. Calculando dimensões via heurística de chunks...")
+		var res struct {
+			MaxX int32
+			MaxY int32
+			MaxZ int32
+		}
+		s.DB.Model(&ChunkModel{}).Where("is_empty = ?", false).Select("MAX(x) as max_x, MAX(y) as max_y, MAX(z) as max_z").Scan(&res)
+		
+		if res.MaxX > 0 && res.MaxY > 0 {
+			// Nota: Isso é o ORIGIN do último bloco. Adicionamos 16 para fechar a borda.
+			x, y, z = res.MaxX+16, res.MaxY+16, res.MaxZ+1
+			
+			// Sanity check: Se os valores forem astronômicos, clipamos para um padrão seguro (ex: 4096x4096x246)
+			if x > 4096 { x = 4096 }
+			if y > 4096 { y = 4096 }
+			if z > 1000 { z = 1000 }
+
+			log.Printf("[Persistence] Heurística (Sólida): Mapa estimado em %dx%dx%d", x, y, z)
+			return x, y, z, nil
+		}
+		return 0, 0, 0, fmt.Errorf("MapInfo incompleto no banco e heurística falhou")
+	}
+	return x, y, z, nil
+}
+
+// SaveDictionary armazena um arquivo binário ou payload protobuf no banco com a chave dada
+func (s *MapDataStore) SaveDictionary(key string, data []byte) error {
+	if s.DB == nil {
+		return fmt.Errorf("banco não inicializado")
+	}
+	// Salva ou atualiza
+	return s.DB.Save(&DictionaryModel{Key: key, Data: data}).Error
+}
+
+// GetDictionary recupera um arquivo binário do banco sob a chave especificada
+func (s *MapDataStore) GetDictionary(key string) ([]byte, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("banco não inicializado")
+	}
+	var model DictionaryModel
+	if err := s.DB.First(&model, "key = ?", key).Error; err != nil {
+		return nil, err
+	}
+	return model.Data, nil
 }
 
 // resetCorruptDatabase renomeia o arquivo corrompido e tenta criar um novo

@@ -240,27 +240,67 @@ func main() {
 	log.Printf("Conectando ao DFHack em %s...", dfHost)
 	dfClient, err := dfhack.NewClient(dfHost)
 	if err != nil {
-		log.Fatalf("Erro fatal: não foi possível conectar ao DFHack: %v", err)
-	}
-	defer dfClient.Close()
-
-	if err := dfClient.FetchStaticData(); err != nil {
-		log.Printf("Aviso: Falha ao carregar dados estáticos iniciais: %v", err)
+		log.Printf("Aviso: Não foi possível conectar ao DFHack (%v). O servidor continuará em MODO OFFLINE.", err)
+		dfClient = nil
 	} else {
-		// Inicializar persistência no SQLite com o nome do mundo
-		worldName := dfClient.MapInfo.WorldNameEn
-		if worldName == "" {
-			worldName = dfClient.MapInfo.WorldName
-		}
-		if worldName != "" {
-			log.Printf("[Startup] Dimensões do Mapa: %dx%dx%d blocos (DF-Blocks)",
-				dfClient.MapInfo.BlockSizeX, dfClient.MapInfo.BlockSizeY, dfClient.MapInfo.BlockSizeZ)
-			log.Printf("Inicializando banco de dados para o mundo: %s", worldName)
-			if err := store.OpenInitialize(worldName); err != nil {
-				log.Printf("Erro ao abrir SQLite: %v", err)
-			}
+		defer dfClient.Close()
+	}
 
-			// Carregar Construções Iniciais (Fase 6) - Assíncrono para retorno rápido
+	var worldName string
+	if dfClient != nil {
+		if err := dfClient.FetchStaticData(); err != nil {
+			log.Printf("Aviso: Falha ao carregar dados estáticos iniciais: %v", err)
+		} else {
+			worldName = dfClient.MapInfo.WorldNameEn
+			if worldName == "" {
+				worldName = dfClient.MapInfo.WorldName
+			}
+			if worldName != "" {
+				log.Printf("[Startup] Dimensões do Mapa: %dx%dx%d blocos (DF-Blocks)",
+					dfClient.MapInfo.BlockSizeX, dfClient.MapInfo.BlockSizeY, dfClient.MapInfo.BlockSizeZ)
+				// Persistir dimensões para uso offline futuro
+				store.SaveMapInfo(dfClient.MapInfo)
+			}
+		}
+	} else {
+		// Modo Offline: Tentar encontrar o último mundo salvo
+		worldName = findLatestSave()
+		if worldName != "" {
+			log.Printf("[Offline] Nenhum DF ativo. Carregando último mundo conhecido: %s", worldName)
+			// Tentar carregar dimensões do banco
+			if err := store.OpenInitialize(worldName); err == nil {
+				x, y, z, err := store.GetMapInfo()
+				if err == nil {
+					log.Printf("[Offline] Dimensões recuperadas do cache: %dx%dx%d", x, y, z)
+				} else {
+					log.Printf("[Offline] Aviso: Não foi possível recuperar dimensões do cache: %v", err)
+				}
+			}
+		} else {
+			log.Println("[Offline] Nenhum mundo salvo encontrado. O servidor aguardará uma conexão futura.")
+		}
+	}
+
+	if worldName != "" {
+		log.Printf("Inicializando banco de dados para o mundo: %s", worldName)
+		if err := store.OpenInitialize(worldName); err != nil {
+			log.Printf("Erro ao abrir SQLite: %v", err)
+		}
+
+		// Gravar dicionários críticos no banco para futuro modo offline
+		if dfClient != nil && dfClient.IsConnected() {
+			if dfClient.TiletypeList != nil {
+				data, _ := dfClient.TiletypeList.Marshal()
+				store.SaveDictionary("TiletypeList", data)
+			}
+			if dfClient.MaterialList != nil {
+				data, _ := dfClient.MaterialList.Marshal()
+				store.SaveDictionary("MaterialList", data)
+			}
+		}
+
+		// Carregar Construções Iniciais (Fase 6) - Assíncrono para retorno rápido
+		if dfClient != nil {
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -300,7 +340,7 @@ func main() {
 						log.Printf("[Units-Loop] Recuperado de pânico: %v", r)
 					}
 				}()
-				if dfClient.IsConnected() {
+				if dfClient != nil && dfClient.IsConnected() {
 					units, err := dfClient.GetUnitList()
 					if err == nil && units != nil {
 						for _, u := range units.CreatureList {
@@ -336,7 +376,7 @@ func main() {
 						log.Printf("[AutoSave-Loop] Recuperado de pânico: %v", r)
 					}
 				}()
-				if dfClient.IsConnected() && dfClient.MapInfo != nil {
+				if dfClient != nil && dfClient.IsConnected() && dfClient.MapInfo != nil {
 					worldName := dfClient.MapInfo.WorldNameEn
 					if worldName == "" {
 						worldName = dfClient.MapInfo.WorldName
@@ -371,7 +411,7 @@ func main() {
 		}()
 		// Damos um tempo menor (2 segs) para o servidor conectar e carregar MapInfo
 		time.Sleep(2 * time.Second)
-		if dfClient.MapInfo == nil {
+		if dfClient == nil || dfClient.MapInfo == nil {
 			return
 		}
 
@@ -390,7 +430,7 @@ func main() {
 	}()
 
 	// Iniciar Broadcast de Status do Mundo
-	go broadcastWorldStatus(hub, dfClient)
+	go broadcastWorldStatus(hub, dfClient, store)
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r, dfClient, store, scanner)
@@ -431,18 +471,45 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request, dfClient *dfhack.
 
 	// Enviar status inicial
 	status := &fvnet.ServerStatus{
-		Message:     "Conectado ao Servidor FortressVision",
-		DfConnected: dfClient.IsConnected(),
+		DfConnected: dfClient != nil && dfClient.IsConnected(),
+		Message:     "Servidor FortressVision Ativo",
+	}
+	if dfClient != nil && dfClient.IsConnected() {
+		status.Message = "Conectado ao DFHack - Sincronização em tempo real"
+	} else {
+		status.Message = "Modo Offline - Lendo dados do Cache SQLite"
 	}
 	hub.SendProtoMessage(conn, fvnet.Envelope_SERVER_STATUS, status)
 
-	// Enviar Dicionários de Tipos (Essencial para o Cliente renderizar)
-	if dfClient.IsConnected() {
+	// Enviar Dicionários de Tipos (Essencial para o Cliente renderizar blocos sólidos)
+	if dfClient != nil && dfClient.IsConnected() {
 		if dfClient.TiletypeList != nil {
 			hub.SendProtoMessage(conn, fvnet.Envelope_TILETYPE_LIST, dfClient.TiletypeList)
 		}
 		if dfClient.MaterialList != nil {
 			hub.SendProtoMessage(conn, fvnet.Envelope_MATERIAL_LIST, dfClient.MaterialList)
+		}
+	} else {
+		// MODO OFFLINE: Buscar do SQLite e enviar empacotado cru
+		tileData, errT := store.GetDictionary("TiletypeList")
+		matData, errM := store.GetDictionary("MaterialList")
+
+		if errT == nil && len(tileData) > 0 {
+			log.Println("[Offline] Servindo dicionário de Tiletypes a partir do Cache.")
+			env := &fvnet.Envelope{Type: fvnet.Envelope_TILETYPE_LIST, Payload: tileData}
+			b, _ := proto.Marshal(env)
+			conn.WriteMessage(websocket.BinaryMessage, b)
+		} else {
+			log.Println("[Offline] AVISO: TiletypeList não encontrado no banco de dados!")
+		}
+
+		if errM == nil && len(matData) > 0 {
+			log.Println("[Offline] Servindo dicionário de Materials a partir do Cache.")
+			env := &fvnet.Envelope{Type: fvnet.Envelope_MATERIAL_LIST, Payload: matData}
+			b, _ := proto.Marshal(env)
+			conn.WriteMessage(websocket.BinaryMessage, b)
+		} else {
+			log.Println("[Offline] AVISO: MaterialList não encontrado no banco de dados!")
 		}
 	}
 
@@ -481,7 +548,9 @@ func handleClientMessage(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Client
 			return
 		}
 		log.Printf("[Network] Região Center(%d,%d,%d) R:%d", req.CenterX, req.CenterY, req.CenterZ, req.Radius)
-		dfClient.SetInterestZ(req.CenterZ)
+		if dfClient != nil {
+			dfClient.SetInterestZ(req.CenterZ)
+		}
 		go streamRegionToClient(hub, conn, dfClient, store, &req, scanner)
 	}
 }
@@ -607,14 +676,14 @@ func streamRegionToClient(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Clien
 	}
 }
 
-func broadcastWorldStatus(hub *Hub, dfClient *dfhack.Client) {
+func broadcastWorldStatus(hub *Hub, dfClient *dfhack.Client, store *mapdata.MapDataStore) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[WorldStatus] Recuperado de pânico: %v", r)
 			// Reinicia após uma pausa
 			go func() {
 				time.Sleep(5 * time.Second)
-				broadcastWorldStatus(hub, dfClient)
+				broadcastWorldStatus(hub, dfClient, store)
 			}()
 		}
 	}()
@@ -623,7 +692,24 @@ func broadcastWorldStatus(hub *Hub, dfClient *dfhack.Client) {
 	seasons := []string{"Primavera", "Verão", "Outono", "Inverno"}
 
 	for {
-		if !dfClient.IsConnected() || dfClient.MapInfo == nil {
+		if dfClient == nil || !dfClient.IsConnected() || dfClient.MapInfo == nil {
+			// No modo offline
+			if dfClient == nil {
+				cx, cy, cz, _ := store.GetMapInfo()
+				status := &fvnet.WorldStatus{
+					WorldName: "Modo Offline (Cache)",
+					ViewX:     cx / 2,      // Centro do mapa em tiles
+					ViewY:     cy / 2,      // Centro do mapa em tiles
+					ViewZ:     cz - 1,      // Nível Z mais alto (Superfície) estimado pela heurística
+				}
+				payload, _ := proto.Marshal(status)
+				envelope := &fvnet.Envelope{
+					Type:    fvnet.Envelope_WORLD_STATUS,
+					Payload: payload,
+				}
+				data, _ := proto.Marshal(envelope)
+				hub.safeSend(data)
+			}
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -710,4 +796,33 @@ func (h *Hub) SendProtoMessage(conn *websocket.Conn, msgType fvnet.Envelope_Type
 	if err := h.WriteSafe(conn, websocket.BinaryMessage, data); err != nil {
 		log.Printf("Erro ao enviar mensagem: %v", err)
 	}
+}
+
+// findLatestSave busca o arquivo .fv mais recente na pasta saves
+func findLatestSave() string {
+	files, err := os.ReadDir("saves")
+	if err != nil {
+		return ""
+	}
+
+	var latestFile string
+	var latestTime time.Time
+
+	for _, f := range files {
+		if !f.IsDir() && filepath.Ext(f.Name()) == ".fv" {
+			info, err := f.Info()
+			if err == nil {
+				if latestFile == "" || info.ModTime().After(latestTime) {
+					latestTime = info.ModTime()
+					latestFile = f.Name()
+				}
+			}
+		}
+	}
+
+	if latestFile != "" {
+		// Retorna o nome sem a extensão .fv
+		return latestFile[:len(latestFile)-3]
+	}
+	return ""
 }

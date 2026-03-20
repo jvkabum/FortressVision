@@ -71,41 +71,48 @@ func (m *BlockMesher) Stop() {
 }
 
 func (m *BlockMesher) worker() {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("[PANIC] Erro no Mesher Worker: %v", r)
-		}
-	}()
 	for {
 		select {
 		case req := <-m.requests:
-			// 1. Verificar Cache antes de processar
-			if m.ResultStore != nil {
-				if cached, ok := m.ResultStore.Get(req.Origin, req.MTime); ok {
-					m.pendingMu.Lock()
-					delete(m.pending, req.Origin)
-					m.pendingMu.Unlock()
-					m.results <- cached
-					continue
-				}
-			}
-
-			// 2. Gerar geometria se não estiver no cache
-			res := m.Generate(req)
-
-			// 3. Salvar no cache para uso futuro
-			if m.ResultStore != nil {
-				m.ResultStore.Store(res)
-			}
-
-			m.pendingMu.Lock()
-			delete(m.pending, req.Origin)
-			m.pendingMu.Unlock()
-			m.results <- res
+			m.processRequest(req)
 		case <-m.stop:
 			return
 		}
 	}
+}
+
+// processRequest processa uma requisição de meshing com proteção contra panic.
+// O defer garante que o chunk SEMPRE é removido do mapa pending,
+// mesmo que Generate() ou o cache disparem um panic.
+func (m *BlockMesher) processRequest(req Request) {
+	defer func() {
+		// Cleanup garantido: remove do pending independente de sucesso ou panic
+		m.pendingMu.Lock()
+		delete(m.pending, req.Origin)
+		m.pendingMu.Unlock()
+
+		if r := recover(); r != nil {
+			log.Printf("[PANIC] Erro no Mesher Worker (chunk %v): %v", req.Origin, r)
+		}
+	}()
+
+	// 1. Verificar Cache antes de processar
+	if m.ResultStore != nil {
+		if cached, ok := m.ResultStore.Get(req.Origin, req.MTime); ok {
+			m.results <- cached
+			return
+		}
+	}
+
+	// 2. Gerar geometria se não estiver no cache
+	res := m.Generate(req)
+
+	// 3. Salvar no cache para uso futuro
+	if m.ResultStore != nil {
+		m.ResultStore.Store(res)
+	}
+
+	m.results <- res
 }
 
 // Generate transforma um bloco de tiles em geometria.
@@ -114,6 +121,12 @@ func (m *BlockMesher) Generate(req Request) Result {
 		Origin:             req.Origin,
 		MTime:              req.MTime,
 		MaterialGeometries: make(map[string]GeometryData),
+	}
+
+	// Guard: Se o MapDataStore for nil, retorna resultado vazio (evita panic em GetTile)
+	if req.Data == nil {
+		log.Printf("[Mesher] AVISO: req.Data é nil para chunk %v. Retornando resultado vazio.", req.Origin)
+		return res
 	}
 
 	// Buffers temporários por textura

@@ -51,7 +51,7 @@ func (s *ServerScanner) scanLoop() {
 			// O scanner direcional agora pode rodar em paralelo ao Full Scan (Fase 8)
 			// Isso garante que o nível Z onde o jogador está olhando seja priorizado/atualizado.
 
-			if !s.dfClient.IsConnected() {
+			if s.dfClient == nil || !s.dfClient.IsConnected() {
 				time.Sleep(2 * time.Second)
 				return
 			}
@@ -153,8 +153,8 @@ func (s *ServerScanner) StartFullScan() {
 			}
 		}()
 		log.Printf("[Scanner] Iniciando download TOTAL do mapa no servidor...")
-		for !s.dfClient.IsConnected() {
-			time.Sleep(500 * time.Millisecond)
+		if s.dfClient == nil || !s.dfClient.IsConnected() {
+			return // Modo offline não faz full scan de DFHack
 		}
 
 		info := s.dfClient.MapInfo
@@ -279,8 +279,7 @@ func (s *ServerScanner) ScanZLevelBackground(z int32) {
 		return
 	}
 
-	for !s.dfClient.IsConnected() {
-		time.Sleep(500 * time.Millisecond)
+	if s.dfClient == nil || !s.dfClient.IsConnected() {
 		return
 	}
 
