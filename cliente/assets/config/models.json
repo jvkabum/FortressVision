@@ -1,6 +1,6 @@
 {
     "named_models": {
-        "shrub": "assets/models/plants/Foliage_New.obj",
+        "shrub": "assets/models/plants/BUSH.obj",
         "tree_body": "assets/models/plants/TREE.obj",
         "tree_trunk": "assets/models/plants/TreeTrunkPillar.obj",
         "tree_branches": "assets/models/plants/TreeBranches.obj",
@@ -17,7 +17,7 @@
         "tree_branch_sew": "assets/models/plants/TreeBranchSEW.obj",
         "tree_branch_nsew": "assets/models/plants/TreeBranchNSEW.obj",
         "branches": "assets/models/props/Branches.obj",
-        "mushroom": "assets/models/plants/Foliage_Small_1.obj",
-        "sapling": "assets/models/plants/Foliage_Small_1.obj"
+        "mushroom": "assets/models/plants/Mushroom.obj",
+        "sapling": "assets/models/plants/SAPLING.obj"
     }
 }

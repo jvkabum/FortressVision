@@ -183,30 +183,9 @@ func (a *App) drawSelectedTileInfo() {
 	matName := a.matStore.GetMaterialName(tile.Material)
 	rl.DrawText(fmt.Sprintf("Material: %s", matName), x+15, y+90, 16, rl.White)
 
-	// Lógica de categorias de material (Fase 37)
-	matCat := "Desconhecido"
-	cat := tile.MaterialCategory()
-	switch cat {
-	case dfproto.TilematStone:
-		matCat = "Pedra"
-	case dfproto.TilematSoil:
-		matCat = "Solo"
-	case dfproto.TilematGrassLight, dfproto.TilematGrassDark, dfproto.TilematGrassDry, dfproto.TilematGrassDead:
-		matCat = "Grama"
-	case dfproto.TilematTreeMaterial, dfproto.TilematPlant, dfproto.TilematMushroom:
-		matCat = "Vegetação"
-	case dfproto.TilematMineral:
-		matCat = "Minério"
-	case dfproto.TilematMagma:
-		matCat = "Magma"
-	case dfproto.TilematConstruction:
-		matCat = "Construção"
-	case dfproto.TilematFrozenLiquid:
-		matCat = "Gelo"
-	default:
-		matCat = fmt.Sprintf("Outro (%d)", cat)
-	}
-	rl.DrawText(fmt.Sprintf("Categoria: %s", matCat), x+15, y+110, 14, rl.LightGray)
+	// Lógica de categorias e subcategorias universais (Fase 60)
+	mainCat, subCat := tile.GetCategorization()
+	rl.DrawText(fmt.Sprintf("%s > %s", mainCat, subCat), x+15, y+110, 14, rl.LightGray)
 
 	// Líquidos
 	if tile.WaterLevel > 0 {

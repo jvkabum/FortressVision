@@ -37,6 +37,7 @@ type Tile struct {
 
 	TrunkPercent   uint8
 	PositionOnTree util.DFCoord
+	PlantID        uint32 // ID da planta no DF (Oak, Pine, etc)
 
 	DigDesignation dfproto.TileDigDesignation
 	DigMarker      bool // ID 27
@@ -78,6 +79,7 @@ func (t *Tile) CopyFrom(orig *Tile) {
 	t.WaterSalt = orig.WaterSalt
 	t.TrunkPercent = orig.TrunkPercent
 	t.PositionOnTree = orig.PositionOnTree
+	t.PlantID = orig.PlantID
 	t.DigDesignation = orig.DigDesignation
 	t.DigMarker = orig.DigMarker
 	t.DigAuto = orig.DigAuto
@@ -106,6 +108,67 @@ func (t *Tile) MaterialCategory() dfproto.TiletypeMaterial {
 		return dfproto.TilematNoMaterial
 	}
 	return tt.Material
+}
+
+// GetCategorization retorna a (Categoria Principal, Subcategoria) do tile.
+func (t *Tile) GetCategorization() (string, string) {
+	cat := t.MaterialCategory()
+	shape := t.Shape()
+
+	switch cat {
+	case dfproto.TilematStone:
+		if t.VeinMaterial.MatIndex != 0 || t.VeinMaterial.MatType != 0 {
+			return "Pedra", "Filão Mineral"
+		}
+		return "Pedra", "Camada Base"
+	case dfproto.TilematSoil:
+		return "Solo", "Terreno"
+	case dfproto.TilematGrassLight, dfproto.TilematGrassDark, dfproto.TilematGrassDry, dfproto.TilematGrassDead:
+		return "Grama", "Cobertura"
+	case dfproto.TilematTreeMaterial, dfproto.TilematPlant, dfproto.TilematMushroom:
+		main := "Vegetação"
+		if cat == dfproto.TilematMushroom {
+			return main, "Cogumelo"
+		}
+		switch shape {
+		case dfproto.ShapeSapling:
+			return main, "Semente / Muda"
+		case dfproto.ShapeShrub:
+			return main, "Arbusto"
+		case dfproto.ShapeTreeShape:
+			return main, "Folhagem (Copa)"
+		case dfproto.ShapeTrunkBranch:
+			return main, "Árvore (Tronco)"
+		case dfproto.ShapeBranch:
+			return main, "Árvore (Galho)"
+		case dfproto.ShapeTwig:
+			return main, "Graveto / Folha"
+		}
+		return main, "Planta"
+	case dfproto.TilematMineral:
+		return "Minério", "Riqueza Mineral"
+	case dfproto.TilematMagma, dfproto.TilematLavaStone:
+		return "Magma", "Vulcânico"
+	case dfproto.TilematConstruction:
+		sub := "Estrutura"
+		switch shape {
+		case dfproto.ShapeWall:
+			sub = "Parede"
+		case dfproto.ShapeFloor:
+			sub = "Piso"
+		case dfproto.ShapeRamp:
+			sub = "Rampa"
+		case dfproto.ShapeStairUp, dfproto.ShapeStairDown, dfproto.ShapeStairUpDown:
+			sub = "Escada"
+		}
+		return "Construção", sub
+	case dfproto.TilematFrozenLiquid:
+		return "Gelo", "Líquido Congelado"
+	case dfproto.TilematRiver, dfproto.TilematBrook, dfproto.TilematPool:
+		return "Água", "Corpo d'Água"
+	default:
+		return "Outro", "Genérico"
+	}
 }
 
 func (t *Tile) IsWall() bool {

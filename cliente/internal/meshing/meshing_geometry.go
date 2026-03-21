@@ -15,8 +15,10 @@ func (m *BlockMesher) emitGreedyQuad(req Request, x, y, w, h int32, face util.Di
 	// Espessura e formato baseados no shape
 	shape := tile.Shape()
 	thickness := float32(1.0)
-	if shape == dfproto.ShapeFloor {
-		thickness = 0.1
+	
+	switch shape {
+	case dfproto.ShapeFloor, dfproto.ShapeSapling, dfproto.ShapeShrub:
+		thickness = 1.0 // Espessura total para preencher o bloco de terra
 	}
 
 	// Identificar material e cor
@@ -24,6 +26,12 @@ func (m *BlockMesher) emitGreedyQuad(req Request, x, y, w, h int32, face util.Di
 	targetBuffer := getBuffer(texName)
 	rlColor := m.MatStore.GetTileColor(tile)
 	color := [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}
+
+	// Para blocos de CHÃO (Floor) ou decorativos, queremos que o TOPO do bloco seja o nível Z.
+	// Por isso, subtraímos a espessura da posição Y base.
+	if shape == dfproto.ShapeFloor || shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
+		pos.Y -= thickness
+	}
 
 	// Chamar o gerador de faces especializado (passando dimensões)
 	m.addQuadFace(pos, float32(w), float32(h), thickness, face, color, targetBuffer, util.DFCoord{X: req.Origin.X + x, Y: req.Origin.Y + y, Z: req.Origin.Z}, req.Data)

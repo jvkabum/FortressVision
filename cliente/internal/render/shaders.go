@@ -169,17 +169,23 @@ uniform mat4 mvp;
 uniform float time;
 
 out vec2 fragTexCoord;
-out vec4 fragColor;
 out vec3 fragNormal;
 out float fragHeight;
+out vec4 fragColor;
 
 void main() {
     fragTexCoord = vertexTexCoord;
-    fragColor = vertexColor;
     fragNormal = vertexNormal;
     fragHeight = vertexPosition.y;
+    fragColor = vertexColor;
     
-    gl_Position = mvp * vec4(vertexPosition, 1.0);
+    // Wind Sway: balanço horizontal baseado na altura e tempo
+    vec3 pos = vertexPosition;
+    float sway = sin(time * 2.0 + vertexPosition.y * 0.5) * (vertexPosition.y * 0.1);
+    pos.x += sway;
+    pos.z += sway * 0.5;
+    
+    gl_Position = mvp * vec4(pos, 1.0);
 }
 `
 
@@ -194,24 +200,30 @@ uniform mat4 mvp;
 uniform float time;
 
 out vec2 fragTexCoord;
-out vec4 fragColor;
 out vec3 fragNormal;
 out float fragHeight;
+out vec4 fragColor;
 
 void main() {
     fragTexCoord = vertexTexCoord;
-    fragColor = vertexColor;
     fragNormal = vertexNormal;
     fragHeight = vertexPosition.y;
+    fragColor = vertexColor;
     
-    gl_Position = mvp * instanceTransform * vec4(vertexPosition, 1.0);
+    // Wind Sway para Instancing
+    vec3 pos = vertexPosition;
+    float sway = sin(time * 1.5 + vertexPosition.y * 0.8) * (vertexPosition.y * 0.08);
+    pos.x += sway;
+    pos.z += sway * 0.3;
+    
+    gl_Position = mvp * instanceTransform * vec4(pos, 1.0);
 }
 `
 
 const plantFragmentShader = `
 #version 330
-in vec2 fragTexCoord;
 in vec4 fragColor;
+in vec2 fragTexCoord;
 in vec3 fragNormal;
 in float fragHeight;
 
@@ -223,17 +235,22 @@ out vec4 finalColor;
 
 void main() {
     vec4 texelColor = texture(texture0, fragTexCoord);
-    if (texelColor.a < 0.1) texelColor = vec4(1.0, 1.0, 1.0, 1.0); 
-
+    
+    // Iluminação 3D (Lambert simples para volume)
     vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
     float diff = max(dot(fragNormal, lightDir), 0.0);
     vec3 ambient = vec3(0.4, 0.4, 0.4);
     vec3 light = ambient + vec3(0.6) * diff;
 
-    vec4 color = texelColor * fragColor * colDiffuse;
-    color.rgb *= light;
+    // Descartar pixels transparentes (folhas)
+    if (texelColor.a < 0.1) discard;
 
-    color.rgb *= (0.8 + 0.2 * smoothstep(0.0, 1.0, fragHeight));
+    // Combinação Final: Declarar explicitamente a variável color
+    vec4 color = texelColor * colDiffuse * fragColor;
+    
+    // Aplicar iluminação e gradiente de altura (fragHeight * 0.1 para escala suave)
+    float heightFade = 0.8 + 0.2 * smoothstep(0.0, 1.0, fragHeight * 0.1);
+    color.rgb *= light * heightFade;
 
     finalColor = color;
 }
@@ -329,34 +346,42 @@ float hash(vec2 p) {
 }
 
 void main() {
-    // TRIPLANAR MAPPING (Fase 47: Estilo Armok Vision)
+    // TRIPLANAR MAPPING
     vec3 blending = abs(fragNormal);
     float total = blending.x + blending.y + blending.z;
     if (total > 0.0) blending /= total;
     else blending = vec3(0, 1, 0);
 
-    float scale = 1.0; // Tiling da textura
+    float scale = 0.5; // Ajuste de escala para tiling
     vec4 xTex = texture(texture0, fragWorldPos.yz * scale);
     vec4 yTex = texture(texture0, fragWorldPos.xz * scale);
     vec4 zTex = texture(texture0, fragWorldPos.xy * scale);
-
     vec4 texelColor = xTex * blending.x + yTex * blending.y + zTex * blending.z;
 
-    // Se o alpha for muito baixo (bug de amostragem), mostra cor de debug magenta
-    if (texelColor.a < 0.01) texelColor = vec4(1.0, 0.0, 1.0, 1.0);
+    // Se a textura falhar (alpha baixo), usamos branco para não escurecer a cor do vértice
+    if (texelColor.a < 0.1) texelColor = vec4(1.0, 1.0, 1.0, 1.0);
 
-    // Ruído baseado na posição de mundo para quebrar repetição
-    float n = hash(floor(fragWorldPos.xz * 10.0));
-    vec4 mixedColor = texelColor * fragColor * colDiffuse;
-    mixedColor.rgb *= (0.9 + 0.2 * n);
+    // Iluminação Básica
+    vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
+    float diff = max(dot(fragNormal, lightDir), 0.0);
+    vec3 ambient = vec3(0.3, 0.3, 0.3);
+    vec3 light = ambient + vec3(0.7) * diff;
 
+    // Combinação Final: Textura * Cor do Vértice (DF) * Iluminação
+    vec4 color = texelColor * fragColor;
+    
+    // Aplicar colDiffuse apenas se não for branco (evita tingimento indesejado)
+    if (colDiffuse.r < 1.0 || colDiffuse.g < 1.0 || colDiffuse.b < 1.0) {
+        color *= colDiffuse;
+    }
+
+    color.rgb *= light;
+
+    // Neve (opcional)
     float snowFactor = clamp(fragNormal.y, 0.0, 1.0);
     snowFactor = pow(snowFactor, 4.0) * snowAmount;
-    float snowNoise = hash(fragWorldPos.xz * 5.0 + vec2(time * 0.01));
-    snowFactor *= (0.8 + 0.4 * snowNoise);
-    
-    mixedColor.rgb = mix(mixedColor.rgb, vec3(0.9, 0.95, 1.0), snowFactor);
+    color.rgb = mix(color.rgb, vec3(0.9, 0.95, 1.0), snowFactor * 0.8);
 
-    finalColor = mixedColor;
+    finalColor = color;
 }
 `

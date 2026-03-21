@@ -116,10 +116,13 @@ func (m *BlockMesher) shouldDrawFace(tile *mapdata.Tile, dir util.Directions) bo
 		return true
 	}
 
-	// ÚNICA otimização: ocultar face LATERAL entre duas Walls sólidas visíveis.
+	tileIsCullable := tile.Shape() == dfproto.ShapeWall || tile.Shape() == dfproto.ShapeTreeShape
+	neighborIsCullable := neighborShape == dfproto.ShapeWall || neighborShape == dfproto.ShapeTreeShape
+
+	// ÚNICA otimização: ocultar face LATERAL entre duas Walls ou duas Folhas contíguas.
 	// NUNCA ocultar DirUp/DirDown — no sistema de níveis, o jogador precisa ver
 	// o teto (DirUp) e o chão (DirDown) do bloco no nível que está olhando.
-	if tile.Shape() == dfproto.ShapeWall && neighborShape == dfproto.ShapeWall {
+	if tileIsCullable && neighborIsCullable {
 		if dir != util.DirUp && dir != util.DirDown {
 			return false
 		}
@@ -137,7 +140,7 @@ func (m *BlockMesher) isSolidAO(coord util.DFCoord, dir util.Directions, data *m
 		return false
 	}
 	shape := tile.Shape()
-	return shape == dfproto.ShapeWall || shape == dfproto.ShapeFortification
+	return shape == dfproto.ShapeWall || shape == dfproto.ShapeFortification || shape == dfproto.ShapeTreeShape
 }
 
 func (m *BlockMesher) isSolid(coord util.DFCoord, dir util.Directions, data *mapdata.MapDataStore) bool {

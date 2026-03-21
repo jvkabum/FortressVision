@@ -12,6 +12,7 @@ import (
 	"unsafe"
 
 	"FortressVision/cliente/internal/assets"
+	"FortressVision/cliente/internal/assets/constants"
 	"FortressVision/cliente/internal/liquid"
 	"FortressVision/cliente/internal/meshing"
 	"FortressVision/shared/util"
@@ -25,7 +26,7 @@ import (
 
 type Renderer struct {
 	mu     sync.RWMutex
-	Models map[util.DFCoord]*BlockModel
+	Models map[util.DFCoord]*meshing.BlockModel
 
 	// Shaders e Uniforms
 	TerrainShader          rl.Shader
@@ -67,12 +68,18 @@ type Renderer struct {
 	queryPlants ecs.Filter4[comp.Position, comp.Renderable, comp.Rotation, comp.Scale]
 	// Mappers (otimizados para criação de entidades)
 	vegMapper *ecs.Map5[comp.Position, comp.Rotation, comp.Scale, comp.Renderable, comp.ChunkInfo]
+
+	// NOVO: Atlas de texturas de folha
+	LeafAtlas *LeafAtlas
+
+	// Cache de materiais para folhas
+	LeafMaterial rl.Material
 }
 
 // NewRenderer cria um novo renderizador.
 func NewRenderer() *Renderer {
 	r := &Renderer{
-		Models:     make(map[util.DFCoord]*BlockModel),
+		Models:     make(map[util.DFCoord]*meshing.BlockModel),
 		purgeQueue: make([]util.DFCoord, 0),
 		Textures:   make(map[string]rl.Texture2D),
 		Models3D:   make(map[string]rl.Model),
@@ -101,6 +108,20 @@ func NewRenderer() *Renderer {
 		r.PlantShader = rl.LoadShaderFromMemory(plantVertexShader, plantFragmentShader)
 		r.PlantInstancedShader = rl.LoadShaderFromMemory(plantInstancedVertexShader, plantFragmentShader)
 		r.WaterShader = rl.LoadShaderFromMemory(waterVertexShader, waterFragmentShader)
+
+		// BUGS DE "EXPLODING MESH" / "INVISIBILIDADE" DO INSTANCING SANADOS AQUI:
+		// Em OpenGL / Raylib-Go, Shaders de Desenho em Lote (Instanced) precisam obrigatoriamente
+		// ter o Attribute do VAO "instanceTransform" ligado na Location Matrix padrão (Index 4 = RL_SHADER_LOC_MATRIX_MODEL).
+		// Como Locs no binding raylib-go é `*int32`, injetamos via slice.
+		{
+			matModelLocIdx := 4 // rl.LocMatrixModel constante em C
+			
+			locT := rl.GetShaderLocationAttrib(r.TerrainInstancedShader, "instanceTransform")
+			unsafe.Slice(r.TerrainInstancedShader.Locs, 32)[matModelLocIdx] = int32(locT)
+			
+			locP := rl.GetShaderLocationAttrib(r.PlantInstancedShader, "instanceTransform")
+			unsafe.Slice(r.PlantInstancedShader.Locs, 32)[matModelLocIdx] = int32(locP)
+		}
 
 		r.terrainTimeLoc = rl.GetShaderLocation(r.TerrainShader, "time")
 		r.snowAmountLoc = rl.GetShaderLocation(r.TerrainShader, "snowAmount")
@@ -192,7 +213,7 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		return
 	}
 
-	bm := &BlockModel{
+	bm := &meshing.BlockModel{
 		Origin:    res.Origin,
 		Active:    true,
 		MTime:     res.MTime,
@@ -231,11 +252,17 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		if len(geo.Vertices) > 0 {
 			mesh := r.geometryToMesh(geo)
 			rl.UploadMesh(&mesh, false)
-			// r.freeMeshRAM(&mesh) // DESATIVADO para permitir Raycasting (Fase 35 Fix)
 			model := rl.LoadModelFromMesh(mesh)
 			if model.MaterialCount > 0 {
 				materials := unsafe.Slice(model.Materials, model.MaterialCount)
-				materials[0].Shader = r.TerrainShader
+				
+				// Selecionar Shader: Se for folha, usar PlantShader
+				shader := r.TerrainShader
+				if isLeafTexture(matName) && r.PlantShader.ID != 0 {
+					shader = r.PlantShader
+				}
+				materials[0].Shader = shader
+
 				if tex, ok := r.Textures[matName]; ok {
 					rl.SetMaterialTexture(&materials[0], rl.MapDiffuse, tex)
 				}
@@ -429,8 +456,10 @@ func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 
 	// Usamos o Query do ECS para encontrar tudo que precisa ser desenhado
 	query := r.queryPlants.Query()
+	instanceCount := 0
 	for query.Next() {
 		posComp, rendComp, rotComp, scaleComp := query.Get()
+		instanceCount++
 
 		// Culling de distância
 		pos := rl.Vector3{X: posComp.X, Y: posComp.Y, Z: posComp.Z}
@@ -495,6 +524,11 @@ func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 		}
 	}
 	query.Close()
+
+	if instanceCount > 0 && r.debugInstCount % 60 == 0 {
+		log.Printf("[RENDERER-ECS] Desenhando %d instâncias de vegetação...", instanceCount)
+	}
+	r.debugInstCount++
 
 	// Desenha tudo em lotes otimizados (1 draw call por tipo)
 	r.PropMgr.DrawAll(camera3d)
@@ -564,7 +598,7 @@ func (r *Renderer) Unload() {
 			rl.UnloadModel(bm.LiquidModel)
 		}
 	}
-	r.Models = make(map[util.DFCoord]*BlockModel)
+	r.Models = make(map[util.DFCoord]*meshing.BlockModel)
 }
 
 // GetRayCollision verifica qual bloco do terreno foi atingido pelo raio do mouse.
@@ -664,4 +698,10 @@ func isPlantModel(modelName string) bool {
 	return modelName == "shrub" || modelName == "tree_body" || modelName == "tree_trunk" ||
 		modelName == "tree_branches" || modelName == "tree_twigs" || modelName == "branches" ||
 		modelName == "mushroom" || modelName == "sapling" || (len(modelName) > 12 && modelName[:12] == "tree_branch_")
+}
+
+func isLeafTexture(texName string) bool {
+	return texName == constants.TextureLeafOak || texName == constants.TextureLeafPine ||
+		texName == constants.TextureLeafMaple || texName == constants.TextureLeafMushroom ||
+		texName == constants.TextureLeafGeneric
 }

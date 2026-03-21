@@ -3,6 +3,7 @@ package meshing
 import (
 	"FortressVision/cliente/internal/assets"
 	"FortressVision/cliente/internal/liquid"
+	"FortressVision/cliente/internal/treegen"
 	"FortressVision/shared/mapdata"
 	"FortressVision/shared/pkg/dfproto"
 	"FortressVision/shared/util"
@@ -96,6 +97,9 @@ func (m *BlockMesher) processRequest(req Request) {
 		}
 	}()
 
+	// 0. Limpar cache de extração para este novo chunk
+	treegen.ClearCache()
+
 	// 1. Verificar Cache antes de processar
 	if m.ResultStore != nil {
 		if cached, ok := m.ResultStore.Get(req.Origin, req.MTime); ok {
@@ -173,8 +177,8 @@ func (m *BlockMesher) runGreedyMesher2D(req Request, getBuffer func(string) *Mes
 	// Para cada uma das 6 faces, executamos a otimização
 	for _, faceDir := range coreDirs {
 		// 1. Gerar Máscara 16x16 para esta face
-		// Usamos uint32 para codificar [MaterialID(16 bits) | Color(16 bits reduzido)]
-		mask := make([]uint32, 16*16)
+		// Usamos uint64 para codificar [ShapeID(16) | MaterialID(16) | AO(8) | Color(24)]
+		mask := make([]uint64, 16*16)
 		tiles := make([]*mapdata.Tile, 16*16)
 
 		for yy := int32(0); yy < 16; yy++ {
@@ -231,7 +235,8 @@ func (m *BlockMesher) runGreedyMesher2D(req Request, getBuffer func(string) *Mes
 
 					// 3. GRAMAS
 					if tile.GrassPercent > 0 {
-						m.addGrass(worldCoord, tile, res)
+						rlColor := m.MatStore.GetTileColor(tile)
+						m.addGrass(worldCoord, tile, [4]uint8{rlColor.R, rlColor.G, rlColor.B, rlColor.A}, res)
 					}
 				}
 
@@ -241,22 +246,21 @@ func (m *BlockMesher) runGreedyMesher2D(req Request, getBuffer func(string) *Mes
 
 				// Se a face deve ser desenhada, adicionamos à máscara
 				if m.shouldDrawFace(tile, faceDir) {
-					// Pular formas que não são cubos padrão
+					// Pular formas que não são suportadas pelo greedy meshing e seus tamanhos
 					shape := tile.Shape()
 					if shape != dfproto.ShapeWall && shape != dfproto.ShapeFloor && shape != dfproto.ShapeFortification &&
 						shape != dfproto.ShapeBoulder && shape != dfproto.ShapePebbles {
 						continue
 					}
 
-					texID := uint32(tile.MaterialCategory())
+					texID := uint64(tile.MaterialCategory())
 					rlColor := m.MatStore.GetTileColor(tile)
-					colorID := uint32(rlColor.R)<<16 | uint32(rlColor.G)<<8 | uint32(rlColor.B)
+					colorID := uint64(rlColor.R)<<16 | uint64(rlColor.G)<<8 | uint64(rlColor.B)
+					shapeID := uint64(shape)
+					aoMask64 := uint64(m.calculateAOMask(worldCoord, faceDir, req.Data))
 
-					// Oclusão Ambiente (AO): Para fundir faces, elas devem ter o mesmo padrão de AO nos cantos.
-					// Isso evita interpolação errada de sombras em quads grandes.
-					aoMask := m.calculateAOMask(worldCoord, faceDir, req.Data)
-
-					mask[yy*16+xx] = (texID << 24) | (aoMask << 20) | (colorID & 0xFFFFF) | 1<<31
+					// Inclui todas as informações vitais num uint64 para não misturar formatos e cores:
+					mask[yy*16+xx] = (shapeID << 48) | (texID << 32) | (aoMask64 << 24) | (colorID & 0xFFFFFF) | 1<<63
 					tiles[yy*16+xx] = tile
 				}
 			}
