@@ -1,0 +1,171 @@
+package world
+
+import (
+	"bytes"
+	"encoding/gob"
+	"log"
+	"time"
+
+	"FortressVision/shared/mapdata"
+	"FortressVision/shared/pkg/dfproto"
+	"FortressVision/shared/proto/fvnet"
+	"FortressVision/shared/util"
+	"google.golang.org/protobuf/proto"
+)
+
+// Manager é o guardião dos dados do jogo (Chunks, Materiais, Entidades).
+// Ele consome as informações cruas da rede e organiza no MapDataStore,
+// disponibilizando avisos estruturados para outros sistemas (como o Mesher).
+type Manager struct {
+	Store *mapdata.MapDataStore
+
+	// Eventos
+	OnMapChunkUpdated func(origin util.DFCoord)
+	OnWorldStatus     func(status *fvnet.WorldStatus)
+	OnStatusMsg       func(msg string, dfConnected bool)
+}
+
+// NewManager cria uma nova gestão de mundo com armazenamento vazio.
+func NewManager() *Manager {
+	return &Manager{
+		Store: mapdata.NewMapDataStore(),
+	}
+}
+
+// HandleEnvelope processa os envelopes (mensagens) recebidos da rede.
+func (m *Manager) HandleEnvelope(env *fvnet.Envelope) {
+	switch env.Type {
+	case fvnet.Envelope_SERVER_STATUS:
+		var status fvnet.ServerStatus
+		if err := proto.Unmarshal(env.Payload, &status); err == nil {
+			log.Printf("[World] 🟢 Servidor Status: %s (DF: %v)", status.Message, status.DfConnected)
+			if m.OnStatusMsg != nil {
+				m.OnStatusMsg(status.Message, status.DfConnected)
+			}
+		}
+
+	case fvnet.Envelope_WORLD_STATUS:
+		var worldStatus fvnet.WorldStatus
+		if err := proto.Unmarshal(env.Payload, &worldStatus); err == nil {
+			log.Printf("[World] 🌍 Relatório do Mundo: %s, Ano %d (Foco: %d,%d, Z:%d)", 
+				worldStatus.WorldName, worldStatus.Year, worldStatus.ViewX, worldStatus.ViewY, worldStatus.ViewZ)
+			if m.OnWorldStatus != nil {
+				m.OnWorldStatus(&worldStatus)
+			}
+		}
+
+	case fvnet.Envelope_TILETYPE_LIST:
+		var list dfproto.TiletypeList
+		if err := list.Unmarshal(env.Payload); err == nil {
+			log.Printf("[World] 🧱 Recebidos %d Tiletypes do servidor", len(list.TiletypeList))
+			if len(list.TiletypeList) > 0 {
+				tt := list.TiletypeList[0]
+				log.Printf("[World-Diag] 🧱 Exemplo Tiletype[0]: ID=%d, Nome=%s, Shape=%v", tt.ID, tt.Name, tt.Shape)
+			}
+			m.Store.UpdateTiletypes(&list)
+		}
+
+	case fvnet.Envelope_MATERIAL_LIST:
+		var list dfproto.MaterialList
+		if err := list.Unmarshal(env.Payload); err == nil {
+			log.Printf("[World] 🎨 Recebidos %d Materiais do servidor", len(list.MaterialList))
+			m.Store.UpdateMaterials(&list)
+		}
+
+	case fvnet.Envelope_MAP_CHUNK:
+		var chunkMsg fvnet.MapChunkMessage
+		if err := proto.Unmarshal(env.Payload, &chunkMsg); err == nil {
+			log.Printf("[World] 🧱 Envelope MAP_CHUNK recebido p/ %d,%d,%d (VoxelData: %d bytes)", chunkMsg.ChunkX, chunkMsg.ChunkY, chunkMsg.ChunkZ, len(chunkMsg.VoxelData))
+			m.processChunk(&chunkMsg)
+		} else {
+			log.Printf("[World] ❌ Erro ao desmarshallar MAP_CHUNK: %v", err)
+		}
+
+	case fvnet.Envelope_VEGETATION_UPDATE:
+		var vegMsg fvnet.VegetationUpdateMessage
+		if err := vegMsg.Unmarshal(env.Payload); err == nil {
+			m.processVegetation(&vegMsg)
+		}
+	}
+}
+
+// processChunk extrai do Envelope o bloco codificado com GOB e armazena na memória (Store).
+func (m *Manager) processChunk(msg *fvnet.MapChunkMessage) {
+	origin := util.DFCoord{X: msg.ChunkX, Y: msg.ChunkY, Z: msg.ChunkZ}
+
+	// Chunk de "Ar" (vazio)
+	if msg.VoxelData == nil {
+		m.Store.Mu.Lock()
+		delete(m.Store.Chunks, origin)
+		m.Store.Mu.Unlock()
+		if m.OnMapChunkUpdated != nil {
+			m.OnMapChunkUpdated(origin)
+		}
+		return
+	}
+
+	// Decodificador de voxel-grid serializado do server (16x16)
+	var tiles [16][16]*mapdata.Tile
+	dec := gob.NewDecoder(bytes.NewReader(msg.VoxelData))
+	if err := dec.Decode(&tiles); err != nil {
+		log.Printf("[World] ❌ Erro ao decodificar dados do chunk em %v: %v", origin, err)
+		return
+	}
+
+	m.Store.Mu.Lock()
+	chunk := &mapdata.Chunk{
+		Origin: origin,
+		Tiles:  tiles,
+		MTime:  time.Now().UnixNano(),
+	}
+
+	// Reconectar as referências recursivas dos tiles ao seu armazenador de mundo
+	for x := 0; x < 16; x++ {
+		for y := 0; y < 16; y++ {
+			if t := chunk.Tiles[x][y]; t != nil {
+				t.SetStore(m.Store)
+			}
+		}
+	}
+
+	m.Store.Chunks[origin] = chunk
+	m.Store.Mu.Unlock()
+
+	log.Printf("[World] ✅ Chunk %v processado com sucesso (%d tiles)", origin, 16*16)
+
+	// Avisizar interessados (como o render/mesher) que este terreno atualizou.
+	if m.OnMapChunkUpdated != nil {
+		m.OnMapChunkUpdated(origin)
+	}
+}
+
+// processVegetation propaga mudanças apenas nas vegetações (Shrubs, Trees) para o Store.
+func (m *Manager) processVegetation(msg *fvnet.VegetationUpdateMessage) {
+	origin := util.DFCoord{X: msg.ChunkX, Y: msg.ChunkY, Z: msg.ChunkZ}
+
+	var plants []dfproto.PlantDetail
+	for _, p := range msg.Plants {
+		plants = append(plants, dfproto.PlantDetail{
+			Pos:      dfproto.Coord{X: p.X, Y: p.Y, Z: 0},
+			Material: dfproto.MatPair{MatType: p.MatType, MatIndex: p.MatIndex},
+		})
+	}
+
+	m.Store.StorePlants(msg.ChunkX, msg.ChunkY, msg.ChunkZ, plants)
+
+	// A vegetação crescer é uma atualização de chunk. Notificar.
+	if m.OnMapChunkUpdated != nil {
+		m.OnMapChunkUpdated(origin)
+	}
+}
+
+// RequestRegion pede ativamente à "Estrada" (cliente WebSocket) um raio contendo terreno a partir do foco central.
+func (m *Manager) RequestRegion(sendFunc func(msgType fvnet.Envelope_Type, msg proto.Message), center util.DFCoord, radius int32) {
+	req := &fvnet.ClientRequestRegion{
+		CenterX: center.X,
+		CenterY: center.Y,
+		CenterZ: center.Z,
+		Radius:  radius,
+	}
+	sendFunc(fvnet.Envelope_CLIENT_REQUEST_REGION, req)
+}

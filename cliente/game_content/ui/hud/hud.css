@@ -1,0 +1,74 @@
+/* hud.css - Estilos Premium para a HUD do FortressVision */
+
+body {
+    font-family: 'OpenSans-Regular';
+    color: #e8e8e8;
+    margin: 0;
+    padding: 0;
+}
+
+#debug-panel {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 280px;
+    background-color: #1e1e21f0;
+    border: 1px solid #2d4a55;
+    border-radius: 8px;
+    padding: 12px;
+    z-index: 100;
+}
+
+#world-name {
+    font-size: 16px;
+    font-weight: bold;
+    color: #ffffff;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #ffffff20;
+    padding-bottom: 4px;
+}
+
+.metric {
+    font-size: 13px;
+    margin-bottom: 6px; /* Aumentado para evitar o "bunched up" */
+    height: 18px;
+}
+
+#fps-val { color: #7ad89a; }
+#pos-val { color: #7abed8; }
+#z-val { color: #99ccdd; }
+#pop-val { color: #d8c37a; }
+#world-meta { color: #666666; font-size: 11px; margin-top: 6px; }
+
+#controls-hint {
+    margin-top: 10px;
+    padding-top: 6px;
+    border-top: 1px solid #2d4a55;
+    color: #444455;
+    font-size: 10px;
+}
+
+#inspect-panel {
+    position: absolute;
+    bottom: 30px;
+    left: 200px;
+    width: 400px;
+    background-color: #1a1a1cf0;
+    border: 1px solid #3a3a3d;
+    border-radius: 8px;
+    padding: 12px;
+    z-index: 100;
+}
+
+#inspect-label {
+    font-size: 10px;
+    color: #7abed8;
+    opacity: 0.7;
+    margin-bottom: 6px;
+}
+
+.inspect-info {
+    font-size: 13px;
+    color: #d0d0d0;
+    margin-bottom: 4px;
+}

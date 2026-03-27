@@ -203,12 +203,13 @@ func (h *Hub) BroadcastServerStatus(message string, dfConnected bool) {
 }
 
 func main() {
-	// Garante que o working directory é o mesmo diretório do executável,
-	// para que caminhos relativos (saves/, tmp/) funcionem corretamente.
+	// Desativado durante o desenvolvimento para não quebrar o 'go run'
+	/*
 	if exePath, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exePath)
 		os.Chdir(exeDir)
 	}
+	*/
 
 	log.SetFlags(log.Ltime | log.Lshortfile)
 
@@ -285,6 +286,16 @@ func main() {
 		log.Printf("Inicializando banco de dados para o mundo: %s", worldName)
 		if err := store.OpenInitialize(worldName); err != nil {
 			log.Printf("Erro ao abrir SQLite: %v", err)
+		}
+
+		// Radar de Sólidos: Encontra o nível Z mais alto com dados persistidos
+		var res struct {
+			MaxZ int32
+		}
+		store.DB.Model(&mapdata.ChunkModel{}).Where("is_empty = ?", false).Select("MAX(z) as max_z").Scan(&res)
+		log.Printf("[Radar] 🌍 Topo do Mundo Persistido encontrado em Z:%d", res.MaxZ)
+		if res.MaxZ > 0 {
+			log.Printf("[Radar] 💡 Sugestão: Vá para o Nível Z:%d para encontrar o terreno.", res.MaxZ)
 		}
 
 		// Gravar dicionários críticos no banco para futuro modo offline

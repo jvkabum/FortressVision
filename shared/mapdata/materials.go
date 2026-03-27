@@ -6,7 +6,6 @@ import (
 	"log"
 	"sync"
 
-	rl "github.com/gen2brain/raylib-go/raylib"
 	"gorm.io/gorm"
 )
 
@@ -15,7 +14,7 @@ type MaterialStore struct {
 	mu sync.RWMutex
 
 	// Cache de cores por par de material (MatType, MatIndex)
-	Colors map[dfproto.MatPair]rl.Color
+	Colors map[dfproto.MatPair]Color
 
 	// Cache de nomes legíveis (ex: "Granite", "Iron Ore")
 	Names map[dfproto.MatPair]string
@@ -32,7 +31,7 @@ type MaterialStore struct {
 
 func NewMaterialStore() *MaterialStore {
 	return &MaterialStore{
-		Colors:     make(map[dfproto.MatPair]rl.Color),
+		Colors:     make(map[dfproto.MatPair]Color),
 		Names:      make(map[dfproto.MatPair]string),
 		Tokens:     make(map[dfproto.MatPair]string),
 		TextureMap: make(map[dfproto.TiletypeMaterial]string),
@@ -65,7 +64,7 @@ func (s *MaterialStore) GetTextureName(mat dfproto.TiletypeMaterial) string {
 }
 
 // GetTileColor retorna a cor para um tile específico.
-func (s *MaterialStore) GetTileColor(tile *Tile) rl.Color {
+func (s *MaterialStore) GetTileColor(tile *Tile) Color {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -75,7 +74,6 @@ func (s *MaterialStore) GetTileColor(tile *Tile) rl.Color {
 	}
 
 	// 2. Fallback baseado no MaterialCategory e cores padrão do DF
-	// Isso usa a tabela DFColorList portada do Armok Vision.
 	var colorToken string
 	switch tile.MaterialCategory() {
 	case dfproto.TilematStone:
@@ -100,10 +98,10 @@ func (s *MaterialStore) GetTileColor(tile *Tile) rl.Color {
 
 	r, g, b, ok := GetDFColor(colorToken)
 	if ok {
-		return rl.NewColor(r, g, b, 255)
+		return Color{R: r, G: g, B: b, A: 255}
 	}
 
-	return rl.NewColor(150, 150, 150, 255) // Fallback absoluto
+	return Color{R: 150, G: 150, B: 150, A: 255} // Fallback absoluto
 }
 
 // LoadFromDB carrega todos os materiais salvos no SQLite para o cache.
@@ -124,7 +122,7 @@ func (s *MaterialStore) LoadFromDB() error {
 			MatType:  m.MatType,
 			MatIndex: m.MatIndex,
 		}
-		s.Colors[pair] = rl.NewColor(m.R, m.G, m.B, 255)
+		s.Colors[pair] = Color{R: m.R, G: m.G, B: m.B, A: 255}
 	}
 	log.Printf("[MaterialStore] %d materiais carregados do SQLite.", len(models))
 	return nil
@@ -140,12 +138,12 @@ func (s *MaterialStore) UpdateMaterials(list *dfproto.MaterialList) {
 	var models []MaterialModel
 	for _, mat := range list.MaterialList {
 		pair := mat.MatPair
-		color := rl.NewColor(
-			uint8(mat.StateColor.Red),
-			uint8(mat.StateColor.Green),
-			uint8(mat.StateColor.Blue),
-			255,
-		)
+		color := Color{
+			R: uint8(mat.StateColor.Red),
+			G: uint8(mat.StateColor.Green),
+			B: uint8(mat.StateColor.Blue),
+			A: 255,
+		}
 		s.Colors[pair] = color
 		s.Names[pair] = mat.Name
 		s.Tokens[pair] = mat.ID

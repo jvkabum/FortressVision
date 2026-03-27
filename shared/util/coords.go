@@ -3,18 +3,18 @@ package util
 import (
 	"fmt"
 	"math"
-
-	rl "github.com/gen2brain/raylib-go/raylib"
 )
+
+// Vector3 representa um vetor no espaço 3D (Agnóstico)
+type Vector3 struct {
+	X, Y, Z float32
+}
 
 // Ray representa um raio no espaço 3D (Origem e Direção)
 type Ray struct {
-	Origin    rl.Vector3
-	Direction rl.Vector3
+	Origin    Vector3
+	Direction Vector3
 }
-
-// Vector3 é um alias para rl.Vector3 para conveniência
-type Vector3 = rl.Vector3
 
 // DFCoord representa uma coordenada no espaço do Dwarf Fortress.
 // X = leste/oeste, Y = norte/sul, Z = nível vertical
@@ -83,8 +83,8 @@ const GameScale float32 = 1.0
 // DFToWorldPos converte uma coordenada DF para posição 3D no mundo.
 // No DF: X = leste, Y = sul (invertido), Z = cima
 // No 3D: X = leste, Y = cima (Z do DF), Z = sul (Y do DF invertido)
-func DFToWorldPos(coord DFCoord) rl.Vector3 {
-	return rl.Vector3{
+func DFToWorldPos(coord DFCoord) Vector3 {
+	return Vector3{
 		X: float32(coord.X) * GameScale,
 		Y: float32(coord.Z) * GameScale,
 		Z: float32(-coord.Y) * GameScale, // Y do DF é invertido
@@ -92,7 +92,7 @@ func DFToWorldPos(coord DFCoord) rl.Vector3 {
 }
 
 // DFToWorldCenter converte para o centro do tile no mundo 3D.
-func DFToWorldCenter(coord DFCoord) rl.Vector3 {
+func DFToWorldCenter(coord DFCoord) Vector3 {
 	pos := DFToWorldPos(coord)
 	pos.X += GameScale * 0.5
 	pos.Z -= GameScale * 0.5
@@ -103,12 +103,8 @@ func DFToWorldCenter(coord DFCoord) rl.Vector3 {
 const FloorHeight float32 = 0.1
 
 // DFToWorldBottomCorner retorna o canto inferior esquerdo do tile (espaço 3D).
-func DFToWorldBottomCorner(coord DFCoord) rl.Vector3 {
+func DFToWorldBottomCorner(coord DFCoord) Vector3 {
 	pos := DFToWorldPos(coord)
-	// Como DFToWorldPos já retorna o canto "origin" do tile,
-	// e nosso sistema já inverte o Y, o "BottomCorner"
-	// no espaço 3D depende se o DFToWorldPos é o centro ou o canto.
-	// No FortressVision V1, DFToWorldPos é o canto (X*Scale, Z*Scale, -Y*Scale).
 	return pos
 }
 
@@ -116,12 +112,17 @@ func DFToWorldBottomCorner(coord DFCoord) rl.Vector3 {
 func Between(lower, t, upper float32) bool {
 	return t >= lower && t <= upper
 }
-func WorldToDFCoord(pos rl.Vector3) DFCoord {
+func WorldToDFCoord(pos Vector3) DFCoord {
 	return DFCoord{
 		X: int32(math.Floor(float64(pos.X / GameScale))),
 		Y: int32(math.Floor(float64(-pos.Z / GameScale))),
 		Z: int32(math.Floor(float64(pos.Y / GameScale))),
 	}
+}
+
+// WorldToDFCoordFromFloats é um helper para conversão direta de floats.
+func WorldToDFCoordFromFloats(x, y, z float32) DFCoord {
+	return WorldToDFCoord(Vector3{X: x, Y: y, Z: z})
 }
 
 // Directions representa as direções cardinais e diagonais.

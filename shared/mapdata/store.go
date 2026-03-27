@@ -23,7 +23,7 @@ type MapDataStore struct {
 	Chunks map[util.DFCoord]*Chunk
 
 	// Tiletypes é um cache para consulta de propriedades (shape, material, etc)
-	Tiletypes map[int32]*dfproto.Tiletype
+	Tiletypes map[int32]dfproto.Tiletype
 
 	// Entidades Dinâmicas
 	Buildings      map[int32]*BuildingInstance
@@ -41,6 +41,9 @@ type MapDataStore struct {
 
 	// PosZ é o nível atual de foco (atualizado pelo servidor)
 	PosZ int32
+
+	// MatStore gerencia as propriedades visuais dos materiais
+	MatStore *MaterialStore
 }
 
 // RaycastHit armazena informações sobre uma colisão de raio.
@@ -88,11 +91,22 @@ type Chunk struct {
 func NewMapDataStore() *MapDataStore {
 	return &MapDataStore{
 		Chunks:         make(map[util.DFCoord]*Chunk),
-		Tiletypes:      make(map[int32]*dfproto.Tiletype),
+		Tiletypes:      make(map[int32]dfproto.Tiletype),
 		Buildings:      make(map[int32]*BuildingInstance),
 		Units:          make(map[int32]*UnitInstance),
 		BuildingLookup: make(map[util.DFCoord]int32),
+		MatStore:       NewMaterialStore(),
 	}
+}
+
+// GetMTime retorna a versão de modificação de um chunk.
+func (s *MapDataStore) GetMTime(origin util.DFCoord) int64 {
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
+	if c, ok := s.Chunks[origin]; ok {
+		return c.MTime
+	}
+	return 0
 }
 
 // MarkAsEmpty marca um chunk como conhecido e vazio (Ar).
@@ -476,8 +490,16 @@ func (s *MapDataStore) UpdateTiletypes(list *dfproto.TiletypeList) {
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
 	for i := range list.TiletypeList {
-		tt := &list.TiletypeList[i]
+		tt := list.TiletypeList[i]
+		// Armazenamos por valor para garantir persistência e segurança
 		s.Tiletypes[tt.ID] = tt
+	}
+}
+
+// UpdateMaterials atualiza o cache de materiais no MaterialStore interno.
+func (s *MapDataStore) UpdateMaterials(list *dfproto.MaterialList) {
+	if s.MatStore != nil {
+		s.MatStore.UpdateMaterials(list)
 	}
 }
 
@@ -884,4 +906,11 @@ func (s *MapDataStore) ClearEntities() {
 	s.Buildings = make(map[int32]*BuildingInstance)
 	s.Units = make(map[int32]*UnitInstance)
 	s.BuildingLookup = make(map[util.DFCoord]int32)
+}
+
+// GetRAMChunkCount retorna o n�mero de chunks atualmente carregados na mem�ria.
+func (s *MapDataStore) GetRAMChunkCount() int {
+s.Mu.RLock()
+defer s.Mu.RUnlock()
+return len(s.Chunks)
 }
