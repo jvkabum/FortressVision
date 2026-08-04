@@ -1,7 +1,7 @@
 package render
 
 import (
-	"cliente-kaiju/internal/mesher"
+	"FortressVision/cliente/internal/mesher"
 	"fmt"
 	"kaijuengine.com/engine"
 	"kaijuengine.com/engine/cameras"
@@ -81,51 +81,54 @@ func CreateRedBall(host *engine.Host, pos matrix.Vec3) *matrix.Transform {
 	return trans
 }
 
-// DrawChunk adiciona as sub-malhas de um único chunk à cena.
-func DrawChunk(host *engine.Host, cm *mesher.ChunkMesh) {
+// CreateChunkDrawings cria as estruturas de desenho de um chunk preparadas para submissão por frame.
+func CreateChunkDrawings(host *engine.Host, cm *mesher.ChunkMesh, meshKey string) []rendering.Drawing {
 	if cm == nil {
-		return
+		return nil
 	}
 
 	mat, _ := host.MaterialCache().Material("basic.material")
 	viewCuller := &CameraViewCuller{Camera: host.PrimaryCamera()}
+	var draws []rendering.Drawing
 
 	for matID, data := range cm.SubMeshes {
 		if len(data.Vertices) == 0 {
 			continue
 		}
 
-		// Chave única para o cache de malha (ChunkID + MatID)
-		key := fmt.Sprintf("chunk_%v_%d", cm.Origin, matID)
+		// Chave única para o cache de malha (ID do Chunk + Material + Modificador de Versão)
+		key := fmt.Sprintf("%s_%d", meshKey, matID)
 		mesh := host.MeshCache().Mesh(key, data.Vertices, data.Indices)
 		
 		sd := shader_data_registry.Create("basic")
 		if sd != nil {
-			r := matrix.Float((matID * 123) % 255) / 255.0
-			g := matrix.Float((matID * 456) % 255) / 255.0
-			b := matrix.Float((matID * 789) % 255) / 255.0
-			sd.(*shader_data_registry.ShaderDataStandard).Color = matrix.NewColor(r, g, b, 1.0)
+			sd.(*shader_data_registry.ShaderDataStandard).Color = matrix.ColorWhite()
 		}
 
 		trans := &matrix.Transform{}
 		trans.SetupRawTransform()
 		trans.SetPosition(cm.Origin)
 
-		draw := rendering.Drawing{
+		drawings := rendering.Drawing{
 			Mesh:       mesh,
 			Material:   mat,
 			ShaderData: sd,
 			Transform:  trans,
 			ViewCuller: viewCuller,
 		}
-		host.Drawings.AddDrawing(draw)
+		draws = append(draws, drawings)
 	}
+	return draws
 }
 
 // DrawChunks renderiza toda a geometria gerada pelo mesher (Legacy - Evitar usar em loop)
 func DrawChunks(host *engine.Host, meshingMgr *mesher.Manager) {
 	meshes := meshingMgr.GetMeshes()
 	for _, cm := range meshes {
-		DrawChunk(host, cm)
+		key := fmt.Sprintf("legacy_%v", cm.Origin)
+		draws := CreateChunkDrawings(host, cm, key)
+		for _, d := range draws {
+			host.Drawings.AddDrawing(d)
+		}
 	}
 }

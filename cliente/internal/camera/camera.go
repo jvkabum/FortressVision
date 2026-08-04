@@ -50,8 +50,8 @@ type Controller struct {
 func New(host *engine.Host) *Controller {
 	c := &Controller{
 		host:            host,
-		TargetLookAt:    [3]float32{16, 0, 16},
-		CurrentLookAt:   [3]float32{16, 0, 16},
+		TargetLookAt:    [3]float32{16, 165, -16},
+		CurrentLookAt:   [3]float32{16, 165, -16},
 		TargetDistance:  40.0,
 		CurrentDistance: 40.0,
 		Yaw:            -math.Pi / 4.0,
@@ -248,6 +248,16 @@ func (c *Controller) Update(dt float32) {
 	c.CurrentDistance += (c.TargetDistance - c.CurrentDistance) * t
 
 	// Aplicar transformacao na camera
+	c.apply()
+}
+
+// Teleport move o foco da camera instantaneamente para uma posicao.
+func (c *Controller) Teleport(x, y, z float32) {
+	c.TargetLookAt[0] = x
+	c.TargetLookAt[1] = z // Z do DF -> Y da Engine
+	c.TargetLookAt[2] = -y // Y do DF -> -Z da Engine
+	
+	c.CurrentLookAt = c.TargetLookAt
 	c.apply()
 }
 

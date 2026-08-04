@@ -291,7 +291,8 @@ func (h *HUD) UpdateFPS(fps int) {
 }
 
 func (h *HUD) UpdateLocation(x, y, z float64) {
-	h.set(h.lblLocDF, fmt.Sprintf("DF: %.0f, %.0f, %.0f", x, y, z))
+	dfY := -z
+	h.set(h.lblLocDF, fmt.Sprintf("DF: %.0f, %.0f, %.0f", x, dfY, y))
 	h.set(h.lblLocElev, fmt.Sprintf("Elevação: %d", int(math.Floor(y))))
 }
 

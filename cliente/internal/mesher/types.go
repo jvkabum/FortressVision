@@ -41,3 +41,33 @@ func (m *MeshData) AddQuad(v0, v1, v2, v3 rendering.Vertex) {
 	// Segundo Triângulo
 	m.Indices = append(m.Indices, startIdx, startIdx+2, startIdx+3)
 }
+
+// AddGeometry junta outra de malha, aplicando um offset (posição), rotação opcionalmente na raiz e uma cor base.
+func (m *MeshData) AddGeometry(verts []rendering.Vertex, indices []uint32, offset matrix.Vec3, color matrix.Color) {
+	startIdx := uint32(len(m.Vertices))
+	
+	for _, v := range verts {
+		// Adiciona o offset de posição
+		v.Position = matrix.NewVec3(
+			v.Position.X() + offset.X(),
+			v.Position.Y() + offset.Y(),
+			v.Position.Z() + offset.Z(),
+		)
+		
+		// Aplica a sobreposição de cor mantendo o sombreamento original se existir no OBJ (multiplicação de cores simples)
+		// Se o OBJ for branco, ele vai pegar puramente a color passada
+		v.Color = matrix.NewColor(
+			v.Color.R() * color.R(),
+			v.Color.G() * color.G(),
+			v.Color.B() * color.B(),
+			v.Color.A() * color.A(),
+		)
+		
+		m.Vertices = append(m.Vertices, v)
+	}
+
+	for _, idx := range indices {
+		m.Indices = append(m.Indices, startIdx+idx)
+	}
+}
+

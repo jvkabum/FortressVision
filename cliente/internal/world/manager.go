@@ -20,7 +20,7 @@ type Manager struct {
 	Store *mapdata.MapDataStore
 
 	// Eventos
-	OnMapChunkUpdated func(origin util.DFCoord)
+	OnMapChunkUpdated func(chunk *mapdata.Chunk)
 	OnWorldStatus     func(status *fvnet.WorldStatus)
 	OnStatusMsg       func(msg string, dfConnected bool)
 }
@@ -99,7 +99,7 @@ func (m *Manager) processChunk(msg *fvnet.MapChunkMessage) {
 		delete(m.Store.Chunks, origin)
 		m.Store.Mu.Unlock()
 		if m.OnMapChunkUpdated != nil {
-			m.OnMapChunkUpdated(origin)
+			m.OnMapChunkUpdated(nil) // Sinaliza remoção/ar
 		}
 		return
 	}
@@ -135,7 +135,7 @@ func (m *Manager) processChunk(msg *fvnet.MapChunkMessage) {
 
 	// Avisizar interessados (como o render/mesher) que este terreno atualizou.
 	if m.OnMapChunkUpdated != nil {
-		m.OnMapChunkUpdated(origin)
+		m.OnMapChunkUpdated(chunk)
 	}
 }
 
@@ -153,9 +153,10 @@ func (m *Manager) processVegetation(msg *fvnet.VegetationUpdateMessage) {
 
 	m.Store.StorePlants(msg.ChunkX, msg.ChunkY, msg.ChunkZ, plants)
 
-	// A vegetação crescer é uma atualização de chunk. Notificar.
+	// A vegetação crescer é uma atualização de chunk. Notificar com o chunk atualizado.
 	if m.OnMapChunkUpdated != nil {
-		m.OnMapChunkUpdated(origin)
+		chunk, _ := m.Store.GetChunk(origin)
+		m.OnMapChunkUpdated(chunk)
 	}
 }
 

@@ -11,6 +11,8 @@ type Manager struct {
 	mu            sync.RWMutex
 	meshes        map[string]*ChunkMesh
 	pendingChunks chan *mapdata.Chunk
+
+	OnMeshGenerated func(mesh *ChunkMesh)
 }
 
 // NewManager inicializa o gerenciador de alvenaria.
@@ -35,6 +37,14 @@ func (m *Manager) RequestMeshUpdate(chunk *mapdata.Chunk) {
 }
 
 func (m *Manager) worker() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[PANIC] Erro fatal no Worker do Mesher (Thread morta salva): %v", r)
+			// Reinicia o worker em caso de pânico para não travar o canal pendente!
+			go m.worker()
+		}
+	}()
+
 	for chunk := range m.pendingChunks {
 		// Gerar a malha (Greedy)
 		mesh := GenerateChunkMesh(chunk)
@@ -42,7 +52,12 @@ func (m *Manager) worker() {
 		m.mu.Lock()
 		key := chunk.Origin.String()
 		m.meshes[key] = mesh
+		cb := m.OnMeshGenerated
 		m.mu.Unlock()
+		
+		if cb != nil {
+			cb(mesh)
+		}
 		
 		log.Printf("🧱 [Mesher] Geometria gerada para chunk %v (%d materiais)", chunk.Origin, len(mesh.SubMeshes))
 	}

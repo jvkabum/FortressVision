@@ -1,0 +1,156 @@
+package mesher
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"strings"
+	"strconv"
+	"kaijuengine.com/matrix"
+	"kaijuengine.com/rendering"
+)
+
+type CachedGeometry struct {
+	Verts   []rendering.Vertex
+	Indices []uint32
+}
+
+var rampCache = make(map[int32]*CachedGeometry)
+
+// LoadRampGeometries deve ser invocado no boot para parsear os arquivos OBJ
+// de forma independente do KaijuEngine (evitando crash por dependência de VFS).
+func LoadRampGeometries(basePath string) {
+	log.Println("⛰️ [Mesher] Pré-carregando malhas OBJ de rampas com parser nativo...")
+	
+	sucessos := 0
+
+	for i := 1; i <= 26; i++ {
+		paths := []string{
+			fmt.Sprintf("%s/assets/models/ramps/RAMP_%d.obj", basePath, i),
+			fmt.Sprintf("%s/assets/models/ramps/RAMP_%d_sharp.obj", basePath, i),
+			fmt.Sprintf("%s/assets/models/ramps/RAMP_%d_blunt.obj", basePath, i),
+		}
+
+		for _, p := range paths {
+			geom := loadSimpleObj(p)
+			if geom != nil {
+				rampCache[int32(i)] = geom
+				sucessos++
+				break
+			}
+		}
+	}
+
+	// Rampa "UP"
+	pathUp := fmt.Sprintf("%s/assets/models/ramps/RAMP_UP.obj", basePath)
+	geomUp := loadSimpleObj(pathUp)
+	if geomUp != nil {
+		rampCache[99] = geomUp
+		sucessos++
+	}
+
+	log.Printf("⛰️ [Mesher] %d rampas carregadas na RAM com sucesso.", sucessos)
+}
+
+func GetRampGeometry(rampType int32) *CachedGeometry {
+	if geom, ok := rampCache[rampType]; ok {
+		return geom
+	}
+	if geom, ok := rampCache[1]; ok {
+		return geom
+	}
+	return nil
+}
+
+// loadSimpleObj extrai triangulos de um OBJ basico no formato v, vn e f v//vn
+func loadSimpleObj(path string) *CachedGeometry {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(string(data), "\n")
+	
+	var positions []matrix.Vec3
+	var normals []matrix.Vec3
+	
+	geom := &CachedGeometry{
+		Verts:   make([]rendering.Vertex, 0),
+		Indices: make([]uint32, 0),
+	}
+	
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if len(l) == 0 || l[0] == '#' { continue }
+		
+		parts := strings.Fields(l)
+		if len(parts) == 0 { continue }
+		
+		switch parts[0] {
+		case "v":
+			if len(parts) >= 4 {
+				x, _ := strconv.ParseFloat(parts[1], 32)
+				y, _ := strconv.ParseFloat(parts[2], 32)
+				z, _ := strconv.ParseFloat(parts[3], 32)
+				// Escala de 0.5 para adequar as rampas modeladas de 2x2x2 à grade Voxel 1x1x1.
+				positions = append(positions, matrix.NewVec3(matrix.Float(x)*0.5, matrix.Float(y)*0.5, matrix.Float(z)*0.5))
+			}
+		case "vn":
+			if len(parts) >= 4 {
+				x, _ := strconv.ParseFloat(parts[1], 32)
+				y, _ := strconv.ParseFloat(parts[2], 32)
+				z, _ := strconv.ParseFloat(parts[3], 32)
+				normals = append(normals, matrix.NewVec3(matrix.Float(x), matrix.Float(y), matrix.Float(z)))
+			}
+		case "f":
+			// Processar faces (podem ser triângulos ou quads)
+			// Face formato: v/vt/vn ou v//vn ou v
+			var faceIndices []uint32
+			
+			for i := 1; i < len(parts); i++ {
+				subParts := strings.Split(parts[i], "/")
+				vIdx, _ := strconv.Atoi(subParts[0])
+				vIdx-- // OBJ é 1-indexed
+				
+				nIdx := vIdx
+				if len(subParts) >= 3 && subParts[2] != "" {
+					parsedN, _ := strconv.Atoi(subParts[2])
+					nIdx = parsedN - 1
+				}
+				
+				// Pegar os vetores
+				pos := positions[vIdx]
+				var norm matrix.Vec3
+				if nIdx < len(normals) && nIdx >= 0 {
+					norm = normals[nIdx]
+				} else {
+					norm = matrix.Vec3Up()
+				}
+				
+				newVert := rendering.Vertex{Position: pos, Normal: norm, Color: matrix.ColorWhite()}
+				geom.Verts = append(geom.Verts, newVert)
+				faceIndices = append(faceIndices, uint32(len(geom.Verts)-1))
+			}
+			
+			// Triangulação da face com Winding Order Invertido para o Culling do Kaiju (CW <-> CCW)
+			if len(faceIndices) == 3 {
+				// Triângulo [0, 1, 2] -> [2, 1, 0]
+				geom.Indices = append(geom.Indices, faceIndices[2], faceIndices[1], faceIndices[0])
+			} else if len(faceIndices) == 4 {
+				// Quad [0, 1, 2, 3] -> Invertido: [0, 3, 2] e [0, 2, 1]
+				geom.Indices = append(geom.Indices, faceIndices[0], faceIndices[3], faceIndices[2])
+				geom.Indices = append(geom.Indices, faceIndices[0], faceIndices[2], faceIndices[1])
+			} else if len(faceIndices) > 4 {
+				// Polygon genérico Fan triangulator (Winding order invertido)
+				v0 := faceIndices[0]
+				for k := 1; k < len(faceIndices)-1; k++ {
+					geom.Indices = append(geom.Indices, faceIndices[k+1], faceIndices[k], v0)
+				}
+			}
+		}
+	}
+	
+	if len(geom.Verts) == 0 {
+		return nil
+	}
+	return geom
+}
