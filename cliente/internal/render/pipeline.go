@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"kaijuengine.com/engine"
 	"kaijuengine.com/engine/cameras"
-	"kaijuengine.com/engine/collision"
+	"kaijuengine.com/engine/graviton"
 	"kaijuengine.com/matrix"
 	"kaijuengine.com/rendering"
 	"kaijuengine.com/registry/shader_data_registry"
@@ -16,7 +16,7 @@ type CameraViewCuller struct {
 	Camera cameras.Camera
 }
 
-func (c *CameraViewCuller) IsInView(box collision.AABB) bool {
+func (c *CameraViewCuller) IsInView(box graviton.AABB) bool {
 	return box.IntersectsFrustum(c.Camera.Frustum())
 }
 
