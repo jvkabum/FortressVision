@@ -206,7 +206,6 @@ func (h *HUD) makePanel(tex *rendering.Texture, w, hght, x, y float32, bg matrix
 	p := h.man.Add().ToPanel()
 	p.Init(tex, ui.ElementTypePanel)
 	p.SetColor(bg)
-	p.SetBGColor(bg)
 	p.DontFitContent()
 	p.Base().Layout().SetPositioning(ui.PositioningAbsolute)
 	p.Base().Layout().Scale(w, hght)
