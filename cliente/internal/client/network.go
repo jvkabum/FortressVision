@@ -1,6 +1,7 @@
 package client
 
 import (
+	"FortressVision/cliente/internal/liquid"
 	"FortressVision/shared/mapdata"
 	"FortressVision/shared/pkg/dfproto"
 	"FortressVision/shared/proto/fvnet"
@@ -234,6 +235,28 @@ func (c *NetworkClient) processChunk(msg *fvnet.MapChunkMessage) {
 	if err := dec.Decode(&tiles); err != nil {
 		log.Printf("[Network] Erro ao decodificar tiles do chunk %v: %v", origin, err)
 		return
+	}
+
+	// === TRACER ETAPA 1 e 2: Contar líquidos e registrar ===
+	waterCount, magmaCount := 0, 0
+	for x := 0; x < 16; x++ {
+		for y := 0; y < 16; y++ {
+			if t := tiles[x][y]; t != nil {
+				if t.WaterLevel > 0 {
+					waterCount++
+					liquid.TraceStore(msg.ChunkX+int32(x), msg.ChunkY+int32(y), msg.ChunkZ, t.WaterLevel, t.MagmaLevel, t.Hidden)
+				}
+				if t.MagmaLevel > 0 {
+					magmaCount++
+					if t.WaterLevel == 0 { // Evita log duplicado
+						liquid.TraceStore(msg.ChunkX+int32(x), msg.ChunkY+int32(y), msg.ChunkZ, t.WaterLevel, t.MagmaLevel, t.Hidden)
+					}
+				}
+			}
+		}
+	}
+	if waterCount > 0 || magmaCount > 0 {
+		liquid.TraceNetwork(msg.ChunkX, msg.ChunkY, msg.ChunkZ, waterCount, magmaCount)
 	}
 
 	// Inserir no MapStore local

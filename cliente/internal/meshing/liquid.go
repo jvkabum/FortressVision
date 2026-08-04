@@ -38,42 +38,41 @@ func addLiquidPlane(tile *mapdata.Tile, level int32, color [4]uint8, buffer *Mes
 	}
 
 	// Calculando a elevação nas 4 QUINAS (Cantos do bloco na malha)
-	// Para unir perfeitamente com os vizinhos, a altura de cada quina é a MÉDIA das alturas dos 4 blocos que tocam naquilo.
-	// Note: O jogo DF tem água descendo como cachoeira, mas o level varia de 0 a 7. 0 = não renderiza plane normal.
-	// As coordenadas cartesianas: X cresce (Leste), Z diminui (-d) (Sul). DF Y+ = 3D Z-
-
-	// Quina NW (Noroeste): Bloco atual, Norte, Oeste, Noroeste (X, Z)
 	nw := (getFluidLevel(0, 0) + getFluidLevel(0, -1) + getFluidLevel(-1, 0) + getFluidLevel(-1, -1)) / 4.0
-	// Quina NE (Nordeste): Bloco atual, Norte, Leste, Nordeste (X+W, Z)
 	ne := (getFluidLevel(0, 0) + getFluidLevel(0, -1) + getFluidLevel(1, 0) + getFluidLevel(1, -1)) / 4.0
-	// Quina SW (Sudoeste): Bloco atual, Sul, Oeste, Sudoeste (X, Z-D)
 	sw := (getFluidLevel(0, 0) + getFluidLevel(0, 1) + getFluidLevel(-1, 0) + getFluidLevel(-1, 1)) / 4.0
-	// Quina SE (Sudeste): Bloco atual, Sul, Leste, Sudeste (X+W, Z-D)
 	se := (getFluidLevel(0, 0) + getFluidLevel(0, 1) + getFluidLevel(1, 0) + getFluidLevel(1, 1)) / 4.0
 
-	// Se for o nível máximo 7 e o bloco de "cima/teto" tiver água, as quinas cravam no 1.0 para ligar cachoeiras
 	if upTile := tile.Up(); upTile != nil && (upTile.WaterLevel > 0 || upTile.MagmaLevel > 0) {
-		// Simplificação pra líquidos transbordantes e colunas de água
 		nw, ne, sw, se = 1.0, 1.0, 1.0, 1.0
 	}
 
-	// Transformamos o Vetor Direcional do DFHack em UV para ser resgatado na GPU pelo Shader
 	u := float32(tile.FlowVector.X)
-	v := float32(-tile.FlowVector.Y) // No motor 3D, Z escala negativamente com DF Y
+	v := float32(-tile.FlowVector.Y)
 	flowUV := [2]float32{u, v}
 
-	// Face SUPERIOR COM RAMPAS SUAVES (Continuous Surface Mesh)
-	// v1(NW) -> v4(NE) -> v3(SE) -> v2(SW)   --- Ordem ccw apontando +Y
+	// SMART OFFSETS: Evita que a água inclinada atravesse paredes de terra.
+	off := float32(0.01)
+	nwX, nwZ := x, z
+	if getFluidLevel(-1, 0) == 0 || getFluidLevel(0, -1) == 0 { nwX += off; nwZ -= off }
+	neX, neZ := x + w, z
+	if getFluidLevel(1, 0) == 0 || getFluidLevel(0, -1) == 0 { neX -= off; neZ -= off }
+	seX, seZ := x + w, z - d
+	if getFluidLevel(1, 0) == 0 || getFluidLevel(0, 1) == 0 { seX -= off; seZ += off }
+	swX, swZ := x, z - d
+	if getFluidLevel(-1, 0) == 0 || getFluidLevel(0, 1) == 0 { swX += off; swZ += off }
+
+	// Face SUPERIOR (Surface)
 	buffer.AddFaceUV(
-		[3]float32{x, y + nw, z},         // NW
-		[3]float32{x + w, y + ne, z},     // NE
-		[3]float32{x + w, y + se, z - d}, // SE
-		[3]float32{x, y + sw, z - d},     // SW
-		flowUV, flowUV, flowUV, flowUV,   // Dados de direção global do Voxel na GPU (Flow)
-		[3]float32{0, 1, 0}, color, // Normal
+		[3]float32{nwX, y + nw, nwZ}, // NW
+		[3]float32{neX, y + ne, neZ}, // NE
+		[3]float32{seX, y + se, seZ}, // SE
+		[3]float32{swX, y + sw, swZ}, // SW
+		flowUV, flowUV, flowUV, flowUV,
+		[3]float32{0, 1, 0}, color,
 	)
 
-	// Face INFERIOR plana (Sem inclinações drásticas para facilitar visual debaixo d'água) - CCW
+	// Face INFERIOR (Base)
 	buffer.AddFaceUV(
 		[3]float32{x, y, z},         // NW
 		[3]float32{x, y, z - d},     // SW
@@ -83,15 +82,15 @@ func addLiquidPlane(tile *mapdata.Tile, level int32, color [4]uint8, buffer *Mes
 		[3]float32{0, -1, 0}, color,
 	)
 
-	// BORDAS/LATERAIS DA ÁGUA (Waterfall/Volume)
-	// Se o nível de fluido cair drasticamente em relação aos vizinhos, desenhamos as faces verticais.
+	// BORDAS/LATERAIS (Volume) com offset fixo de 0.01
+	sideOff := float32(0.01)
 	// Norte (+Z)
 	if getFluidLevel(0, -1) < getFluidLevel(0, 0) {
 		buffer.AddFaceUV(
-			[3]float32{x, y, z},          // Base-NW
-			[3]float32{x + w, y, z},      // Base-NE
-			[3]float32{x + w, y + ne, z}, // Top-NE
-			[3]float32{x, y + nw, z},     // Top-NW
+			[3]float32{x, y, z - sideOff},              // Base-NW
+			[3]float32{x + w, y, z - sideOff},          // Base-NE
+			[3]float32{x + w, y + ne, z - sideOff},     // Top-NE
+			[3]float32{x, y + nw, z - sideOff},         // Top-NW
 			flowUV, flowUV, flowUV, flowUV,
 			[3]float32{0, 0, 1}, color,
 		)
@@ -99,10 +98,10 @@ func addLiquidPlane(tile *mapdata.Tile, level int32, color [4]uint8, buffer *Mes
 	// Sul (-Z)
 	if getFluidLevel(0, 1) < getFluidLevel(0, 0) {
 		buffer.AddFaceUV(
-			[3]float32{x + w, y, z - d},      // Base-SE
-			[3]float32{x, y, z - d},          // Base-SW
-			[3]float32{x, y + sw, z - d},     // Top-SW
-			[3]float32{x + w, y + se, z - d}, // Top-SE
+			[3]float32{x + w, y, z - d + sideOff},      // Base-SE
+			[3]float32{x, y, z - d + sideOff},          // Base-SW
+			[3]float32{x, y + sw, z - d + sideOff},     // Top-SW
+			[3]float32{x + w, y + se, z - d + sideOff}, // Top-SE
 			flowUV, flowUV, flowUV, flowUV,
 			[3]float32{0, 0, -1}, color,
 		)
@@ -110,10 +109,10 @@ func addLiquidPlane(tile *mapdata.Tile, level int32, color [4]uint8, buffer *Mes
 	// Oeste (-X)
 	if getFluidLevel(-1, 0) < getFluidLevel(0, 0) {
 		buffer.AddFaceUV(
-			[3]float32{x, y, z - d},      // Base-SW
-			[3]float32{x, y, z},          // Base-NW
-			[3]float32{x, y + nw, z},     // Top-NW
-			[3]float32{x, y + sw, z - d}, // Top-SW
+			[3]float32{x + sideOff, y, z - d},          // Base-SW
+			[3]float32{x + sideOff, y, z},              // Base-NW
+			[3]float32{x + sideOff, y + nw, z},         // Top-NW
+			[3]float32{x + sideOff, y + sw, z - d},     // Top-SW
 			flowUV, flowUV, flowUV, flowUV,
 			[3]float32{-1, 0, 0}, color,
 		)
@@ -121,10 +120,10 @@ func addLiquidPlane(tile *mapdata.Tile, level int32, color [4]uint8, buffer *Mes
 	// Leste (+X)
 	if getFluidLevel(1, 0) < getFluidLevel(0, 0) {
 		buffer.AddFaceUV(
-			[3]float32{x + w, y, z},          // Base-NE
-			[3]float32{x + w, y, z - d},      // Base-SE
-			[3]float32{x + w, y + se, z - d}, // Top-SE
-			[3]float32{x + w, y + ne, z},     // Top-NE
+			[3]float32{x + w - sideOff, y, z},          // Base-NE
+			[3]float32{x + w - sideOff, y, z - d},      // Base-SE
+			[3]float32{x + w - sideOff, y + se, z - d}, // Top-SE
+			[3]float32{x + w - sideOff, y + ne, z},     // Top-NE
 			flowUV, flowUV, flowUV, flowUV,
 			[3]float32{1, 0, 0}, color,
 		)

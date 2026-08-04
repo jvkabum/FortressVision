@@ -6,301 +6,42 @@ package render
 import "C"
 
 import (
-	"fmt"
 	"log"
+	"math"
 	"sync"
 	"unsafe"
 
+	"FortressVision/cliente/internal/assets"
+	"FortressVision/cliente/internal/liquid"
 	"FortressVision/cliente/internal/meshing"
 	"FortressVision/shared/util"
+	"FortressVision/cliente/internal/comp"
 
+	"github.com/mlange-42/ark/ecs"
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-const waterVertexShader = `
-#version 330
+// Shaders e struct BlockModel movidos para arquivos separados (shaders.go e block_model.go)
 
-in vec3 vertexPosition;
-in vec2 vertexTexCoord;
-in vec3 vertexNormal;
-in vec4 vertexColor;
-
-uniform mat4 mvp;
-uniform float time;
-
-out vec2 fragTexCoord;
-out vec4 fragColor;
-out vec3 fragNormal;
-out vec3 fragWorldPos;
-
-// Gerstner Wave: retorna deslocamento (XYZ) e normal parcial
-vec3 gerstnerWave(vec2 pos, vec2 dir, float steepness, float wavelength, float t) {
-    float k = 6.2831853 / wavelength;
-    float c = sqrt(9.8 / k);
-    float a = steepness / k;
-    float phase = k * (dot(dir, pos) - c * t);
-    return vec3(
-        dir.x * a * cos(phase),
-        a * sin(phase),
-        dir.y * a * cos(phase)
-    );
-}
-
-void main()
-{
-    vec2 flowDir = vertexTexCoord;
-    float speed = 2.0;
-    vec2 offset = flowDir * time * speed;
-    fragTexCoord = vertexPosition.xz + offset;
-    fragColor = vertexColor;
-
-    vec3 pos = vertexPosition;
-
-    // 3 camadas de ondas Gerstner com direções diferentes
-    float flowMag = length(flowDir);
-    float waveIntensity = max(flowMag, 0.3); // Mesmo água parada tem leve ondulação
-
-    pos += gerstnerWave(pos.xz, normalize(vec2(1.0, 0.6)),  0.15 * waveIntensity, 3.0, time) * 0.6;
-    pos += gerstnerWave(pos.xz, normalize(vec2(-0.4, 1.0)), 0.10 * waveIntensity, 2.0, time * 1.3) * 0.4;
-    pos += gerstnerWave(pos.xz, normalize(vec2(0.7, -0.5)), 0.08 * waveIntensity, 1.5, time * 0.8) * 0.3;
-
-    // Recalcular normal aproximada via derivadas das ondas
-    float eps = 0.1;
-    vec3 pX = pos + gerstnerWave(pos.xz + vec2(eps, 0.0), normalize(vec2(1.0, 0.6)), 0.15, 3.0, time) * 0.1;
-    vec3 pZ = pos + gerstnerWave(pos.xz + vec2(0.0, eps), normalize(vec2(1.0, 0.6)), 0.15, 3.0, time) * 0.1;
-    vec3 tangentX = vec3(eps, pX.y - pos.y, 0.0);
-    vec3 tangentZ = vec3(0.0, pZ.y - pos.y, eps);
-    fragNormal = normalize(cross(tangentZ, tangentX));
-
-    fragWorldPos = pos;
-    gl_Position = mvp * vec4(pos, 1.0);
-}
-`
-
-const waterFragmentShader = `
-#version 330
-
-in vec2 fragTexCoord;
-in vec4 fragColor;
-in vec3 fragNormal;
-in vec3 fragWorldPos;
-
-uniform float time;
-uniform vec3 camPos;
-
-out vec4 finalColor;
-
-// Hash para ruído procedural
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
-
-float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-void main()
-{
-    // ===== CORES BASE =====
-    vec3 shallowColor = vec3(0.15, 0.65, 0.65); // Turquesa claro
-    vec3 deepColor    = vec3(0.02, 0.12, 0.30); // Azul escuro profundo
-
-    // A profundidade está codificada no alpha do vértice (0.0 = raso, 1.0 = profundo)
-    float depth = fragColor.a;
-    vec3 baseColor = mix(shallowColor, deepColor, depth * 0.7);
-
-    // ===== ONDAS MULTI-CAMADA =====
-    vec2 uv = fragTexCoord;
-    float w1 = sin(uv.x * 3.0 + uv.y * 2.0 + time * 1.5) * 0.5 + 0.5;
-    float w2 = sin(uv.x * 1.7 - uv.y * 2.3 + time * 1.1) * 0.5 + 0.5;
-    float w3 = sin(uv.x * 4.0 + uv.y * 1.5 + time * 2.0) * 0.5 + 0.5;
-    float wave = (w1 + w2 + w3) / 3.0;
-
-    // Variação de cor baseada nas ondas
-    baseColor += wave * vec3(0.05, 0.15, 0.20);
-    baseColor -= (1.0 - wave) * vec3(0.02, 0.05, 0.08);
-
-    // ===== ESPUMA NAS BORDAS =====
-    // Espuma aparece em água mais rasa (depth baixo) e nas cristas das ondas
-    float foamNoise = noise(uv * 8.0 + time * 0.5);
-    float foamEdge = smoothstep(0.0, 0.4, 1.0 - depth); // Mais forte em água rasa
-    float foamCrest = smoothstep(0.65, 0.85, wave);       // Cristas das ondas
-    float foam = max(foamEdge, foamCrest) * foamNoise;
-    foam = smoothstep(0.3, 0.7, foam);
-    baseColor = mix(baseColor, vec3(0.85, 0.92, 0.95), foam * 0.6);
-
-    // ===== CAÚSTICAS =====
-    vec2 caustUV = fragWorldPos.xz * 1.5;
-    float c1 = sin(caustUV.x * 3.0 + time + sin(caustUV.y * 2.0 + time * 0.7));
-    float c2 = sin(caustUV.y * 3.5 - time * 0.8 + cos(caustUV.x * 2.5 + time));
-    float caustic = pow(abs(c1 * c2), 2.0) * 0.15;
-    baseColor += caustic * vec3(0.3, 0.6, 0.8);
-
-    // ===== FRESNEL (Reflexão/Transparência por ângulo) =====
-    vec3 viewDir = normalize(camPos - fragWorldPos);
-    vec3 normal = normalize(fragNormal);
-    float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), 3.0);
-    fresnel = clamp(fresnel, 0.0, 1.0);
-
-    // Reflexão fake do "céu" (gradiente claro)
-    vec3 skyReflection = vec3(0.45, 0.65, 0.85);
-    baseColor = mix(baseColor, skyReflection, fresnel * 0.4);
-
-    // ===== SPECULAR (Blinn-Phong) =====
-    vec3 lightDir = normalize(vec3(0.5, 0.8, 0.3)); // Direção do "sol"
-    vec3 halfVec = normalize(lightDir + viewDir);
-    float spec = pow(max(dot(normal, halfVec), 0.0), 64.0);
-    baseColor += spec * vec3(1.0, 0.95, 0.8) * 0.5;
-
-    // ===== FOG =====
-    float dist = length(camPos - fragWorldPos);
-    vec3 fogColor = vec3(0.12, 0.12, 0.16);
-    float fogDensity = 0.005;
-    float fogFactor = exp(-pow(dist * fogDensity, 2.0));
-    fogFactor = clamp(fogFactor, 0.0, 1.0);
-
-    vec3 finalRGB = mix(fogColor, baseColor, fogFactor);
-
-    // Transparência: mais opaco no fundo, mais transparente nas bordas rasas
-    float alpha = mix(0.55, 0.85, depth) * fogFactor;
-    alpha = max(alpha, foam * 0.7); // Espuma é mais opaca
-
-    finalColor = vec4(finalRGB, alpha);
-}
-`
-
-const plantVertexShader = `
-#version 330
-in vec3 vertexPosition;
-in vec2 vertexTexCoord;
-in vec3 vertexNormal;
-in vec4 vertexColor;
-uniform mat4 mvp;
-uniform float time;
-
-out vec2 fragTexCoord;
-out vec4 fragColor;
-out vec3 fragNormal;
-out float fragHeight;
-
-void main() {
-    fragTexCoord = vertexTexCoord;
-    fragColor = vertexColor;
-    fragNormal = vertexNormal;
-    fragHeight = vertexPosition.y;
-    
-    vec3 pos = vertexPosition;
-    // Animação de vento: balanço horizontal baseado na altura (Y)
-    float windStrength = 0.15;
-    float freq = 2.0;
-    float move = sin(time * freq + pos.x * 0.5 + pos.z * 0.5) * windStrength * pos.y;
-    pos.x += move;
-    pos.z += move * 0.3;
-
-    gl_Position = mvp * vec4(pos, 1.0);
-}
-`
-
-const terrainVertexShader = `
-#version 330
-in vec3 vertexPosition;
-in vec2 vertexTexCoord;
-in vec3 vertexNormal;
-in vec4 vertexColor;
-
-uniform mat4 mvp;
-
-out vec2 fragTexCoord;
-out vec4 fragColor;
-out vec3 fragNormal;
-out float fragHeight;
-
-void main() {
-    fragTexCoord = vertexTexCoord;
-    fragColor = vertexColor;
-    fragNormal = vertexNormal;
-    fragHeight = vertexPosition.y;
-    gl_Position = mvp * vec4(vertexPosition, 1.0);
-}
-`
-
-const terrainFragmentShader = `
-#version 330
-in vec2 fragTexCoord;
-in vec4 fragColor;
-in vec3 fragNormal;
-in float fragHeight;
-
-uniform sampler2D texture0;
-uniform float time;
-uniform float snowAmount; // 0.0 a 1.0
-
-out vec4 finalColor;
-
-// Função de ruído simples para "Ground Splatting" visual
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
-void main() {
-    vec4 texelColor = texture(texture0, fragTexCoord);
-    if (texelColor.a < 0.1) discard; 
-
-    // Adiciona uma leve variação de cor baseada no ruído (Grit/Splatting visual)
-    float n = hash(floor(fragTexCoord * 10.0));
-    vec4 mixedColor = texelColor;
-    mixedColor.rgb *= (0.9 + 0.2 * n);
-
-    // Efeito de Neve (Baseado na Normal e Uniforme)
-    // Se a normal aponta para cima (Y > 0.7) e snowAmount > 0
-    float snowFactor = clamp(fragNormal.y, 0.0, 1.0);
-    snowFactor = pow(snowFactor, 4.0) * snowAmount;
-    
-    // Adiciona variação de ruído à neve para não ficar plana
-    float snowNoise = hash(fragTexCoord * 5.0 + vec2(time * 0.01));
-    snowFactor *= (0.8 + 0.4 * snowNoise);
-    
-    mixedColor.rgb = mix(mixedColor.rgb, vec3(0.9, 0.95, 1.0), snowFactor);
-
-    finalColor = mixedColor * fragColor;
-}
-`
-
-// BlockModel representa a geometria renderizável de um bloco do mapa.
-type BlockModel struct {
-	Origin      util.DFCoord
-	Model       rl.Model            // Geometria padrão (sem textura)
-	MatModels   map[string]rl.Model // Modelos separados por textura (stone, grass, etc)
-	LiquidModel rl.Model
-	HasLiquid   bool
-	Active      bool
-	MTime       int64                   // Versão dos dados (para cache)
-	Instances   []meshing.ModelInstance // Instâncias de modelos 3D neste bloco
-}
-
-// Renderer gerencia o upload e renderização de malhas na GPU.
 type Renderer struct {
 	mu     sync.RWMutex
 	Models map[util.DFCoord]*BlockModel
-	// Shaders
-	WaterShader   rl.Shader
-	PlantShader   rl.Shader
-	TerrainShader rl.Shader
 
-	// Uniforms
+	// Shaders e Uniforms
+	TerrainShader          rl.Shader
+	TerrainInstancedShader rl.Shader
+	PlantShader            rl.Shader
+	PlantInstancedShader   rl.Shader
+	WaterShader            rl.Shader
+	ModelShader            rl.Shader
+
 	timeLoc        int32
 	waterTimeLoc   int32
 	waterCamPosLoc int32
 	plantTimeLoc   int32
 	terrainTimeLoc int32
 	snowAmountLoc  int32
+	modelMatLoc    int32
 
 	// Texturas Premium
 	Textures map[string]rl.Texture2D
@@ -308,11 +49,24 @@ type Renderer struct {
 	// Modelos 3D carregados (shrub, tree, etc)
 	Models3D map[string]rl.Model
 
+	// Gerenciador de Assets (JSON config)
+	AssetMgr *assets.Manager
+
 	// Sistema de Clima (Fase 8)
 	Weather *ParticleSystem
 
 	// Fila de modelos para purga (evita stutter)
 	purgeQueue []util.DFCoord
+
+	PropMgr *PropManager // Sistema de GPU Instancing (Fase 33)
+
+	debugInstCount int // DEBUG: contador frame para log temporário
+
+	// --- ECS (Ark) ---
+	World       ecs.World
+	queryPlants ecs.Filter4[comp.Position, comp.Renderable, comp.Rotation, comp.Scale]
+	// Mappers (otimizados para criação de entidades)
+	vegMapper *ecs.Map5[comp.Position, comp.Rotation, comp.Scale, comp.Renderable, comp.ChunkInfo]
 }
 
 // NewRenderer cria um novo renderizador.
@@ -322,78 +76,96 @@ func NewRenderer() *Renderer {
 		purgeQueue: make([]util.DFCoord, 0),
 		Textures:   make(map[string]rl.Texture2D),
 		Models3D:   make(map[string]rl.Model),
+		World:      *ecs.NewWorld(),
+	}
+
+	// Inicializar Helpers de Query Genéricos
+	r.queryPlants = *ecs.NewFilter4[comp.Position, comp.Renderable, comp.Rotation, comp.Scale](&r.World)
+	
+	// Inicializar Mappers
+	r.vegMapper = ecs.NewMap5[comp.Position, comp.Rotation, comp.Scale, comp.Renderable, comp.ChunkInfo](&r.World)
+
+	// Inicializar o Gerenciador de Assets (JSON)
+	mgr, err := assets.NewManager("assets/config")
+	if err != nil {
+		log.Printf("[Renderer] AVISO: Asset Manager não inicializado: %v", err)
+	} else {
+		r.AssetMgr = mgr
+		log.Printf("[Renderer] Asset Manager carregado com sucesso")
 	}
 
 	// Tenta carregar os Shaders Customizados
 	if rl.IsWindowReady() {
 		r.TerrainShader = rl.LoadShaderFromMemory(terrainVertexShader, terrainFragmentShader)
-		r.PlantShader = rl.LoadShaderFromMemory(plantVertexShader, terrainFragmentShader) // Reusa o fragment shader
+		r.TerrainInstancedShader = rl.LoadShaderFromMemory(terrainInstancedVertexShader, terrainFragmentShader)
+		r.PlantShader = rl.LoadShaderFromMemory(plantVertexShader, plantFragmentShader)
+		r.PlantInstancedShader = rl.LoadShaderFromMemory(plantInstancedVertexShader, plantFragmentShader)
 		r.WaterShader = rl.LoadShaderFromMemory(waterVertexShader, waterFragmentShader)
+
+		// BUGS DE "EXPLODING MESH" / "INVISIBILIDADE" DO INSTANCING SANADOS AQUI:
+		// Em OpenGL / Raylib-Go, Shaders de Desenho em Lote (Instanced) precisam obrigatoriamente
+		// ter o Attribute do VAO "instanceTransform" ligado na Location Matrix padrão (Index 4 = RL_SHADER_LOC_MATRIX_MODEL).
+		// Como Locs no binding raylib-go é `*int32`, injetamos via slice.
+		{
+			matModelLocIdx := 4 // rl.LocMatrixModel constante em C
+			
+			locT := rl.GetShaderLocationAttrib(r.TerrainInstancedShader, "instanceTransform")
+			unsafe.Slice(r.TerrainInstancedShader.Locs, 32)[matModelLocIdx] = int32(locT)
+			
+			locP := rl.GetShaderLocationAttrib(r.PlantInstancedShader, "instanceTransform")
+			unsafe.Slice(r.PlantInstancedShader.Locs, 32)[matModelLocIdx] = int32(locP)
+		}
 
 		r.terrainTimeLoc = rl.GetShaderLocation(r.TerrainShader, "time")
 		r.snowAmountLoc = rl.GetShaderLocation(r.TerrainShader, "snowAmount")
+
+		// Carregar shader dedicado para modelos (Rampas, Escadas)
+		r.ModelShader = rl.LoadShaderFromMemory(modelVertexShader, terrainFragmentShader)
+		r.modelMatLoc = rl.GetShaderLocation(r.ModelShader, "matModel")
+
 		r.plantTimeLoc = rl.GetShaderLocation(r.PlantShader, "time")
 		r.waterTimeLoc = rl.GetShaderLocation(r.WaterShader, "time")
 		r.waterCamPosLoc = rl.GetShaderLocation(r.WaterShader, "camPos")
 
+		// Registrar localizações de uniforms padrão para que Raylib preencha automaticamente
+		// Locs é um ponteiro bruto (*int32) que aponta para um array em C (32 floats)
+		locsT := unsafe.Slice(r.TerrainShader.Locs, 32)
+		locsT[0] = rl.GetShaderLocation(r.TerrainShader, "texture0")    // SHADER_LOC_MAP_DIFFUSE
+		locsT[12] = rl.GetShaderLocation(r.TerrainShader, "colDiffuse") // SHADER_LOC_COLOR_DIFFUSE
+
+		locsTI := unsafe.Slice(r.TerrainInstancedShader.Locs, 32)
+		locsTI[0] = rl.GetShaderLocation(r.TerrainInstancedShader, "texture0")
+		locsTI[12] = rl.GetShaderLocation(r.TerrainInstancedShader, "colDiffuse")
+
+		locsP := unsafe.Slice(r.PlantShader.Locs, 32)
+		locsP[0] = rl.GetShaderLocation(r.PlantShader, "texture0")
+		locsP[12] = rl.GetShaderLocation(r.PlantShader, "colDiffuse")
+
+		locsPI := unsafe.Slice(r.PlantInstancedShader.Locs, 32)
+		locsPI[0] = rl.GetShaderLocation(r.PlantInstancedShader, "texture0")
+		locsPI[12] = rl.GetShaderLocation(r.PlantInstancedShader, "colDiffuse")
+
+		liquid.TraceDebug("WaterShader carregado com sucesso (verificar ID no console se disponivel)")
+
 		// Carregar Texturas Premium
 		r.loadTextures()
 
-		// Carregar Modelos 3D
+		// Carregar Modelos 3D (via JSON config)
 		r.loadModels()
 	}
 
+	log.Printf("[DEBUG INIT] NewRenderer() finalizado. Models3D=%d, Textures=%d", len(r.Models3D), len(r.Textures))
+
 	r.Weather = NewParticleSystem(2000)
+
+	r.PropMgr = NewPropManager()
 
 	return r
 }
 
-func (r *Renderer) loadTextures() {
-	assets := []string{"stone", "grass", "wood", "marble", "ore", "gem", "plant"}
-	for _, name := range assets {
-		path := fmt.Sprintf("assets/textures/%s.png", name)
-		tex := rl.LoadTexture(path)
-		if tex.ID != 0 {
-			rl.GenTextureMipmaps(&tex)
-			rl.SetTextureFilter(tex, rl.FilterTrilinear)
-			rl.SetTextureWrap(tex, rl.WrapRepeat)
-			r.Textures[name] = tex
-			log.Printf("[Renderer] Textura carregada: %s", path)
-		} else {
-			log.Printf("[Renderer] FALHA ao carregar textura: %s", path)
-		}
-	}
-}
+// Métodos de carga de assets movidos para assets_loader.go
 
-func (r *Renderer) loadModels() {
-	type modelEntry struct {
-		name string
-		path string
-	}
-
-	entries := []modelEntry{
-		{"shrub", "assets/models/shrub.glb"},
-		{"tree_trunk", "assets/models/TreeTrunkPillar.obj"},
-		{"tree_branches", "assets/models/TreeBranches.obj"},
-		{"tree_twigs", "assets/models/TreeTwigs.obj"},
-		{"branches", "assets/models/Branches.obj"},
-		{"mushroom", "assets/models/SAPLING.obj"},
-	}
-
-	for _, entry := range entries {
-		log.Printf("[Renderer] CARGA: Tentando '%s' de '%s'...", entry.name, entry.path)
-
-		model := rl.LoadModel(entry.path)
-		if model.MeshCount > 0 {
-			r.Models3D[entry.name] = model
-			log.Printf("[Renderer] SUCESSO: '%s' carregado", entry.name)
-		} else {
-			log.Printf("[Renderer] AVISO: '%s' falhou (sem meshes)", entry.name)
-		}
-	}
-}
-
-// HasModel verifica se já existe um modelo carregado para esta coordenada e com a mesma versão.
+// GetModelVersion verifica se já existe um modelo carregado para esta coordenada e com a mesma versão.
 func (r *Renderer) GetModelVersion(coord util.DFCoord) int64 {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -405,9 +177,7 @@ func (r *Renderer) GetModelVersion(coord util.DFCoord) int64 {
 }
 
 // UploadResult converte um resultado de meshing em um modelo Raylib GPU.
-// Deve ser chamado na thread principal (onde o contexto OpenGL é válido).
 func (r *Renderer) UploadResult(res meshing.Result) {
-	// PROTEÇÃO: Não processar se o contexto Raylib não estiver pronto
 	if !rl.IsWindowReady() {
 		return
 	}
@@ -415,7 +185,10 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Se já existe um modelo nesta posição, libera o antigo (Raylib agora pode dar free com segurança)
+	// --- INTEGRAÇÃO ECS (Ark) ---
+	// 1. Limpar entidades antigas deste chunk
+	r.cleanupChunkEntities(res.Origin)
+
 	if old, ok := r.Models[res.Origin]; ok {
 		if old.Active {
 			rl.UnloadModel(old.Model)
@@ -429,7 +202,7 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		delete(r.Models, res.Origin)
 	}
 
-	if len(res.Terreno.Vertices) == 0 && len(res.Liquidos.Vertices) == 0 && len(res.MaterialGeometries) == 0 {
+	if len(res.Terreno.Vertices) == 0 && len(res.Liquidos.Vertices) == 0 && len(res.MaterialGeometries) == 0 && len(res.ModelInstances) == 0 {
 		return
 	}
 
@@ -438,13 +211,29 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		Active:    true,
 		MTime:     res.MTime,
 		MatModels: make(map[string]rl.Model),
+		Instances: res.ModelInstances, // Keep for now, but ECS will take over rendering
 	}
 
-	// 1. Upload de geometria sem textura (Legado/Fallback)
+	// 3. Criar entidades no ECS para cada instância enviada
+	for _, inst := range res.ModelInstances {
+		r.vegMapper.NewEntity(
+			&comp.Position{X: inst.Position[0], Y: inst.Position[1], Z: inst.Position[2]},
+			&comp.Rotation{Angle: inst.Rotation},
+			&comp.Scale{Value: inst.Scale},
+			&comp.Renderable{
+				ModelName:   inst.ModelName,
+				TextureName: inst.TextureName,
+				Color:       inst.Color,
+				IsRamp:      inst.IsRamp,
+			},
+			&comp.ChunkInfo{X: res.Origin.X, Y: res.Origin.Y, Z: res.Origin.Z},
+		)
+	}
+
 	if len(res.Terreno.Vertices) > 0 {
 		mesh := r.geometryToMesh(res.Terreno)
 		rl.UploadMesh(&mesh, false)
-		r.freeMeshRAM(&mesh) // Libera RAM após upload para VRAM
+		// r.freeMeshRAM(&mesh) // DESATIVADO para permitir Raycasting (Fase 35 Fix)
 		bm.Model = rl.LoadModelFromMesh(mesh)
 		if bm.Model.MaterialCount > 0 {
 			materials := unsafe.Slice(bm.Model.Materials, bm.Model.MaterialCount)
@@ -452,19 +241,15 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		}
 	}
 
-	// 2. Upload de geometria por material (Com textura)
 	for matName, geo := range res.MaterialGeometries {
 		if len(geo.Vertices) > 0 {
 			mesh := r.geometryToMesh(geo)
 			rl.UploadMesh(&mesh, false)
-			r.freeMeshRAM(&mesh) // Libera RAM após upload para VRAM
+			// r.freeMeshRAM(&mesh) // DESATIVADO para permitir Raycasting (Fase 35 Fix)
 			model := rl.LoadModelFromMesh(mesh)
-
-			// Aplicar shader SEMPRE
 			if model.MaterialCount > 0 {
 				materials := unsafe.Slice(model.Materials, model.MaterialCount)
 				materials[0].Shader = r.TerrainShader
-				// Aplicar textura se existir
 				if tex, ok := r.Textures[matName]; ok {
 					rl.SetMaterialTexture(&materials[0], rl.MapDiffuse, tex)
 				}
@@ -473,15 +258,13 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 		}
 	}
 
-	// 3. Upload de líquidos
 	if len(res.Liquidos.Vertices) > 0 {
 		mesh := r.geometryToMesh(res.Liquidos)
 		rl.UploadMesh(&mesh, false)
-		r.freeMeshRAM(&mesh) // Libera RAM após upload para VRAM
+		// r.freeMeshRAM(&mesh) // DESATIVADO para teste (estilo terreno)
 		bm.LiquidModel = rl.LoadModelFromMesh(mesh)
 		bm.HasLiquid = true
-
-		// Associa o WaterShader ao material 0
+		liquid.TraceUpload(res.Origin.X, res.Origin.Y, res.Origin.Z, len(res.Liquidos.Vertices)/3)
 		if r.WaterShader.ID != 0 && bm.LiquidModel.MaterialCount > 0 {
 			materials := unsafe.Slice(bm.LiquidModel.Materials, bm.LiquidModel.MaterialCount)
 			materials[0].Shader = r.WaterShader
@@ -489,32 +272,45 @@ func (r *Renderer) UploadResult(res meshing.Result) {
 	}
 
 	r.Models[res.Origin] = bm
+}
 
-	// 4. Salvar instâncias de modelos 3D (arbustos, etc)
-	bm.Instances = res.ModelInstances
+func (r *Renderer) cleanupChunkEntities(origin util.DFCoord) {
+	// Filtro para encontrar todas as entidades que pertencem a este chunk
+	filter := ecs.NewFilter1[comp.ChunkInfo](&r.World)
+	query := filter.Query()
+	
+	var toRemove []ecs.Entity
+	for query.Next() {
+		cinfo := query.Get()
+		if cinfo.X == origin.X && cinfo.Y == origin.Y && cinfo.Z == origin.Z {
+			toRemove = append(toRemove, query.Entity())
+		}
+	}
+	query.Close()
 
-	// Como a função geometryToMesh copiou as fatias para o C.malloc,
-	// podemos limpar e devolver os Slices Go para o Pool reaproveitar sem afetar a GPU.
-	meshing.PutMeshBuffer(&meshing.MeshBuffer{Geometry: res.Terreno})
-	meshing.PutMeshBuffer(&meshing.MeshBuffer{Geometry: res.Liquidos})
+	for _, e := range toRemove {
+		r.World.RemoveEntity(e)
+	}
 }
 
 func (r *Renderer) geometryToMesh(data meshing.GeometryData) rl.Mesh {
 	var mesh rl.Mesh
 
+	// Se a malha usa Indices (EBO), o contagem de triângulos baseia-se nos índices
+	// Caso contrário (malhas unindexed), baseia-se nos vértices
 	vCount := int32(len(data.Vertices) / 3)
 	mesh.VertexCount = vCount
-	mesh.TriangleCount = vCount / 3
+	if len(data.Indices) > 0 {
+		mesh.TriangleCount = int32(len(data.Indices) / 3)
+	} else {
+		mesh.TriangleCount = vCount / 3
+	}
 
-	// Limpamos/Inicializamos ponteiros Explicitamente para evitar Garbage no CGO
 	mesh.Vertices = nil
 	mesh.Normals = nil
 	mesh.Colors = nil
 	mesh.Texcoords = nil
 	mesh.Indices = nil
-	mesh.AnimVertices = nil
-	mesh.AnimNormals = nil
-	mesh.Tangents = nil
 
 	if len(data.Vertices) > 0 {
 		mesh.Vertices = (*float32)(r.copyToC(unsafe.Pointer(&data.Vertices[0]), len(data.Vertices)*4))
@@ -528,23 +324,20 @@ func (r *Renderer) geometryToMesh(data meshing.GeometryData) rl.Mesh {
 	if len(data.UVs) > 0 {
 		mesh.Texcoords = (*float32)(r.copyToC(unsafe.Pointer(&data.UVs[0]), len(data.UVs)*4))
 	}
-
+	if len(data.Indices) > 0 {
+		mesh.Indices = (*uint16)(r.copyToC(unsafe.Pointer(&data.Indices[0]), len(data.Indices)*2))
+	}
 	return mesh
 }
 
-// copyToC aloca memória C e copia os dados.
 func (r *Renderer) copyToC(data unsafe.Pointer, size int) unsafe.Pointer {
 	if size <= 0 || data == nil {
 		return nil
 	}
-	// Usamos MemAlloc da Raylib para garantir compatibilidade de heap se possível,
-	// mas como raylib-go não expõe, usamos C.malloc e limpamos MANUALMENTE.
 	ptr := C.malloc(C.size_t(size))
 	if ptr == nil {
-		log.Printf("[CGO] FALHA crítica de alocação de memória (%d bytes)", size)
 		return nil
 	}
-	// Copiamos os dados de Go para C
 	cSlice := unsafe.Slice((*byte)(ptr), size)
 	goSlice := unsafe.Slice((*byte)(data), size)
 	copy(cSlice, goSlice)
@@ -569,13 +362,29 @@ func (r *Renderer) freeMeshRAM(mesh *rl.Mesh) {
 		C.free(unsafe.Pointer(mesh.Texcoords))
 		mesh.Texcoords = nil
 	}
+	if mesh.Indices != nil {
+		C.free(unsafe.Pointer(mesh.Indices))
+		mesh.Indices = nil
+	}
 }
 
 // Draw renderiza os blocos que estão dentro do raio de visão da câmera.
 // Blocos no focusZ ignoram o culling de distância horizontal para manter o chão sempre visível.
-func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
+func (r *Renderer) Draw(camera3d rl.Camera3D, focusZ int32) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
+	// Desabilitar backface culling: No sistema de níveis, faces devem ser visíveis de todos os ângulos.
+	// O winding (0,2,1)+(0,3,2) faz algumas faces apontarem "para dentro", e o culling as descartaria
+	// quando vistas "por trás". Desabilitando, garantimos visibilidade total.
+	rl.DisableBackfaceCulling()
+
+	camPos := camera3d.Position
+
+	if r.debugInstCount == 0 {
+		log.Printf("[DEBUG DRAW] Primeiro Draw(). Models3D=%d, Models=%d, r=%p, focusZ=%d, camPos=(%.1f,%.1f,%.1f)",
+			len(r.Models3D), len(r.Models), r, focusZ, camPos.X, camPos.Y, camPos.Z)
+	}
 
 	// Update da variavel global de tempo nos shaders
 	timeVal := float32(rl.GetTime())
@@ -584,7 +393,7 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 		rl.SetShaderValue(r.WaterShader, r.waterCamPosLoc, []float32{camPos.X, camPos.Y, camPos.Z}, rl.ShaderUniformVec3)
 	}
 	if r.PlantShader.ID != 0 {
-		rl.SetShaderValue(r.PlantShader, r.plantTimeLoc, []float32{0.0}, rl.ShaderUniformFloat)
+		rl.SetShaderValue(r.PlantShader, r.plantTimeLoc, []float32{timeVal}, rl.ShaderUniformFloat)
 	}
 	if r.TerrainShader.ID != 0 {
 		rl.SetShaderValue(r.TerrainShader, r.terrainTimeLoc, []float32{timeVal}, rl.ShaderUniformFloat)
@@ -596,121 +405,166 @@ func (r *Renderer) Draw(camPos rl.Vector3, focusZ int32) {
 	// Isso evita o efeito de "neblina preta" mas protege a CPU de milhares de draw calls inúteis.
 	const viewRadiusSq = 120.0 * 120.0
 
+	// PASS 1: TERRENO
 	for _, bm := range r.Models {
 		if !bm.Active {
 			continue
 		}
-
-		// DISTANCE CULLING: Só desenha se estiver perto do raio de visão ou se for o Z-level atual
-		distSq := util.DistSq(camPos, rl.Vector3{X: float32(bm.Origin.X), Y: camPos.Y, Z: float32(-bm.Origin.Y)})
-		if bm.Origin.Z != focusZ && distSq > viewRadiusSq {
+		// Z-Slicing (Estilo Timberborn): Ocultar tudo o que está acima do nível focado
+		if bm.Origin.Z > focusZ {
 			continue
 		}
 
-		// Desenha modelo padrão
-		if bm.Model.MeshCount > 0 {
-			rl.DrawModel(bm.Model, rl.Vector3{X: 0, Y: 0, Z: 0}, 1.0, rl.White)
+		// Culling Vertical de Terreno: Relaxado para ver buracos profundos
+		diffZ := util.Abs(bm.Origin.Z - focusZ)
+		if diffZ > 64 {
+			continue
 		}
-		// Desenha modelos texturizados
+
+		// DEBUG: Ignorar culling de distância por enquanto
+		// distSq := util.DistSq(camPos, rl.Vector3{X: float32(bm.Origin.X), Y: camPos.Y, Z: float32(-bm.Origin.Y)})
+		// if bm.Origin.Z != focusZ && distSq > viewRadiusSq {
+		// 	continue
+		// }
+
+		if bm.Model.MeshCount > 0 {
+			rl.DrawModel(bm.Model, rl.Vector3{0, 0, 0}, 1.0, rl.White)
+		}
 		for _, m := range bm.MatModels {
 			if m.MeshCount > 0 {
-				rl.DrawModel(m, rl.Vector3{X: 0, Y: 0, Z: 0}, 1.0, rl.White)
+				rl.DrawModel(m, rl.Vector3{0, 0, 0}, 1.0, rl.White)
 			}
 		}
 	}
 
-	// ====== PASS 1.5: VEGETAÇÃO (ARBUSTOS, ÁRVORES) ======
-	// Desenhada APÓS todo o terreno, com depth write OFF para evitar Z-fighting
-	// entre polígonos sobrepostos de folhas. O depth TEST continua ativo.
-	rl.DisableDepthMask()
-	for _, bm := range r.Models {
-		if !bm.Active || len(bm.Instances) == 0 {
+	// PASS 1.5: VEGETACAO E RAMPAS (ECS - Ark + GPU INSTANCING)
+	r.PropMgr.Clear()
+	const instViewRadiusSq = 150.0 * 150.0
+
+	// Usamos o Query do ECS para encontrar tudo que precisa ser desenhado
+	query := r.queryPlants.Query()
+	instanceCount := 0
+	for query.Next() {
+		posComp, rendComp, rotComp, scaleComp := query.Get()
+		instanceCount++
+
+		// Culling de distância
+		pos := rl.Vector3{X: posComp.X, Y: posComp.Y, Z: posComp.Z}
+		if util.DistSq(camPos, pos) > instViewRadiusSq {
 			continue
 		}
 
-		// Mesma verificação de distância para instâncias (árvores/folhas)
-		distSq := util.DistSq(camPos, rl.Vector3{X: float32(bm.Origin.X), Y: camPos.Y, Z: float32(-bm.Origin.Y)})
-		if bm.Origin.Z != focusZ && distSq > viewRadiusSq {
+		// Z-Slicing (Baseado na posição Y do mundo, que é o Z do DF)
+		if int32(posComp.Y) > focusZ {
 			continue
 		}
 
-		for _, inst := range bm.Instances {
-			if model3d, ok := r.Models3D[inst.ModelName]; ok {
-				pos := rl.Vector3{X: inst.Position[0], Y: inst.Position[1], Z: inst.Position[2]}
-				tintColor := rl.NewColor(inst.Color[0], inst.Color[1], inst.Color[2], 255)
+		model3d, ok := r.Models3D[rendComp.ModelName]
+		if !ok {
+			continue
+		}
+		if model3d.MeshCount == 0 {
+			continue
+		}
 
-				// Otimização: Skip se a instância estiver longe demais individualmente
-				// (Opcional, o culling por bloco acima já resolve 90% do problema)
+		// Preparamos o material e shader (Simplificado por enquanto como no código original)
+		material := unsafe.Slice(model3d.Materials, model3d.MaterialCount)[0]
+		shader := r.TerrainInstancedShader
+		if isPlantModel(rendComp.ModelName) && !rendComp.IsRamp && r.PlantInstancedShader.ID != 0 {
+			shader = r.PlantInstancedShader
+		}
+		material.Shader = shader
 
-				// Aplica a textura e o shader ao material
-				if model3d.MaterialCount > 0 {
-					materials := unsafe.Slice(model3d.Materials, model3d.MaterialCount)
+		if rendComp.TextureName != "" {
+			if tex, ok := r.Textures[rendComp.TextureName]; ok {
+				rl.SetMaterialTexture(&material, rl.MapDiffuse, tex)
+			}
+		}
 
-					// Escolhe o shader correto: PlantShader para vegetação, TerrainShader para rampas/outros
-					shader := r.TerrainShader
-					if inst.ModelName == "shrub" || inst.ModelName == "tree_trunk" || inst.ModelName == "tree_branches" || inst.ModelName == "tree_twigs" || inst.ModelName == "branches" || inst.ModelName == "mushroom" {
-						shader = r.PlantShader
-					}
-
-					materials[0].Shader = shader
-
-					if inst.TextureName != "" {
-						if tex, ok := r.Textures[inst.TextureName]; ok {
-							rl.SetMaterialTexture(&materials[0], rl.MapDiffuse, tex)
-						}
-					}
+		// Se for rampa, desenhamos direto para teste de visibilidade (Fase 45)
+		if rendComp.IsRamp {
+			// Usar ModelShader dedicado para rampas (Fase 51)
+			materials := unsafe.Slice(model3d.Materials, model3d.MaterialCount)
+			if rendComp.TextureName != "" {
+				if tex, ok := r.Textures[rendComp.TextureName]; ok {
+					rl.SetMaterialTexture(&materials[0], rl.MapDiffuse, tex)
 				}
-
-				// O DrawModelEx aceita uma rotação (eixo Y), escala e cor (tint).
-				rl.DrawModelEx(model3d, pos, rl.Vector3{X: 0, Y: 1, Z: 0}, inst.Rotation, rl.Vector3{X: inst.Scale, Y: inst.Scale, Z: inst.Scale}, tintColor)
 			}
-		}
-	}
-	rl.EnableDepthMask()
-
-	// ====== PASS 2: GEOMETRIA TRANSLÚCIDA (ÁGUA E MAGMA) ======
-	rl.BeginBlendMode(rl.BlendAlpha)
-	for _, bm := range r.Models {
-		if !bm.Active {
+			materials[0].Shader = r.ModelShader
+			
+			// Escala Gold Standard (0.5/0.3/0.5)
+			c := rl.Color{R: rendComp.Color[0], G: rendComp.Color[1], B: rendComp.Color[2], A: rendComp.Color[3]}
+			rl.DrawModelEx(model3d, pos, rl.Vector3{X: 0, Y: 1, Z: 0}, rotComp.Angle, rl.Vector3{X: scaleComp.Value, Y: scaleComp.Value, Z: scaleComp.Value}, c)
 			continue
 		}
-		if bm.HasLiquid {
-			rl.DrawModel(bm.LiquidModel, rl.Vector3{X: 0, Y: 0, Z: 0}, 1.0, rl.White)
+
+		// Adiciona cada mesh do modelo à fila de instancing
+		meshes := unsafe.Slice(model3d.Meshes, model3d.MeshCount)
+		for i := 0; i < int(model3d.MeshCount); i++ {
+			meshMaterial := material
+			if int32(i) < model3d.MaterialCount {
+				meshMaterial = unsafe.Slice(model3d.Materials, model3d.MaterialCount)[i]
+				meshMaterial.Shader = material.Shader
+			}
+			
+			r.PropMgr.AddInstanceFromECS(posComp, rendComp, rotComp.Angle, scaleComp.Value, meshes[i], meshMaterial, i)
 		}
+	}
+	query.Close()
+
+	if instanceCount > 0 && r.debugInstCount % 60 == 0 {
+		log.Printf("[RENDERER-ECS] Desenhando %d instâncias de vegetação...", instanceCount)
+	}
+	r.debugInstCount++
+
+	// Desenha tudo em lotes otimizados (1 draw call por tipo)
+	r.PropMgr.DrawAll(camera3d)
+
+	// PASS 2: LIQUIDOS
+	rl.BeginBlendMode(rl.BlendAlpha)
+	// Enviar uniformes globais para a água uma vez por frame
+	if r.WaterShader.ID != 0 {
+		rl.SetShaderValue(r.WaterShader, r.waterTimeLoc, []float32{float32(rl.GetTime())}, rl.ShaderUniformFloat)
+		rl.SetShaderValue(r.WaterShader, r.waterCamPosLoc, []float32{camera3d.Position.X, camera3d.Position.Y, camera3d.Position.Z}, rl.ShaderUniformVec3)
+	}
+	for origin, bm := range r.Models {
+		if !bm.Active || !bm.HasLiquid {
+			continue
+		}
+
+		// Z-Slicing para Líquidos
+		if origin.Z > focusZ {
+			continue
+		}
+		liquid.TraceDraw(origin.X, origin.Y, origin.Z)
+		rl.DrawModel(bm.LiquidModel, rl.Vector3{X: 0, Y: 0, Z: 0}, 1.0, rl.White)
 	}
 	rl.EndBlendMode()
 
-	// ====== PASS 3: EFEITOS CLIMÁTICOS (NEVE/CHUVA) ======
+	// PASS 3: CLIMA
 	if r.Weather != nil {
 		r.Weather.Update(rl.GetFrameTime(), camPos)
 		r.Weather.Draw()
 	}
 }
 
-// Purge desativado para Unlimited Vision
-func (r *Renderer) Purge(center util.DFCoord, radius float32) {
-	// r.mu.Lock()
-	// defer r.mu.Unlock()
-	// ... purga removida ...
-}
+func (r *Renderer) Purge(center util.DFCoord, radius float32) {}
 
-// ProcessPurge executa a remoção física de modelos da GPU de forma limitada.
 func (r *Renderer) ProcessPurge() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	// Remove no máximo 2 modelos por frame para evitar travadas
 	limit := 2
 	if len(r.purgeQueue) < limit {
 		limit = len(r.purgeQueue)
 	}
-
 	for i := 0; i < limit; i++ {
 		coord := r.purgeQueue[0]
 		r.purgeQueue = r.purgeQueue[1:]
-
 		if bm, ok := r.Models[coord]; ok {
 			rl.UnloadModel(bm.Model)
+			for _, m := range bm.MatModels {
+				rl.UnloadModel(m)
+			}
 			if bm.HasLiquid {
 				rl.UnloadModel(bm.LiquidModel)
 			}
@@ -719,16 +573,116 @@ func (r *Renderer) ProcessPurge() {
 	}
 }
 
-// Unload libera todos os recursos de GPU.
 func (r *Renderer) Unload() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
 	for _, bm := range r.Models {
 		rl.UnloadModel(bm.Model)
+		for _, m := range bm.MatModels {
+			rl.UnloadModel(m)
+		}
 		if bm.HasLiquid {
 			rl.UnloadModel(bm.LiquidModel)
 		}
 	}
 	r.Models = make(map[util.DFCoord]*BlockModel)
+}
+
+// GetRayCollision verifica qual bloco do terreno foi atingido pelo raio do mouse.
+func (r *Renderer) GetRayCollision(ray rl.Ray) (util.DFCoord, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	log.Printf("[Renderer] GetRayCollision iniciado. Testando contra %d modelos de chunks", len(r.Models))
+	var closestDist float32 = 1000000.0
+	var hit bool
+	var hitPos rl.Vector3
+
+	for _, bm := range r.Models {
+		if !bm.Active {
+			continue
+		}
+
+		// Testamos contra o modelo principal de terreno (várias meshes)
+		if bm.Model.MeshCount > 0 {
+			meshes := unsafe.Slice(bm.Model.Meshes, bm.Model.MeshCount)
+			for i := int32(0); i < bm.Model.MeshCount; i++ {
+				collision := rl.GetRayCollisionMesh(ray, meshes[i], bm.Model.Transform)
+				if collision.Hit && collision.Distance < closestDist {
+					closestDist = collision.Distance
+					hitPos = collision.Point
+					hit = true
+				}
+			}
+		}
+
+		// Testamos contra os modelos de materiais
+		for _, m := range bm.MatModels {
+			if m.MeshCount > 0 {
+				meshes := unsafe.Slice(m.Meshes, m.MeshCount)
+				for i := int32(0); i < m.MeshCount; i++ {
+					collision := rl.GetRayCollisionMesh(ray, meshes[i], m.Transform)
+					if collision.Hit && collision.Distance < closestDist {
+						closestDist = collision.Distance
+						hitPos = collision.Point
+						hit = true
+					}
+				}
+			}
+		}
+
+		// NOVO: Testamos contra Props e Rampas (Instâncias)
+		for _, inst := range bm.Instances {
+			// Pegamos o modelo correspondente (Rampa ou Prop)
+			model, ok := r.Models3D[inst.ModelName]
+			if !ok {
+				continue
+			}
+
+			// Geramos a matriz de transformação da mesma forma que o PropManager
+			// (Nota: Isso garante que o teste de colisão seja feito na posição exata onde o modelo é desenhado)
+			scaleMat := rl.MatrixScale(inst.Scale, inst.Scale, inst.Scale)
+			rotMat := rl.MatrixRotateY(inst.Rotation * (math.Pi / 180.0))
+			transMat := rl.MatrixTranslate(inst.Position[0], inst.Position[1], inst.Position[2])
+			matrix := rl.MatrixMultiply(rl.MatrixMultiply(transMat, rotMat), scaleMat)
+
+			if model.MeshCount > 0 {
+				meshes := unsafe.Slice(model.Meshes, model.MeshCount)
+				for i := int32(0); i < model.MeshCount; i++ {
+					// Testamos contra cada mesh do modelo 3D usando a matriz da instância específica
+					collision := rl.GetRayCollisionMesh(ray, meshes[i], matrix)
+					if collision.Hit && collision.Distance < closestDist {
+						closestDist = collision.Distance
+						hitPos = collision.Point
+						hit = true
+					}
+				}
+			}
+		}
+	}
+
+	if hit {
+		dir := rl.Vector3Normalize(ray.Direction)
+		hitPos.X += dir.X * 0.01
+		hitPos.Y += dir.Y * 0.01
+		hitPos.Z += dir.Z * 0.01
+
+		return util.WorldToDFCoord(hitPos), true
+	}
+
+	return util.DFCoord{}, false
+}
+
+// DrawSelection desenha um cubo de destaque no bloco selecionado.
+func (r *Renderer) DrawSelection(coord util.DFCoord) {
+	pos := util.DFToWorldCenter(coord)
+	// Ajustamos para o centro vertical do bloco (DF Z + 0.5)
+	pos.Y += 0.5
+	rl.DrawCubeWires(pos, 1.01, 1.01, 1.01, rl.Yellow)
+}
+
+func isPlantModel(modelName string) bool {
+	return modelName == "shrub" || modelName == "tree_body" || modelName == "tree_trunk" ||
+		modelName == "tree_branches" || modelName == "tree_twigs" || modelName == "branches" ||
+		modelName == "mushroom" || modelName == "sapling" || (len(modelName) > 12 && modelName[:12] == "tree_branch_")
 }
