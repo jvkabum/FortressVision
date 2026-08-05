@@ -75,3 +75,41 @@ func TestIsolatedUndesignatedVoidGetsAVisualSupport(t *testing.T) {
 		t.Fatal("designated channel must remain an open void")
 	}
 }
+
+func TestBoulderAndPebblesIncludeFloorBase(t *testing.T) {
+	store := mapdata.NewMapDataStore()
+	store.Tiletypes[1] = dfproto.Tiletype{ID: 1, Shape: dfproto.ShapeBoulder, Material: dfproto.TilematStone}
+	store.Tiletypes[2] = dfproto.Tiletype{ID: 2, Shape: dfproto.ShapePebbles, Material: dfproto.TilematStone}
+
+	for _, tileType := range []int32{1, 2} {
+		chunk := &mapdata.Chunk{Origin: util.DFCoord{}}
+		tile := mapdata.NewTile(store, util.DFCoord{})
+		tile.TileType = tileType
+		chunk.Tiles[0][0] = tile
+
+		mesh := GenerateChunkMesh(chunk)
+		main := mesh.SubMeshes[0]
+		if main == nil || len(main.Vertices) < 4 {
+			t.Fatalf("shape %d did not produce a floor base", tileType)
+		}
+	}
+}
+
+func TestRampTopAndVegetationIncludeFloorBase(t *testing.T) {
+	store := mapdata.NewMapDataStore()
+	store.Tiletypes[1] = dfproto.Tiletype{ID: 1, Shape: dfproto.ShapeRampTop, Material: dfproto.TilematStone}
+	store.Tiletypes[2] = dfproto.Tiletype{ID: 2, Shape: dfproto.ShapeTreeShape, Material: dfproto.TilematTreeMaterial}
+
+	for _, tileType := range []int32{1, 2} {
+		chunk := &mapdata.Chunk{Origin: util.DFCoord{}}
+		tile := mapdata.NewTile(store, util.DFCoord{})
+		tile.TileType = tileType
+		chunk.Tiles[0][0] = tile
+
+		mesh := GenerateChunkMesh(chunk)
+		main := mesh.SubMeshes[0]
+		if main == nil || len(main.Vertices) < 4 {
+			t.Fatalf("shape %d did not produce a floor base", tileType)
+		}
+	}
+}

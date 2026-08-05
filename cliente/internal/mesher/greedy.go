@@ -462,6 +462,7 @@ func meshSpecials(chunk *mapdata.Chunk, md *MeshData) {
 			fy := matrix.Float(y)
 			if isVegetationShape(shape) {
 				if shouldRenderVegetationShape(shape) {
+					meshSpecialBase(md, fx, fy, specialGroundColor(chunk, x, y, color))
 					meshVegetationTile(md, shape, fx, fy, color)
 				}
 				continue
@@ -472,10 +473,18 @@ func meshSpecials(chunk *mapdata.Chunk, md *MeshData) {
 			// externo. Gerá-los aqui mantém a silhueta 3D e evita z-fighting.
 			switch shape {
 			case dfproto.ShapeBoulder:
+				meshSpecialBase(md, fx, fy, color)
 				meshBoulder(md, fx, fy, color)
 				continue
 			case dfproto.ShapePebbles:
+				meshSpecialBase(md, fx, fy, color)
 				meshPebbles(md, fx, fy, color)
+				continue
+			case dfproto.ShapeRampTop:
+				// O topo da rampa é um tile de piso plano. Sem este caso,
+				// ele passava pelo greedy e pelo mesher de rampas sem gerar
+				// geometria, deixando um quadrado vazio.
+				meshSpecialBase(md, fx, fy, color)
 				continue
 			case dfproto.ShapeEndlessPit:
 				meshEndlessPit(md, fx, fy, color)
@@ -552,6 +561,32 @@ func meshSpecials(chunk *mapdata.Chunk, md *MeshData) {
 			}
 		}
 	}
+}
+
+// meshSpecialBase mantém o piso visível sob pedregulhos e pedras. Esses
+// shapes são especiais e não passam pelo greedy; sem esta tampa, a geometria
+// da pedra ficava sobre o fundo do mundo e parecia um buraco quadrado.
+func meshSpecialBase(md *MeshData, fx, fy matrix.Float, color matrix.Color) {
+	md.AddQuad(
+		rendering.Vertex{Position: matrix.NewVec3(fx, voxelTopY, -fy), Normal: matrix.Vec3Up(), Color: color},
+		rendering.Vertex{Position: matrix.NewVec3(fx+1, voxelTopY, -fy), Normal: matrix.Vec3Up(), Color: color},
+		rendering.Vertex{Position: matrix.NewVec3(fx+1, voxelTopY, -(fy + 1)), Normal: matrix.Vec3Up(), Color: color},
+		rendering.Vertex{Position: matrix.NewVec3(fx, voxelTopY, -(fy + 1)), Normal: matrix.Vec3Up(), Color: color},
+	)
+}
+
+func specialGroundColor(chunk *mapdata.Chunk, x, y int, fallback matrix.Color) matrix.Color {
+	for _, offset := range [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+		nx, ny := x+offset[0], y+offset[1]
+		if nx < 0 || nx >= 16 || ny < 0 || ny >= 16 {
+			continue
+		}
+		neighbor := chunk.Tiles[nx][ny]
+		if isSolidSupportTile(neighbor) && !isVegetationShape(neighbor.Shape()) {
+			return getTileColor(neighbor)
+		}
+	}
+	return fallback
 }
 
 // meshBoulder cria uma rocha facetada, pequena o bastante para ficar dentro
