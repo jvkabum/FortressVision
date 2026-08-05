@@ -33,6 +33,11 @@ func (s *SyncManager) Update() {
 	if s.cam == nil || s.world == nil || s.net == nil {
 		return
 	}
+	// A primeira atualização pode ocorrer antes do handshake WebSocket.
+	// Só avance lastPos depois que a conexão estiver ativa.
+	if !s.net.IsConnected() {
+		return
+	}
 
 	// Converter posição de foco da câmera para coordenadas DF
 	// Kaiju(X, Y, Z) -> DF(X, Z, -Y) -> util.DFCoord
@@ -45,7 +50,12 @@ func (s *SyncManager) Update() {
 	// Só solicita se o foco da câmera mudou de bloco
 	if dfCoord.X != s.lastPos.X || dfCoord.Y != s.lastPos.Y || dfCoord.Z != s.lastPos.Z {
 		fmt.Printf("[SyncManager] 🛰️ Solicitando região para DF%v (Raio:%d)\n", dfCoord, s.cfg.DrawRangeSide)
-		s.world.RequestRegion(s.net.Send, dfCoord, s.cfg.DrawRangeSide)
+		// DrawRangeSide is configured in chunks; the region API uses tiles.
+		radiusTiles := s.cfg.DrawRangeSide * util.BlockSize
+		if radiusTiles < util.BlockSize {
+			radiusTiles = util.BlockSize
+		}
+		s.world.RequestRegion(s.net.Send, dfCoord, radiusTiles)
 		s.lastPos = dfCoord
 	}
 }

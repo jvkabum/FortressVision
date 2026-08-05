@@ -53,10 +53,14 @@ func (tr *TerrainRenderer) onMeshGenerated(mesh *mesher.ChunkMesh) {
 
 		// 2. Gerar nova chave única para este chunk (Evita conflitos de driver)
 		newMeshKey := fmt.Sprintf("chunk_%s_%d", key, time.Now().UnixNano())
-		
+
 		// 3. Criar e armazenar novos desenhos
 		newDraws := CreateChunkDrawings(tr.host, mesh, newMeshKey)
 		tr.activeDrawings[key] = newDraws
+
+		// Drawings são persistentes na Kaiju. Registrar a malha aqui uma única
+		// vez evita acumular uma nova instância do mesmo chunk a cada frame.
+		tr.host.Drawings.AddDrawings(newDraws)
 
 		// 4. Limpeza do Cache de Malhas da GPU (Soft Handover)
 		if oldKey, ok := tr.activeMeshKeys[key]; ok {
@@ -66,15 +70,7 @@ func (tr *TerrainRenderer) onMeshGenerated(mesh *mesher.ChunkMesh) {
 	})
 }
 
-// Render submete todos os desenhos ativos para o pipeline da KaijuEngine.
-// Deve ser chamado dentro do loop AddUpdate principal.
+// Render mantém a API do controlador; os desenhos já são registrados quando a
+// malha termina de ser gerada e permanecem persistentes na KaijuEngine.
 func (tr *TerrainRenderer) Render() {
-	tr.mu.Lock()
-	defer tr.mu.Unlock()
-
-	for _, draws := range tr.activeDrawings {
-		for _, d := range draws {
-			tr.host.Drawings.AddDrawing(d)
-		}
-	}
 }
