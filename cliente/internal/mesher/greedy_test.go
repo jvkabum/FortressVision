@@ -35,3 +35,43 @@ func TestIsolatedFloorHasExternalFaces(t *testing.T) {
 		t.Fatalf("isolated floor indices = %d, want %d", got, want)
 	}
 }
+
+func TestVegetationRenderingKeepsTreesAndShrubsButHidesLooseDetails(t *testing.T) {
+	if !shouldRenderVegetationShape(dfproto.ShapeTrunkBranch) {
+		t.Fatal("tree trunks should be enabled")
+	}
+	for _, shape := range []dfproto.TiletypeShape{dfproto.ShapeTreeShape, dfproto.ShapeSapling, dfproto.ShapeShrub} {
+		if !shouldRenderVegetationShape(shape) {
+			t.Fatalf("vegetation shape %v should be enabled", shape)
+		}
+	}
+	for _, shape := range []dfproto.TiletypeShape{dfproto.ShapeBranch, dfproto.ShapeTwig} {
+		if shouldRenderVegetationShape(shape) {
+			t.Fatalf("vegetation shape %v should remain disabled", shape)
+		}
+	}
+}
+
+func TestIsolatedUndesignatedVoidGetsAVisualSupport(t *testing.T) {
+	store := mapdata.NewMapDataStore()
+	store.Tiletypes[1] = dfproto.Tiletype{ID: 1, Shape: dfproto.ShapeFloor}
+	store.Tiletypes[2] = dfproto.Tiletype{ID: 2, Shape: dfproto.ShapeEmpty}
+	chunk := &mapdata.Chunk{Origin: util.DFCoord{}}
+	for x := 0; x < 3; x++ {
+		for y := 0; y < 3; y++ {
+			tile := mapdata.NewTile(store, util.DFCoord{X: int32(x), Y: int32(y)})
+			tile.TileType = 1
+			chunk.Tiles[x][y] = tile
+		}
+	}
+	center := chunk.Tiles[1][1]
+	center.TileType = 2
+
+	if !shouldPatchIsolatedVoid(chunk, 1, 1) {
+		t.Fatal("isolated undesignated void should receive a visual support")
+	}
+	center.DigDesignation = dfproto.DigChannel
+	if shouldPatchIsolatedVoid(chunk, 1, 1) {
+		t.Fatal("designated channel must remain an open void")
+	}
+}

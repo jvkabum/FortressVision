@@ -747,6 +747,12 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 	}
 
 	for _, item := range snapshot.Items {
+		if !itemHasSolidSupport(snapshot, origin, item.Pos) {
+			// O DFHack pode devolver itens em células de ar enquanto o chunk
+			// vizinho ainda está chegando. Não desenhar nesse caso evita itens
+			// flutuando sobre os vazios do mapa.
+			continue
+		}
 		itemKind := itemMeshKind(item)
 		key := fmt.Sprintf("item:%d:%s", item.ID, itemKind)
 		seen[key] = struct{}{}
@@ -988,6 +994,49 @@ func itemDimensions(item dfproto.Item) (matrix.Float, matrix.Float) {
 		}
 	}
 	return size, stackHeight
+}
+
+func itemHasSolidSupport(snapshot mapdata.ChunkSnapshot, origin util.DFCoord, pos dfproto.Coord) bool {
+	localX := int(pos.X - origin.X)
+	localY := int(pos.Y - origin.Y)
+	if pos.Z != origin.Z || localX < 0 || localX >= 16 || localY < 0 || localY >= 16 {
+		return false
+	}
+	if !snapshot.TilePresent[localX][localY] {
+		return false
+	}
+
+	shape := snapshot.Tiles[localX][localY].Shape()
+	switch shape {
+	case dfproto.ShapeNoShape, dfproto.ShapeEmpty:
+		tile := snapshot.Tiles[localX][localY]
+		if tile.DigDesignation != dfproto.DigNone || tile.DigMarker || tile.DigAuto || tile.WaterLevel > 0 || tile.MagmaLevel > 0 {
+			return false
+		}
+		return snapshotHasSolidNeighbors(snapshot, localX, localY)
+	case dfproto.ShapeEndlessPit:
+		return false
+	default:
+		return true
+	}
+}
+
+func snapshotHasSolidNeighbors(snapshot mapdata.ChunkSnapshot, x, y int) bool {
+	solidNeighbors := 0
+	for _, offset := range [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+		nx, ny := x+offset[0], y+offset[1]
+		if nx < 0 || nx >= 16 || ny < 0 || ny >= 16 || !snapshot.TilePresent[nx][ny] {
+			continue
+		}
+		shape := snapshot.Tiles[nx][ny].Shape()
+		switch shape {
+		case dfproto.ShapeNoShape, dfproto.ShapeEmpty, dfproto.ShapeEndlessPit:
+			continue
+		default:
+			solidNeighbors++
+		}
+	}
+	return solidNeighbors >= 3
 }
 
 // itemVisualScale traduz dados físicos do RemoteFortressReader em uma forma

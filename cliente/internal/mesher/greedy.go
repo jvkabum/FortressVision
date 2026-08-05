@@ -21,15 +21,35 @@ func materialKey(pair dfproto.MatPair) int32 {
 	return ((pair.MatType + 1) << indexBits) | (pair.MatIndex + 1)
 }
 
-// renderVegetation fica desligado temporariamente para remover árvores,
-// copas, galhos e folhas do cliente durante a investigação dos travamentos.
+// renderVegetation controla os detalhes pequenos de vegetação (galhos,
+// gravetos e folhas soltas). Árvores e arbustos têm chaves próprias para
+// poderem aparecer sem reativar todos esses detalhes de uma vez.
 const renderVegetation = false
+const renderTreeTrunks = true
+const renderTreeCanopies = true
+const renderShrubs = true
 
 func isVegetationShape(shape dfproto.TiletypeShape) bool {
 	switch shape {
 	case dfproto.ShapeTreeShape, dfproto.ShapeSapling, dfproto.ShapeShrub,
 		dfproto.ShapeBranch, dfproto.ShapeTrunkBranch, dfproto.ShapeTwig:
 		return true
+	default:
+		return false
+	}
+}
+
+func shouldRenderVegetationShape(shape dfproto.TiletypeShape) bool {
+	if renderVegetation {
+		return true
+	}
+	switch shape {
+	case dfproto.ShapeTrunkBranch:
+		return renderTreeTrunks
+	case dfproto.ShapeTreeShape:
+		return renderTreeCanopies
+	case dfproto.ShapeSapling, dfproto.ShapeShrub:
+		return renderShrubs
 	default:
 		return false
 	}
@@ -52,6 +72,10 @@ func isVegetationTile(tile *mapdata.Tile) bool {
 	default:
 		return false
 	}
+}
+
+func vegetationSuppressed(tile *mapdata.Tile) bool {
+	return isVegetationTile(tile) && !shouldRenderVegetationShape(tile.Shape())
 }
 
 // getTileColor usa as cores reais recebidas do DFHack. O fallback cinza é
@@ -163,7 +187,7 @@ func shouldDrawFace(chunk *mapdata.Chunk, x, y int, dx, dy int, isFloor bool) bo
 	if shape == dfproto.ShapeNoShape {
 		return true
 	}
-	if !renderVegetation && isVegetationTile(neighbor) {
+	if vegetationSuppressed(neighbor) {
 		return true
 	}
 
@@ -183,6 +207,59 @@ func shouldDrawFace(chunk *mapdata.Chunk, x, y int, dx, dy int, isFloor bool) bo
 	return true
 }
 
+func isSolidSupportTile(tile *mapdata.Tile) bool {
+	if tile == nil || tile.Hidden {
+		return false
+	}
+	switch tile.Shape() {
+	case dfproto.ShapeNoShape, dfproto.ShapeEmpty, dfproto.ShapeEndlessPit:
+		return false
+	case dfproto.ShapeRampTop, dfproto.ShapeStairUp, dfproto.ShapeStairDown, dfproto.ShapeStairUpDown:
+		return true
+	default:
+		return tile.IsFloor() || tile.IsWall()
+	}
+}
+
+func shouldPatchIsolatedVoid(chunk *mapdata.Chunk, x, y int) bool {
+	tile := chunk.Tiles[x][y]
+	if tile == nil || tile.Hidden {
+		return false
+	}
+	shape := tile.Shape()
+	if shape != dfproto.ShapeNoShape && shape != dfproto.ShapeEmpty {
+		return false
+	}
+	if tile.DigDesignation != dfproto.DigNone || tile.DigMarker || tile.DigAuto || tile.WaterLevel > 0 || tile.MagmaLevel > 0 {
+		return false
+	}
+
+	solidNeighbors := 0
+	for _, offset := range [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+		nx, ny := x+offset[0], y+offset[1]
+		if nx < 0 || nx >= 16 || ny < 0 || ny >= 16 {
+			continue
+		}
+		if isSolidSupportTile(chunk.Tiles[nx][ny]) {
+			solidNeighbors++
+		}
+	}
+	return solidNeighbors >= 3
+}
+
+func fallbackVoidMaterial(chunk *mapdata.Chunk, x, y int) dfproto.MatPair {
+	for _, offset := range [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+		nx, ny := x+offset[0], y+offset[1]
+		if nx < 0 || nx >= 16 || ny < 0 || ny >= 16 {
+			continue
+		}
+		if neighbor := chunk.Tiles[nx][ny]; isSolidSupportTile(neighbor) {
+			return neighbor.Material
+		}
+	}
+	return dfproto.MatPair{}
+}
+
 func meshGreedy2D(chunk *mapdata.Chunk, md *MeshData) {
 	// Máscaras paramétricas dimensionais para: 0=Top, 1=East, 2=West, 3=South, 4=North
 	var masks [5][16][16]int32
@@ -197,19 +274,40 @@ func meshGreedy2D(chunk *mapdata.Chunk, md *MeshData) {
 			}
 			if tile == nil || tile.Hidden || shape == dfproto.ShapeRamp ||
 				shape == dfproto.ShapeBoulder || shape == dfproto.ShapePebbles ||
-				(!renderVegetation && isVegetationTile(tile)) {
+				vegetationSuppressed(tile) {
+				continue
+			}
+			patchedVoid := shouldPatchIsolatedVoid(chunk, x, y)
+			if (shape == dfproto.ShapeNoShape || shape == dfproto.ShapeEmpty) && !patchedVoid {
 				continue
 			}
 
 			isWall := tile.IsWall()
-			isFloor := tile.IsFloor()
+			isFloor := tile.IsFloor() || patchedVoid
 			if !isWall && !isFloor {
 				continue
 			}
 
 			// Valor de material ajustado +1 (porque 0 significa ignorar quad)
-			matVal := materialKey(tile.Material)
-			colors[matVal] = getTileColor(tile)
+			material := tile.Material
+			if patchedVoid {
+				material = fallbackVoidMaterial(chunk, x, y)
+			}
+			matVal := materialKey(material)
+			if patchedVoid {
+				colors[matVal] = getTileColor(chunk.Tiles[x][y])
+				for _, offset := range [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+					nx, ny := x+offset[0], y+offset[1]
+					if nx >= 0 && nx < 16 && ny >= 0 && ny < 16 {
+						if neighbor := chunk.Tiles[nx][ny]; isSolidSupportTile(neighbor) {
+							colors[matVal] = getTileColor(neighbor)
+							break
+						}
+					}
+				}
+			} else {
+				colors[matVal] = getTileColor(tile)
+			}
 
 			// 0 = Topo (Pisos/Sólidos SEMPRE desenham a rampa de teto/topo porque fatiamos por camada e a visão topdown exige)
 			masks[0][x][y] = matVal
@@ -353,7 +451,7 @@ func meshSpecials(chunk *mapdata.Chunk, md *MeshData) {
 			if tile == nil || tile.Hidden {
 				continue
 			}
-			if !renderVegetation && isVegetationTile(tile) {
+			if vegetationSuppressed(tile) {
 				continue
 			}
 
@@ -363,7 +461,7 @@ func meshSpecials(chunk *mapdata.Chunk, md *MeshData) {
 			fx := matrix.Float(x)
 			fy := matrix.Float(y)
 			if isVegetationShape(shape) {
-				if renderVegetation {
+				if shouldRenderVegetationShape(shape) {
 					meshVegetationTile(md, shape, fx, fy, color)
 				}
 				continue

@@ -123,6 +123,30 @@ func TestItemMeshKindUsesRemoteItemState(t *testing.T) {
 	}
 }
 
+func TestItemHasSolidSupportRejectsAirAndAcceptsFloor(t *testing.T) {
+	store := mapdata.NewMapDataStore()
+	store.Tiletypes[1] = dfproto.Tiletype{ID: 1, Shape: dfproto.ShapeEmpty}
+	store.Tiletypes[2] = dfproto.Tiletype{ID: 2, Shape: dfproto.ShapeFloor}
+
+	origin := util.DFCoord{X: 16, Y: 32, Z: 4}
+	snapshot := mapdata.ChunkSnapshot{}
+	air := mapdata.NewTile(store, origin)
+	air.TileType = 1
+	snapshot.Tiles[0][0] = *air
+	snapshot.TilePresent[0][0] = true
+
+	if itemHasSolidSupport(snapshot, origin, dfproto.Coord{X: 16, Y: 32, Z: 4}) {
+		t.Fatal("item should not be rendered over an empty tile")
+	}
+
+	floor := mapdata.NewTile(store, origin)
+	floor.TileType = 2
+	snapshot.Tiles[0][0] = *floor
+	if !itemHasSolidSupport(snapshot, origin, dfproto.Coord{X: 16, Y: 32, Z: 4}) {
+		t.Fatal("item should be rendered over a solid floor")
+	}
+}
+
 func TestItemVisualScaleReflectsProjectileVelocity(t *testing.T) {
 	base := itemVisualScale(dfproto.Item{}, 0.16, 0.14)
 	projectile := itemVisualScale(dfproto.Item{
