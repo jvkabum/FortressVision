@@ -15,6 +15,20 @@ func materialKey(pair dfproto.MatPair) int32 {
 	return ((pair.MatType + 1) << indexBits) | (pair.MatIndex + 1)
 }
 
+// renderVegetation fica desligado temporariamente para remover árvores,
+// copas, galhos e folhas do cliente durante a investigação dos travamentos.
+const renderVegetation = false
+
+func isVegetationShape(shape dfproto.TiletypeShape) bool {
+	switch shape {
+	case dfproto.ShapeTreeShape, dfproto.ShapeSapling, dfproto.ShapeShrub,
+		dfproto.ShapeBranch, dfproto.ShapeTrunkBranch, dfproto.ShapeTwig:
+		return true
+	default:
+		return false
+	}
+}
+
 // getTileColor usa as cores reais recebidas do DFHack. O fallback cinza é
 // usado apenas durante a janela em que a lista de materiais ainda não chegou.
 func getTileColor(tile *mapdata.Tile) matrix.Color {
@@ -73,6 +87,9 @@ func shouldDrawFace(chunk *mapdata.Chunk, x, y int, dx, dy int, isFloor bool) bo
 	if shape == dfproto.ShapeNoShape {
 		return true
 	}
+	if !renderVegetation && isVegetationShape(shape) {
+		return true
+	}
 
 	// Oclusão Euclidiana Absoluta:
 	// Elimina polígonos que encostam fisicamente em outros formando maciço visível.
@@ -98,7 +115,8 @@ func meshGreedy2D(chunk *mapdata.Chunk, md *MeshData) {
 	for y := 0; y < 16; y++ {
 		for x := 0; x < 16; x++ {
 			tile := chunk.Tiles[x][y]
-			if tile == nil || tile.Hidden || tile.Shape() == dfproto.ShapeRamp {
+			if tile == nil || tile.Hidden || tile.Shape() == dfproto.ShapeRamp ||
+				(!renderVegetation && isVegetationShape(tile.Shape())) {
 				continue
 			}
 
@@ -254,6 +272,9 @@ func meshSpecials(chunk *mapdata.Chunk, md *MeshData) {
 		for x := 0; x < 16; x++ {
 			tile := chunk.Tiles[x][y]
 			if tile == nil || tile.Hidden {
+				continue
+			}
+			if !renderVegetation && isVegetationShape(tile.Shape()) {
 				continue
 			}
 

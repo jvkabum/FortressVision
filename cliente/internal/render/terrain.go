@@ -28,7 +28,7 @@ func NewTerrainRenderer(host *engine.Host, meshingMgr *mesher.Manager) *TerrainR
 		meshingMgr:     meshingMgr,
 	}
 
-	// Vincular evento de geração de malha
+	// Vincular evento de geração de malha.
 	tr.meshingMgr.OnMeshGenerated = tr.onMeshGenerated
 
 	return tr
@@ -42,7 +42,7 @@ func (tr *TerrainRenderer) onMeshGenerated(mesh *mesher.ChunkMesh) {
 
 		key := mesh.Origin.String()
 
-		// 1. Destruir instâncias de shader antigas (VAO/Buffers)
+		// Destruir instâncias de shader antigas (VAO/Buffers).
 		if oldDraws, ok := tr.activeDrawings[key]; ok {
 			for _, d := range oldDraws {
 				if d.ShaderData != nil {
@@ -51,18 +51,11 @@ func (tr *TerrainRenderer) onMeshGenerated(mesh *mesher.ChunkMesh) {
 			}
 		}
 
-		// 2. Gerar nova chave única para este chunk (Evita conflitos de driver)
 		newMeshKey := fmt.Sprintf("chunk_%s_%d", key, time.Now().UnixNano())
-
-		// 3. Criar e armazenar novos desenhos
 		newDraws := CreateChunkDrawings(tr.host, mesh, newMeshKey)
 		tr.activeDrawings[key] = newDraws
-
-		// Drawings são persistentes na Kaiju. Registrar a malha aqui uma única
-		// vez evita acumular uma nova instância do mesmo chunk a cada frame.
 		tr.host.Drawings.AddDrawings(newDraws)
 
-		// 4. Limpeza do Cache de Malhas da GPU (Soft Handover)
 		if oldKey, ok := tr.activeMeshKeys[key]; ok {
 			tr.host.MeshCache().RemoveMesh(oldKey)
 		}
