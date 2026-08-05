@@ -10,7 +10,9 @@ import (
 type Manager struct {
 	mu            sync.RWMutex
 	meshes        map[string]*ChunkMesh
-	pendingChunks chan *mapdata.Chunk
+	pendingChunks chan string
+	pending       map[string]*mapdata.Chunk
+	queued        map[string]bool
 
 	OnMeshGenerated func(mesh *ChunkMesh)
 }
@@ -19,12 +21,14 @@ type Manager struct {
 func NewManager() *Manager {
 	m := &Manager{
 		meshes:        make(map[string]*ChunkMesh),
-		pendingChunks: make(chan *mapdata.Chunk, 100),
+		pendingChunks: make(chan string, 100),
+		pending:       make(map[string]*mapdata.Chunk),
+		queued:        make(map[string]bool),
 	}
-	
+
 	// Worker pool para meshing asíncrono
 	go m.worker()
-	
+
 	return m
 }
 
@@ -33,7 +37,17 @@ func (m *Manager) RequestMeshUpdate(chunk *mapdata.Chunk) {
 	if chunk == nil {
 		return
 	}
-	m.pendingChunks <- chunk
+	key := chunk.Origin.String()
+	m.mu.Lock()
+	m.pending[key] = chunk
+	shouldQueue := !m.queued[key]
+	if shouldQueue {
+		m.queued[key] = true
+	}
+	m.mu.Unlock()
+	if shouldQueue {
+		m.pendingChunks <- key
+	}
 }
 
 func (m *Manager) worker() {
@@ -45,20 +59,38 @@ func (m *Manager) worker() {
 		}
 	}()
 
-	for chunk := range m.pendingChunks {
+	for key := range m.pendingChunks {
+		m.mu.Lock()
+		chunk := m.pending[key]
+		delete(m.pending, key)
+		m.mu.Unlock()
+		if chunk == nil {
+			continue
+		}
+
 		// Gerar a malha (Greedy)
 		mesh := GenerateChunkMesh(chunk)
-		
+
 		m.mu.Lock()
-		key := chunk.Origin.String()
-		m.meshes[key] = mesh
+		meshKey := chunk.Origin.String()
+		m.meshes[meshKey] = mesh
 		cb := m.OnMeshGenerated
 		m.mu.Unlock()
-		
+
 		if cb != nil {
 			cb(mesh)
 		}
-		
+
+		m.mu.Lock()
+		_, needsRetry := m.pending[key]
+		if !needsRetry {
+			delete(m.queued, key)
+		}
+		m.mu.Unlock()
+		if needsRetry {
+			m.pendingChunks <- key
+		}
+
 		log.Printf("🧱 [Mesher] Geometria gerada para chunk %v (%d materiais)", chunk.Origin, len(mesh.SubMeshes))
 	}
 }
@@ -67,7 +99,7 @@ func (m *Manager) worker() {
 func (m *Manager) GetMeshes() []*ChunkMesh {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	list := make([]*ChunkMesh, 0, len(m.meshes))
 	for _, mesh := range m.meshes {
 		list = append(list, mesh)

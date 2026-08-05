@@ -7,15 +7,20 @@ import (
 	"FortressVision/shared/util"
 	"fmt"
 	"math"
+	"time"
 )
+
+const regionRequestInterval = 350 * time.Millisecond
 
 // SyncManager coordena a sincronização entre a posição da câmera 3D e o mundo do DF.
 type SyncManager struct {
-	world   *Manager
-	net     *network.Client
-	cam     *camera.Controller
-	cfg     *config.Config
-	lastPos util.DFCoord
+	world            *Manager
+	net              *network.Client
+	cam              *camera.Controller
+	cfg              *config.Config
+	lastRegion       util.DFCoord
+	hasRegionRequest bool
+	lastRequestAt    time.Time
 }
 
 // NewSyncManager inicializa o gerenciador de sincronização de região.
@@ -48,7 +53,16 @@ func (s *SyncManager) Update() {
 	}
 
 	// Só solicita se o foco da câmera mudou de bloco
-	if dfCoord.X != s.lastPos.X || dfCoord.Y != s.lastPos.Y || dfCoord.Z != s.lastPos.Z {
+	region := dfCoord.BlockCoord()
+	// A região só precisa ser recarregada ao entrar em um novo chunk de 16x16.
+	if s.hasRegionRequest && region == s.lastRegion {
+		return
+	}
+	if s.hasRegionRequest && time.Since(s.lastRequestAt) < regionRequestInterval {
+		return
+	}
+
+	if !s.hasRegionRequest || region != s.lastRegion {
 		fmt.Printf("[SyncManager] 🛰️ Solicitando região para DF%v (Raio:%d)\n", dfCoord, s.cfg.DrawRangeSide)
 		// DrawRangeSide is configured in chunks; the region API uses tiles.
 		radiusTiles := s.cfg.DrawRangeSide * util.BlockSize
@@ -56,6 +70,8 @@ func (s *SyncManager) Update() {
 			radiusTiles = util.BlockSize
 		}
 		s.world.RequestRegion(s.net.Send, dfCoord, radiusTiles)
-		s.lastPos = dfCoord
+		s.lastRegion = region
+		s.hasRegionRequest = true
+		s.lastRequestAt = time.Now()
 	}
 }

@@ -36,6 +36,8 @@ type Hub struct {
 	register   chan *websocket.Conn
 	unregister chan *websocket.Conn
 	mu         sync.Mutex
+	regionMu   sync.Mutex
+	regionSeq  map[*websocket.Conn]uint64
 }
 
 func newHub() *Hub {
@@ -44,6 +46,7 @@ func newHub() *Hub {
 		broadcast:  make(chan []byte, 4096), // Bufferizado para evitar deadlocks e bloqueios
 		register:   make(chan *websocket.Conn),
 		unregister: make(chan *websocket.Conn),
+		regionSeq:  make(map[*websocket.Conn]uint64),
 	}
 }
 
@@ -64,6 +67,9 @@ func (h *Hub) run() {
 			h.mu.Lock()
 			h.clients[client] = &sync.Mutex{}
 			h.mu.Unlock()
+			h.regionMu.Lock()
+			h.regionSeq[client] = 0
+			h.regionMu.Unlock()
 			log.Printf("Cliente registrado: %s", client.RemoteAddr())
 		case client, ok := <-h.unregister:
 			if !ok {
@@ -78,6 +84,9 @@ func (h *Hub) run() {
 				log.Printf("Cliente desregistrado: %s", client.RemoteAddr())
 			}
 			h.mu.Unlock()
+			h.regionMu.Lock()
+			delete(h.regionSeq, client)
+			h.regionMu.Unlock()
 		case message, ok := <-h.broadcast:
 			if !ok {
 				return
@@ -108,6 +117,19 @@ func (h *Hub) run() {
 			}
 		}
 	}
+}
+
+func (h *Hub) beginRegion(conn *websocket.Conn) uint64 {
+	h.regionMu.Lock()
+	defer h.regionMu.Unlock()
+	h.regionSeq[conn]++
+	return h.regionSeq[conn]
+}
+
+func (h *Hub) isCurrentRegion(conn *websocket.Conn, requestID uint64) bool {
+	h.regionMu.Lock()
+	defer h.regionMu.Unlock()
+	return h.regionSeq[conn] == requestID
 }
 
 // WriteSafe garante que apenas uma goroutine escreva no WebSocket por vez
@@ -562,11 +584,12 @@ func handleClientMessage(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Client
 		if dfClient != nil {
 			dfClient.SetInterestZ(req.CenterZ)
 		}
-		go streamRegionToClient(hub, conn, dfClient, store, &req, scanner)
+		requestID := hub.beginRegion(conn)
+		go streamRegionToClient(hub, conn, dfClient, store, &req, scanner, requestID)
 	}
 }
 
-func streamRegionToClient(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Client, store *mapdata.MapDataStore, req *fvnet.ClientRequestRegion, scanner *ServerScanner) {
+func streamRegionToClient(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Client, store *mapdata.MapDataStore, req *fvnet.ClientRequestRegion, scanner *ServerScanner, requestID uint64) {
 	// Streaming agora é permitido mesmo durante o Full Scan para uma experiência fluida (Fase 8)
 
 	// Definir limites
@@ -584,7 +607,13 @@ func streamRegionToClient(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Clien
 
 	// Iterar em blocos de 16
 	for x := startX; x <= maxX; x += 16 {
+		if !hub.isCurrentRegion(conn, requestID) {
+			return
+		}
 		for y := startY; y <= maxY; y += 16 {
+			if !hub.isCurrentRegion(conn, requestID) {
+				return
+			}
 			origin := util.DFCoord{X: x, Y: y, Z: z}.BlockCoord()
 
 			chunk, exists := store.GetChunk(origin)
@@ -709,9 +738,9 @@ func broadcastWorldStatus(hub *Hub, dfClient *dfhack.Client, store *mapdata.MapD
 				cx, cy, cz, _ := store.GetMapInfo()
 				status := &fvnet.WorldStatus{
 					WorldName: "Modo Offline (Cache)",
-					ViewX:     cx / 2,      // Centro do mapa em tiles
-					ViewY:     cy / 2,      // Centro do mapa em tiles
-					ViewZ:     cz - 1,      // Nível Z mais alto (Superfície) estimado pela heurística
+					ViewX:     cx / 2, // Centro do mapa em tiles
+					ViewY:     cy / 2, // Centro do mapa em tiles
+					ViewZ:     cz - 1, // Nível Z mais alto (Superfície) estimado pela heurística
 				}
 				payload, _ := proto.Marshal(status)
 				envelope := &fvnet.Envelope{
