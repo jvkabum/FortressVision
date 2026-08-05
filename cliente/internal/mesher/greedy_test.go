@@ -36,7 +36,7 @@ func TestIsolatedFloorHasExternalFaces(t *testing.T) {
 	}
 }
 
-func TestVegetationRenderingKeepsTreesAndShrubsButHidesLooseDetails(t *testing.T) {
+func TestVegetationRenderingEnablesAllShapes(t *testing.T) {
 	if !shouldRenderVegetationShape(dfproto.ShapeTrunkBranch) {
 		t.Fatal("tree trunks should be enabled")
 	}
@@ -46,8 +46,8 @@ func TestVegetationRenderingKeepsTreesAndShrubsButHidesLooseDetails(t *testing.T
 		}
 	}
 	for _, shape := range []dfproto.TiletypeShape{dfproto.ShapeBranch, dfproto.ShapeTwig} {
-		if shouldRenderVegetationShape(shape) {
-			t.Fatalf("vegetation shape %v should remain disabled", shape)
+		if !shouldRenderVegetationShape(shape) {
+			t.Fatalf("vegetation shape %v should be enabled", shape)
 		}
 	}
 }

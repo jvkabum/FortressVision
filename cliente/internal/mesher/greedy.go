@@ -24,7 +24,7 @@ func materialKey(pair dfproto.MatPair) int32 {
 // renderVegetation controla os detalhes pequenos de vegetação (galhos,
 // gravetos e folhas soltas). Árvores e arbustos têm chaves próprias para
 // poderem aparecer sem reativar todos esses detalhes de uma vez.
-const renderVegetation = false
+const renderVegetation = true
 const renderTreeTrunks = true
 const renderTreeCanopies = true
 const renderShrubs = true
