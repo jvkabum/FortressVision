@@ -83,6 +83,31 @@ func (m *Manager) notifyLoadedChunks() {
 	}
 }
 
+func tilesFromSnapshot(snapshot mapdata.ChunkSnapshot, store *mapdata.MapDataStore, origin util.DFCoord) ([16][16]*mapdata.Tile, int) {
+	var tiles [16][16]*mapdata.Tile
+	missing := 0
+	for x := 0; x < 16; x++ {
+		for y := 0; y < 16; y++ {
+			position := util.DFCoord{X: origin.X + int32(x), Y: origin.Y + int32(y), Z: origin.Z}
+			if snapshot.TilePresent[x][y] {
+				tile := snapshot.Tiles[x][y]
+				tile.SetStore(store)
+				tile.Position = position
+				tiles[x][y] = &tile
+				continue
+			}
+
+			// Um chunk não vazio deve trazer os 256 tiles. Criar um tile
+			// desconhecido aqui preserva a célula para o mesher e permite que
+			// a atualização de tiletypes ou a correção de vazio isolado a
+			// recupere sem deixar um nil silencioso no meio do terreno.
+			tiles[x][y] = mapdata.NewTile(store, position)
+			missing++
+		}
+	}
+	return tiles, missing
+}
+
 // SetActiveRegion atualiza a janela solicitada pelo cliente e remove do
 // store/renderizador os chunks que ficaram definitivamente fora dela. Sem
 // essa poda, cada deslocamento acumulava malhas e entidades antigas e o
@@ -243,14 +268,9 @@ func (m *Manager) processChunk(msg *fvnet.MapChunkMessage) {
 		log.Printf("[World] ❌ Erro ao decodificar dados do chunk em %v: %v", origin, err)
 		return
 	}
-	var tiles [16][16]*mapdata.Tile
-	for x := 0; x < 16; x++ {
-		for y := 0; y < 16; y++ {
-			if snapshot.TilePresent[x][y] {
-				tile := snapshot.Tiles[x][y]
-				tiles[x][y] = &tile
-			}
-		}
+	tiles, missingTiles := tilesFromSnapshot(snapshot, m.Store, origin)
+	if missingTiles > 0 {
+		log.Printf("[World-Diag] Chunk %v chegou incompleto: %d/256 tiles ausentes; mantendo placeholders para recuperação", origin, missingTiles)
 	}
 
 	m.Store.Mu.Lock()
@@ -273,7 +293,6 @@ func (m *Manager) processChunk(msg *fvnet.MapChunkMessage) {
 		for y := 0; y < 16; y++ {
 			if t := chunk.Tiles[x][y]; t != nil {
 				t.SetStore(m.Store)
-				t.Position = util.NewDFCoord(origin.X+int32(x), origin.Y+int32(y), origin.Z)
 			}
 		}
 	}

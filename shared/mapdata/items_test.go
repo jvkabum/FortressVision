@@ -83,6 +83,24 @@ func TestFindTileByRayReturnsVisibleBlock(t *testing.T) {
 	}
 }
 
+func TestFindTileByRayCanInspectEmptyCellWhenNoSolidTileIsHit(t *testing.T) {
+	store := NewMapDataStore()
+	store.Tiletypes[1] = dfproto.Tiletype{ID: 1, Shape: dfproto.ShapeEmpty}
+	chunk := &Chunk{Origin: util.NewDFCoord(0, 0, 0)}
+	tile := NewTile(store, util.NewDFCoord(2, 3, 0))
+	tile.TileType = 1
+	chunk.Tiles[2][3] = tile
+	store.Chunks[chunk.Origin] = chunk
+
+	_, coord, found := store.FindTileByRay(util.Ray{
+		Origin:    util.Vector3{X: 2.5, Y: 6, Z: -3.5},
+		Direction: util.Vector3{X: 0, Y: -1, Z: 0},
+	}, 100)
+	if !found || coord != (util.DFCoord{X: 2, Y: 3, Z: 0}) {
+		t.Fatalf("empty tile selection = (%v, %v), want ((2, 3, 0), true)", coord, found)
+	}
+}
+
 func TestTileDisplayNameIncludesMaterial(t *testing.T) {
 	store := NewMapDataStore()
 	store.Tiletypes[1] = dfproto.Tiletype{ID: 1, Shape: dfproto.ShapeFloor, Material: dfproto.TilematStone}

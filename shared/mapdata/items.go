@@ -128,6 +128,7 @@ func (s *MapDataStore) FindItemByRay(ray util.Ray, maxDistance float32) (dfproto
 		if pos == (util.DFCoord{}) && item.Pos != (dfproto.Coord{}) {
 			pos = util.DFCoord{X: item.Pos.X, Y: item.Pos.Y, Z: item.Pos.Z}
 		}
+		pos = s.itemSupportPositionLocked(pos)
 		distance, ok := itemRayDistance(ray, item, pos, bestDistance)
 		if ok && (!found || distance < bestDistance) {
 			bestDistance = distance
@@ -170,6 +171,33 @@ func itemWorldPosition(item dfproto.Item, fallback *util.DFCoord) util.DFCoord {
 	return util.DFCoord{}
 }
 
+func (s *MapDataStore) itemSupportPositionLocked(pos util.DFCoord) util.DFCoord {
+	if tile := s.getTileLocked(pos); itemSupportTile(tile) {
+		return pos
+	}
+	for depth := int32(1); depth <= 8; depth++ {
+		support := util.DFCoord{X: pos.X, Y: pos.Y, Z: pos.Z - depth}
+		if tile := s.getTileLocked(support); itemSupportTile(tile) {
+			return support
+		}
+	}
+	return pos
+}
+
+func itemSupportTile(tile *Tile) bool {
+	if tile == nil || tile.Hidden {
+		return false
+	}
+	switch tile.Shape() {
+	case dfproto.ShapeNoShape, dfproto.ShapeEmpty, dfproto.ShapeEndlessPit:
+		return false
+	case dfproto.ShapeRampTop, dfproto.ShapeStairUp, dfproto.ShapeStairDown, dfproto.ShapeStairUpDown:
+		return true
+	default:
+		return tile.IsFloor() || tile.IsWall()
+	}
+}
+
 func itemRayDistance(ray util.Ray, item dfproto.Item, pos util.DFCoord, maxDistance float32) (float32, bool) {
 	corner := util.DFToWorldPos(pos)
 	center := util.Vector3{
@@ -206,6 +234,9 @@ func (s *MapDataStore) FindTileByRay(ray util.Ray, maxDistance float32) (*Tile, 
 	bestDistance := maxDistance
 	var selected *Tile
 	var selectedCoord util.DFCoord
+	voidDistance := maxDistance
+	var voidTile *Tile
+	var voidCoord util.DFCoord
 	for origin, chunk := range s.Chunks {
 		if chunk == nil {
 			continue
@@ -217,9 +248,6 @@ func (s *MapDataStore) FindTileByRay(ray util.Ray, maxDistance float32) (*Tile, 
 					continue
 				}
 				shape := tile.Shape()
-				if shape == dfproto.ShapeNoShape || shape == dfproto.ShapeEmpty {
-					continue
-				}
 
 				coord := util.DFCoord{
 					X: origin.X + int32(localX),
@@ -238,6 +266,12 @@ func (s *MapDataStore) FindTileByRay(ray util.Ray, maxDistance float32) (*Tile, 
 					Z: corner.Z,
 				}
 				distance, ok := rayAABBDistance(ray, minimum, maximum, bestDistance)
+				if ok && (shape == dfproto.ShapeNoShape || shape == dfproto.ShapeEmpty) && distance < voidDistance {
+					voidDistance = distance
+					voidTile = tile
+					voidCoord = coord
+					continue
+				}
 				if ok && (selected == nil || distance < bestDistance) {
 					bestDistance = distance
 					selected = tile
@@ -245,6 +279,9 @@ func (s *MapDataStore) FindTileByRay(ray util.Ray, maxDistance float32) (*Tile, 
 				}
 			}
 		}
+	}
+	if selected == nil && voidTile != nil {
+		return voidTile, voidCoord, true
 	}
 	return selected, selectedCoord, selected != nil
 }

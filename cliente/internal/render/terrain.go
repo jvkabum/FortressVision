@@ -81,6 +81,7 @@ type TerrainRenderer struct {
 	mu                sync.Mutex
 	queueMu           sync.Mutex
 	meshingMgr        *mesher.Manager
+	store             *mapdata.MapDataStore
 	chunkDrawings     map[string]map[int32]*chunkDrawing
 	terrainMaterial   *rendering.Material
 	liquidMaterial    *rendering.Material
@@ -128,6 +129,13 @@ func NewTerrainRenderer(host *engine.Host, meshingMgr *mesher.Manager) *TerrainR
 	tr.meshingMgr.OnMeshGenerated = tr.onMeshGenerated
 
 	return tr
+}
+
+// SetStore liga o renderer ao store do mundo para que entidades em células de
+// ar possam procurar o piso real em níveis Z abaixo, quando ele estiver
+// carregado. Isso evita desenhar objetos no topo errado de uma abertura.
+func (tr *TerrainRenderer) SetStore(store *mapdata.MapDataStore) {
+	tr.store = store
 }
 
 // UpdateUnits recebe um snapshot do DFHack e agenda a atualização no thread da
@@ -747,7 +755,8 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 	}
 
 	for _, item := range snapshot.Items {
-		if !itemHasSolidSupport(snapshot, origin, item.Pos) {
+		support, supported := tr.itemSupportPosition(snapshot, origin, item.Pos)
+		if !supported {
 			// O DFHack pode devolver itens em células de ar enquanto o chunk
 			// vizinho ainda está chegando. Não desenhar nesse caso evita itens
 			// flutuando sobre os vazios do mapa.
@@ -760,7 +769,7 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 		if drawing == nil {
 			continue
 		}
-		pos := util.DFToWorldPos(util.DFCoord{X: item.Pos.X, Y: item.Pos.Y, Z: item.Pos.Z})
+		pos := util.DFToWorldPos(support)
 		size, stackHeight := itemDimensions(item)
 		drawing.transform.SetPosition(matrix.NewVec3(
 			matrix.Float(pos.X)+0.5+matrix.Float(item.SubposX),
@@ -1019,6 +1028,41 @@ func itemHasSolidSupport(snapshot mapdata.ChunkSnapshot, origin util.DFCoord, po
 	default:
 		return true
 	}
+}
+
+func renderSupportTile(tile *mapdata.Tile) bool {
+	if tile == nil || tile.Hidden {
+		return false
+	}
+	switch tile.Shape() {
+	case dfproto.ShapeNoShape, dfproto.ShapeEmpty, dfproto.ShapeEndlessPit:
+		return false
+	case dfproto.ShapeRampTop, dfproto.ShapeStairUp, dfproto.ShapeStairDown, dfproto.ShapeStairUpDown:
+		return true
+	default:
+		return tile.IsFloor() || tile.IsWall()
+	}
+}
+
+func (tr *TerrainRenderer) itemSupportPosition(snapshot mapdata.ChunkSnapshot, origin util.DFCoord, pos dfproto.Coord) (util.DFCoord, bool) {
+	current := util.DFCoord{X: pos.X, Y: pos.Y, Z: pos.Z}
+	if itemHasSolidSupport(snapshot, origin, pos) {
+		return current, true
+	}
+	if tr.store == nil {
+		return util.DFCoord{}, false
+	}
+
+	// Itens em uma célula de ar podem estar caindo ou apoiados no nível
+	// imediatamente inferior. Limitar a busca evita atravessar o mapa inteiro
+	// e não transforma um item em um objeto preso a um piso muito distante.
+	for depth := int32(1); depth <= 8; depth++ {
+		support := util.DFCoord{X: pos.X, Y: pos.Y, Z: pos.Z - depth}
+		if tile := tr.store.GetTile(support); renderSupportTile(tile) {
+			return support, true
+		}
+	}
+	return util.DFCoord{}, false
 }
 
 func snapshotHasSolidNeighbors(snapshot mapdata.ChunkSnapshot, x, y int) bool {

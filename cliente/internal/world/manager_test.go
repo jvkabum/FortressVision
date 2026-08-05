@@ -86,3 +86,19 @@ func TestNotifyLoadedChunksRefreshesOnlyNonEmptyChunks(t *testing.T) {
 		t.Fatalf("refreshed chunks = %v, want [%v]", refreshed, nonEmpty)
 	}
 }
+
+func TestTilesFromSnapshotPreservesIncompleteCellsAsPlaceholders(t *testing.T) {
+	store := mapdata.NewMapDataStore()
+	origin := util.DFCoord{X: 16, Y: 32, Z: 4}
+	snapshot := mapdata.ChunkSnapshot{}
+	snapshot.TilePresent[0][0] = true
+	snapshot.Tiles[0][0] = *mapdata.NewTile(store, origin)
+
+	tiles, missing := tilesFromSnapshot(snapshot, store, origin)
+	if missing != 255 {
+		t.Fatalf("missing tile count = %d, want 255", missing)
+	}
+	if tiles[1][1] == nil || tiles[1][1].Position != (util.DFCoord{X: 17, Y: 33, Z: 4}) {
+		t.Fatalf("placeholder tile was not initialized at the correct position: %+v", tiles[1][1])
+	}
+}
