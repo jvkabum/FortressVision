@@ -174,7 +174,7 @@ func (t *Tile) GetCategorization() (string, string) {
 func (t *Tile) IsWall() bool {
 	shape := t.Shape()
 	switch shape {
-	case dfproto.ShapeWall, dfproto.ShapeTreeShape:
+	case dfproto.ShapeWall, dfproto.ShapeFortification, dfproto.ShapeTreeShape:
 		return true
 	default:
 		return false
@@ -184,7 +184,7 @@ func (t *Tile) IsWall() bool {
 func (t *Tile) IsFloor() bool {
 	shape := t.Shape()
 	switch shape {
-	case dfproto.ShapeRamp, dfproto.ShapeFloor, dfproto.ShapeBoulder, dfproto.ShapePebbles,
+	case dfproto.ShapeRamp, dfproto.ShapeRampTop, dfproto.ShapeFloor, dfproto.ShapeBoulder, dfproto.ShapePebbles,
 		dfproto.ShapeSapling, dfproto.ShapeShrub, dfproto.ShapeBranch, dfproto.ShapeTrunkBranch:
 		return true
 	default:
@@ -258,16 +258,26 @@ func (t *Tile) CalculateRampType() {
 		t.RampType = 0
 		return
 	}
+	t.container.Mu.Lock()
+	defer t.container.Mu.Unlock()
+	t.calculateRampTypeLocked()
+}
+
+func (t *Tile) calculateRampTypeLocked() {
+	if t.container == nil || t.Shape() != dfproto.ShapeRamp {
+		t.RampType = 0
+		return
+	}
 
 	lookup := 0
 
 	checkWallFloor := func(dir util.Directions) bool {
-		neighbor := t.container.GetTile(t.Position.Add(util.DirOffsets[dir]))
+		neighbor := t.container.getTileLocked(t.Position.Add(util.DirOffsets[dir]))
 		if neighbor == nil {
 			return false
 		}
 		if neighbor.IsWall() {
-			up := neighbor.Up()
+			up := t.container.getTileLocked(neighbor.Position.Up())
 			if up != nil && up.IsFloor() {
 				return true
 			}
@@ -308,7 +318,7 @@ func (t *Tile) CalculateRampType() {
 
 	// Fase 2: Apenas paredes (fallback)
 	checkWall := func(dir util.Directions) bool {
-		neighbor := t.container.GetTile(t.Position.Add(util.DirOffsets[dir]))
+		neighbor := t.container.getTileLocked(t.Position.Add(util.DirOffsets[dir]))
 		return neighbor != nil && neighbor.IsWall()
 	}
 
@@ -345,9 +355,9 @@ func (t *Tile) CalculateRampType() {
 
 func checkNeighborWallFloor(t *Tile, d1, d2 util.Directions) bool {
 	pos := t.Position.Add(util.DirOffsets[d1]).Add(util.DirOffsets[d2])
-	neighbor := t.container.GetTile(pos)
+	neighbor := t.container.getTileLocked(pos)
 	if neighbor != nil && neighbor.IsWall() {
-		up := neighbor.Up()
+		up := t.container.getTileLocked(neighbor.Position.Up())
 		return up != nil && up.IsFloor()
 	}
 	return false
@@ -355,6 +365,6 @@ func checkNeighborWallFloor(t *Tile, d1, d2 util.Directions) bool {
 
 func checkDiagWall(t *Tile, d1, d2 util.Directions) bool {
 	pos := t.Position.Add(util.DirOffsets[d1]).Add(util.DirOffsets[d2])
-	neighbor := t.container.GetTile(pos)
+	neighbor := t.container.getTileLocked(pos)
 	return neighbor != nil && neighbor.IsWall()
 }

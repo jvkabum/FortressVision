@@ -128,7 +128,12 @@ func (s *MapDataStore) MarkAsEmpty(origin util.DFCoord) {
 func (s *MapDataStore) GetTile(pos util.DFCoord) *Tile {
 	s.Mu.RLock()
 	defer s.Mu.RUnlock()
+	return s.getTileLocked(pos)
+}
 
+// getTileLocked retorna um tile sem adquirir o mutex. O chamador precisa
+// manter s.Mu bloqueado.
+func (s *MapDataStore) getTileLocked(pos util.DFCoord) *Tile {
 	blockPos := pos.BlockCoord()
 	chunk, ok := s.Chunks[blockPos]
 	if !ok {
@@ -137,6 +142,41 @@ func (s *MapDataStore) GetTile(pos util.DFCoord) *Tile {
 
 	local := pos.LocalCoord()
 	return chunk.Tiles[local.X][local.Y]
+}
+
+// RecalculateRampTypes recalcula rampas no chunk informado e na borda dos
+// chunks vizinhos. A orientação depende das paredes e pisos ao redor.
+func (s *MapDataStore) RecalculateRampTypes(origin util.DFCoord) []util.DFCoord {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+	return s.recalculateRampTypesLocked(origin)
+}
+
+func (s *MapDataStore) recalculateRampTypesLocked(origin util.DFCoord) []util.DFCoord {
+	changedChunks := make(map[util.DFCoord]struct{})
+	for z := origin.Z - 1; z <= origin.Z; z++ {
+		for y := origin.Y - 1; y <= origin.Y+16; y++ {
+			for x := origin.X - 1; x <= origin.X+16; x++ {
+				pos := util.NewDFCoord(x, y, z)
+				tile := s.getTileLocked(pos)
+				if tile == nil || tile.Shape() != dfproto.ShapeRamp {
+					continue
+				}
+
+				oldType := tile.RampType
+				tile.calculateRampTypeLocked()
+				if tile.RampType != oldType {
+					changedChunks[pos.BlockCoord()] = struct{}{}
+				}
+			}
+		}
+	}
+
+	result := make([]util.DFCoord, 0, len(changedChunks))
+	for chunkOrigin := range changedChunks {
+		result = append(result, chunkOrigin)
+	}
+	return result
 }
 
 // GetChunk retorna um chunk de forma segura (thread-safe).
@@ -406,6 +446,10 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 	}
 
 	// Coleta dados de vegetação (saplings e shrubs)
+	if len(s.recalculateRampTypesLocked(origin)) > 0 {
+		chunkChanged = true
+	}
+
 	var currentPlants []dfproto.PlantDetail
 	if len(block.Plants) > 0 {
 		currentPlants = block.Plants

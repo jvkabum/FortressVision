@@ -78,12 +78,12 @@ func shouldDrawFace(chunk *mapdata.Chunk, x, y int, dx, dy int, isFloor bool) bo
 	// Elimina polígonos que encostam fisicamente em outros formando maciço visível.
 	if !isFloor {
 		// Para paredes: elas ocultam com outras paredes e blocos cheios
-		if shape == dfproto.ShapeWall || shape == dfproto.ShapeTreeShape {
+		if shape == dfproto.ShapeWall || shape == dfproto.ShapeFortification || shape == dfproto.ShapeTreeShape {
 			return false
 		}
 	} else {
 		// Para pisos (DF Floors): laterais invisíveis se encontram vizinhos (que sustentam os floors ou são os mesmos).
-		if shape == dfproto.ShapeWall || shape == dfproto.ShapeFloor || shape == dfproto.ShapeTreeShape || shape == dfproto.ShapeBoulder {
+		if shape == dfproto.ShapeWall || shape == dfproto.ShapeFortification || shape == dfproto.ShapeFloor || shape == dfproto.ShapeTreeShape || shape == dfproto.ShapeBoulder {
 			return false
 		}
 	}
@@ -253,7 +253,7 @@ func meshSpecials(chunk *mapdata.Chunk, md *MeshData) {
 	for y := 0; y < 16; y++ {
 		for x := 0; x < 16; x++ {
 			tile := chunk.Tiles[x][y]
-			if tile == nil {
+			if tile == nil || tile.Hidden {
 				continue
 			}
 
@@ -265,7 +265,8 @@ func meshSpecials(chunk *mapdata.Chunk, md *MeshData) {
 
 			// 1. Rampas
 			if shape == dfproto.ShapeRamp {
-				geom := GetRampGeometry(tile.RampType)
+				rampType := tile.RampType
+				geom := GetRampGeometry(rampType)
 				if geom != nil {
 					// O OBJ modelado tem o centro na base e coordenadas variando de -0.5 a 0.5.
 					// Portanto, precisamos transladar para o centro do voxel.

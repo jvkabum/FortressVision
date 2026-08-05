@@ -48,6 +48,7 @@ func SetupBridge(cfg BridgeConfig) {
 		cfg.HUD.UpdateWorld(s.WorldName)
 		cfg.HUD.UpdatePop(int(s.Population))
 		cfg.HUD.UpdateSeason(fmt.Sprintf("Ano %d", s.Year))
+		cfg.HUD.SetZOffset(s.ZOffset)
 	}
 
 	// 4. Conexão Mundo -> Logs/Status

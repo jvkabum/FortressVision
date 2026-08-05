@@ -77,6 +77,7 @@ type HUD struct {
 	frameCount int
 	lastW      int
 	lastH      int
+	zOffset    int32
 }
 
 func New(host *engine.Host) *HUD {
@@ -292,7 +293,12 @@ func (h *HUD) UpdateFPS(fps int) {
 func (h *HUD) UpdateLocation(x, y, z float64) {
 	dfY := -z
 	h.set(h.lblLocDF, fmt.Sprintf("DF: %.0f, %.0f, %.0f", x, dfY, y))
-	h.set(h.lblLocElev, fmt.Sprintf("Elevação: %d", int(math.Floor(y))))
+	elevation := int(math.Floor(y)) - int(h.zOffset)
+	h.set(h.lblLocElev, fmt.Sprintf("Elevação: %d", elevation))
+}
+
+func (h *HUD) SetZOffset(offset int32) {
+	h.zOffset = offset
 }
 
 func (h *HUD) UpdatePop(pop int) {

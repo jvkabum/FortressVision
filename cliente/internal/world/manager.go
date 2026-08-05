@@ -47,7 +47,7 @@ func (m *Manager) HandleEnvelope(env *fvnet.Envelope) {
 	case fvnet.Envelope_WORLD_STATUS:
 		var worldStatus fvnet.WorldStatus
 		if err := proto.Unmarshal(env.Payload, &worldStatus); err == nil {
-			log.Printf("[World] 🌍 Relatório do Mundo: %s, Ano %d (Foco: %d,%d, Z:%d)", 
+			log.Printf("[World] 🌍 Relatório do Mundo: %s, Ano %d (Foco: %d,%d, Z:%d)",
 				worldStatus.WorldName, worldStatus.Year, worldStatus.ViewX, worldStatus.ViewY, worldStatus.ViewZ)
 			if m.OnWorldStatus != nil {
 				m.OnWorldStatus(&worldStatus)
@@ -124,6 +124,7 @@ func (m *Manager) processChunk(msg *fvnet.MapChunkMessage) {
 		for y := 0; y < 16; y++ {
 			if t := chunk.Tiles[x][y]; t != nil {
 				t.SetStore(m.Store)
+				t.Position = util.NewDFCoord(origin.X+int32(x), origin.Y+int32(y), origin.Z)
 			}
 		}
 	}
@@ -131,11 +132,21 @@ func (m *Manager) processChunk(msg *fvnet.MapChunkMessage) {
 	m.Store.Chunks[origin] = chunk
 	m.Store.Mu.Unlock()
 
+	affectedChunks := m.Store.RecalculateRampTypes(origin)
+
 	log.Printf("[World] ✅ Chunk %v processado com sucesso (%d tiles)", origin, 16*16)
 
 	// Avisizar interessados (como o render/mesher) que este terreno atualizou.
 	if m.OnMapChunkUpdated != nil {
 		m.OnMapChunkUpdated(chunk)
+		for _, affectedOrigin := range affectedChunks {
+			if affectedOrigin == origin {
+				continue
+			}
+			if affected, ok := m.Store.GetChunk(affectedOrigin); ok {
+				m.OnMapChunkUpdated(affected)
+			}
+		}
 	}
 }
 
