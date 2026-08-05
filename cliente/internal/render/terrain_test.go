@@ -6,6 +6,7 @@ import (
 	"FortressVision/cliente/internal/mesher"
 	"FortressVision/shared/mapdata"
 	"FortressVision/shared/pkg/dfproto"
+	"FortressVision/shared/util"
 	"kaijuengine.com/matrix"
 	"kaijuengine.com/rendering"
 )
@@ -82,6 +83,28 @@ func TestTileSurfaceYStartsAtVoxelTop(t *testing.T) {
 	}
 	if got := tileSurfaceY(-3, 0.02); got != -1.98 {
 		t.Fatalf("tile surface offset y = %f, want -1.98", got)
+	}
+}
+
+func TestShouldRenderDesignationSkipsAirAndUnknownTiles(t *testing.T) {
+	store := mapdata.NewMapDataStore()
+	unknown := *mapdata.NewTile(store, util.DFCoord{})
+	if shouldRenderDesignation(unknown) {
+		t.Fatal("designation should be hidden when the tiletype is unknown")
+	}
+
+	store.Tiletypes[1] = dfproto.Tiletype{ID: 1, Shape: dfproto.ShapeEmpty}
+	empty := *mapdata.NewTile(store, util.DFCoord{})
+	empty.TileType = 1
+	if shouldRenderDesignation(empty) {
+		t.Fatal("designation should be hidden on an empty tile")
+	}
+
+	store.Tiletypes[2] = dfproto.Tiletype{ID: 2, Shape: dfproto.ShapeFloor}
+	floor := *mapdata.NewTile(store, util.DFCoord{})
+	floor.TileType = 2
+	if !shouldRenderDesignation(floor) {
+		t.Fatal("designation should remain visible on a solid floor")
 	}
 }
 

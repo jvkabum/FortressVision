@@ -68,3 +68,21 @@ func TestRequestRegionRejectsLateChunkOutsideActiveWindow(t *testing.T) {
 		t.Fatal("late chunk outside the requested region was accepted")
 	}
 }
+
+func TestNotifyLoadedChunksRefreshesOnlyNonEmptyChunks(t *testing.T) {
+	m := NewManager()
+	nonEmpty := util.DFCoord{X: 16, Y: 16, Z: 10}
+	empty := util.DFCoord{X: 32, Y: 16, Z: 10}
+	m.Store.Chunks[nonEmpty] = &mapdata.Chunk{Origin: nonEmpty}
+	m.Store.Chunks[empty] = &mapdata.Chunk{Origin: empty, IsEmpty: true}
+
+	var refreshed []util.DFCoord
+	m.OnMapChunkUpdated = func(chunk *mapdata.Chunk) {
+		refreshed = append(refreshed, chunk.Origin)
+	}
+	m.notifyLoadedChunks()
+
+	if len(refreshed) != 1 || refreshed[0] != nonEmpty {
+		t.Fatalf("refreshed chunks = %v, want [%v]", refreshed, nonEmpty)
+	}
+}

@@ -59,6 +59,30 @@ func NewManager() *Manager {
 	}
 }
 
+// notifyLoadedChunks reaplica o estado dos chunks já recebidos depois que o
+// catálogo de tiletypes chega. O mapa pode ser entregue antes desse catálogo;
+// nesse intervalo Tile.Shape() retorna ShapeNoShape e o mesher deixa essas
+// células fora da malha. Reprocessar os chunks elimina esses falsos buracos.
+func (m *Manager) notifyLoadedChunks() {
+	if m.OnMapChunkUpdated == nil {
+		return
+	}
+
+	m.Store.Mu.RLock()
+	loaded := make([]*mapdata.Chunk, 0, len(m.Store.Chunks))
+	for _, chunk := range m.Store.Chunks {
+		if chunk == nil || chunk.IsEmpty {
+			continue
+		}
+		loaded = append(loaded, chunk)
+	}
+	m.Store.Mu.RUnlock()
+
+	for _, chunk := range loaded {
+		m.OnMapChunkUpdated(chunk)
+	}
+}
+
 // SetActiveRegion atualiza a janela solicitada pelo cliente e remove do
 // store/renderizador os chunks que ficaram definitivamente fora dela. Sem
 // essa poda, cada deslocamento acumulava malhas e entidades antigas e o
@@ -150,6 +174,7 @@ func (m *Manager) HandleEnvelope(env *fvnet.Envelope) {
 				log.Printf("[World-Diag] 🧱 Exemplo Tiletype[0]: ID=%d, Nome=%s, Shape=%v", tt.ID, tt.Name, tt.Shape)
 			}
 			m.Store.UpdateTiletypes(&list)
+			m.notifyLoadedChunks()
 		}
 
 	case fvnet.Envelope_MATERIAL_LIST:

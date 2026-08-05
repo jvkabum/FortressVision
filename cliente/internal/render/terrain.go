@@ -633,6 +633,19 @@ func designationColor(designation dfproto.TileDigDesignation, marker, auto bool)
 	}
 }
 
+// shouldRenderDesignation evita desenhar ordens de escavação em células que
+// o DFHack identificou como ar (ou cujo tiletype ainda não chegou ao cliente).
+// Sem essa validação, a marcação fica parecendo um bloco flutuando sobre um
+// buraco e também mascara o diagnóstico de chunks ainda incompletos.
+func shouldRenderDesignation(tile mapdata.Tile) bool {
+	switch tile.Shape() {
+	case dfproto.ShapeNoShape, dfproto.ShapeEmpty:
+		return false
+	default:
+		return true
+	}
+}
+
 func artImageElementColor(snapshot mapdata.ChunkSnapshot, element dfproto.ArtImageElement) matrix.Color {
 	fallback := matrix.NewColor(0.75, 0.75, 0.78, 1)
 	switch element.Type {
@@ -916,6 +929,9 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 			}
 			tile := snapshot.Tiles[x][y]
 			if tile.DigDesignation == dfproto.DigNone && !tile.DigMarker && !tile.DigAuto {
+				continue
+			}
+			if !shouldRenderDesignation(tile) {
 				continue
 			}
 			key := fmt.Sprintf("designation:%s:%d", chunkKey, x+y*16)
