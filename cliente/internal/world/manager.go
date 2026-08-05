@@ -21,6 +21,8 @@ type Manager struct {
 
 	// Eventos
 	OnMapChunkUpdated func(chunk *mapdata.Chunk)
+	OnMapChunkRemoved func(origin util.DFCoord)
+	OnUnitsUpdated    func(units []mapdata.UnitInstance)
 	OnWorldStatus     func(status *fvnet.WorldStatus)
 	OnStatusMsg       func(msg string, dfConnected bool)
 }
@@ -81,6 +83,17 @@ func (m *Manager) HandleEnvelope(env *fvnet.Envelope) {
 			log.Printf("[World] ❌ Erro ao desmarshallar MAP_CHUNK: %v", err)
 		}
 
+	case fvnet.Envelope_CREATURE_UPDATE:
+		var creatures fvnet.CreatureUpdateMessage
+		if err := creatures.Unmarshal(env.Payload); err != nil {
+			log.Printf("[World] Erro ao desserializar unidades: %v", err)
+			break
+		}
+		m.Store.ReplaceUnits(creatures.Units)
+		if m.OnUnitsUpdated != nil {
+			m.OnUnitsUpdated(creatures.Units)
+		}
+
 	case fvnet.Envelope_VEGETATION_UPDATE:
 		var vegMsg fvnet.VegetationUpdateMessage
 		if err := vegMsg.Unmarshal(env.Payload); err == nil {
@@ -101,22 +114,41 @@ func (m *Manager) processChunk(msg *fvnet.MapChunkMessage) {
 		if m.OnMapChunkUpdated != nil {
 			m.OnMapChunkUpdated(nil) // Sinaliza remoção/ar
 		}
+		if m.OnMapChunkRemoved != nil {
+			m.OnMapChunkRemoved(origin)
+		}
 		return
 	}
 
 	// Decodificador de voxel-grid serializado do server (16x16)
-	var tiles [16][16]*mapdata.Tile
+	var snapshot mapdata.ChunkSnapshot
 	dec := gob.NewDecoder(bytes.NewReader(msg.VoxelData))
-	if err := dec.Decode(&tiles); err != nil {
+	if err := dec.Decode(&snapshot); err != nil {
 		log.Printf("[World] ❌ Erro ao decodificar dados do chunk em %v: %v", origin, err)
 		return
+	}
+	var tiles [16][16]*mapdata.Tile
+	for x := 0; x < 16; x++ {
+		for y := 0; y < 16; y++ {
+			if snapshot.TilePresent[x][y] {
+				tile := snapshot.Tiles[x][y]
+				tiles[x][y] = &tile
+			}
+		}
 	}
 
 	m.Store.Mu.Lock()
 	chunk := &mapdata.Chunk{
-		Origin: origin,
-		Tiles:  tiles,
-		MTime:  time.Now().UnixNano(),
+		Origin:            origin,
+		Tiles:             tiles,
+		Plants:            snapshot.Plants,
+		Buildings:         snapshot.Buildings,
+		Items:             snapshot.Items,
+		ConstructionItems: snapshot.ConstructionItems,
+		Flows:             snapshot.Flows,
+		SpatterPile:       snapshot.SpatterPile,
+		Engravings:        snapshot.Engravings,
+		MTime:             time.Now().UnixNano(),
 	}
 
 	// Reconectar as referências recursivas dos tiles ao seu armazenador de mundo
@@ -172,12 +204,20 @@ func (m *Manager) processVegetation(msg *fvnet.VegetationUpdateMessage) {
 }
 
 // RequestRegion pede ativamente à "Estrada" (cliente WebSocket) um raio contendo terreno a partir do foco central.
-func (m *Manager) RequestRegion(sendFunc func(msgType fvnet.Envelope_Type, msg proto.Message), center util.DFCoord, radius int32) {
+func (m *Manager) RequestRegion(sendFunc func(msgType fvnet.Envelope_Type, msg proto.Message), center util.DFCoord, radius, levelsDown, levelsUp int32) {
+	if levelsDown < 0 {
+		levelsDown = 0
+	}
+	if levelsUp < 0 {
+		levelsUp = 0
+	}
 	req := &fvnet.ClientRequestRegion{
-		CenterX: center.X,
-		CenterY: center.Y,
-		CenterZ: center.Z,
-		Radius:  radius,
+		CenterX:    center.X,
+		CenterY:    center.Y,
+		CenterZ:    center.Z,
+		Radius:     radius,
+		LevelsDown: levelsDown,
+		LevelsUp:   levelsUp,
 	}
 	sendFunc(fvnet.Envelope_CLIENT_REQUEST_REGION, req)
 }

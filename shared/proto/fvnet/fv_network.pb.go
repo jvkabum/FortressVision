@@ -219,6 +219,8 @@ type ClientRequestRegion struct {
 	CenterY       int32                  `protobuf:"varint,2,opt,name=center_y,json=centerY,proto3" json:"center_y,omitempty"`
 	CenterZ       int32                  `protobuf:"varint,3,opt,name=center_z,json=centerZ,proto3" json:"center_z,omitempty"`
 	Radius        int32                  `protobuf:"varint,4,opt,name=radius,proto3" json:"radius,omitempty"`
+	LevelsDown    int32                  `protobuf:"varint,5,opt,name=levels_down,json=levelsDown,proto3" json:"levels_down,omitempty"`
+	LevelsUp      int32                  `protobuf:"varint,6,opt,name=levels_up,json=levelsUp,proto3" json:"levels_up,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -277,6 +279,20 @@ func (x *ClientRequestRegion) GetCenterZ() int32 {
 func (x *ClientRequestRegion) GetRadius() int32 {
 	if x != nil {
 		return x.Radius
+	}
+	return 0
+}
+
+func (x *ClientRequestRegion) GetLevelsDown() int32 {
+	if x != nil {
+		return x.LevelsDown
+	}
+	return 0
+}
+
+func (x *ClientRequestRegion) GetLevelsUp() int32 {
+	if x != nil {
+		return x.LevelsUp
 	}
 	return 0
 }
@@ -479,12 +495,14 @@ const file_shared_proto_fvnet_fv_network_proto_rawDesc = "" +
 	"\achunk_y\x18\x02 \x01(\x05R\x06chunkY\x12\x17\n" +
 	"\achunk_z\x18\x03 \x01(\x05R\x06chunkZ\x12\x1d\n" +
 	"\n" +
-	"voxel_data\x18\x04 \x01(\fR\tvoxelData\"~\n" +
+	"voxel_data\x18\x04 \x01(\fR\tvoxelData\"\xbc\x01\n" +
 	"\x13ClientRequestRegion\x12\x19\n" +
 	"\bcenter_x\x18\x01 \x01(\x05R\acenterX\x12\x19\n" +
 	"\bcenter_y\x18\x02 \x01(\x05R\acenterY\x12\x19\n" +
 	"\bcenter_z\x18\x03 \x01(\x05R\acenterZ\x12\x16\n" +
-	"\x06radius\x18\x04 \x01(\x05R\x06radius\"p\n" +
+	"\x06radius\x18\x04 \x01(\x05R\x06radius\x12\x1f\n" +
+	"\vlevels_down\x18\x05 \x01(\x05R\nlevelsDown\x12\x1b\n" +
+	"\tlevels_up\x18\x06 \x01(\x05R\blevelsUp\"p\n" +
 	"\fServerStatus\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x12!\n" +
 	"\fdf_connected\x18\x02 \x01(\bR\vdfConnected\x12#\n" +

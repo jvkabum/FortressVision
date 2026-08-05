@@ -24,6 +24,12 @@ type ServerScanner struct {
 	fsMutex        sync.RWMutex
 }
 
+// responseBlockOrigin converte as coordenadas de tile retornadas pelo
+// RemoteFortressReader para a origem do chunk 16x16 usado pelo store.
+func responseBlockOrigin(block dfproto.MapBlock) util.DFCoord {
+	return util.NewDFCoord(block.MapX, block.MapY, block.MapZ).BlockCoord()
+}
+
 func NewServerScanner(df *dfhack.Client, s *mapdata.MapDataStore, h *Hub) *ServerScanner {
 	return &ServerScanner{
 		dfClient:       df,
@@ -105,10 +111,11 @@ func (s *ServerScanner) scanLoop() {
 
 				if list != nil && len(list.MapBlocks) > 0 {
 					for _, block := range list.MapBlocks {
-						origin := util.NewDFCoord(block.MapX, block.MapY, block.MapZ).BlockCoord()
+						origin := responseBlockOrigin(block)
 						foundBlockMap[origin] = true
 
-						change := s.store.StoreSingleBlock(&block)
+						_, wasCached := s.store.GetChunk(origin)
+						change, affectedRampChunks := s.store.StoreSingleBlockWithAffected(&block)
 						if change != mapdata.NoChange {
 							blocksUpdated++
 							if change == mapdata.VegetationChange {
@@ -118,16 +125,33 @@ func (s *ServerScanner) scanLoop() {
 									s.hub.BroadcastVegetation(block.MapX, block.MapY, block.MapZ, plantsCopy)
 								}
 							}
+							if wasCached {
+								if chunk, ok := s.store.GetChunk(origin); ok {
+									// Um snapshot completo sincroniza todos os campos do MapBlock.
+									s.hub.BroadcastChunkSnapshot(chunk)
+								}
+								for _, affectedOrigin := range affectedRampChunks {
+									if affectedOrigin == origin {
+										continue
+									}
+									if affected, ok := s.store.GetChunk(affectedOrigin); ok {
+										s.hub.BroadcastChunkSnapshot(affected)
+									}
+								}
+							}
 						}
 					}
 				}
 
 				// Marca como vazio o que pedimos e não veio (Ar/Céu)
-				for bx := (bxMin / 16) * 16; bx <= bxMax; bx += 16 {
-					for by := (byMin / 16) * 16; by <= byMax; by += 16 {
+				start := util.DFCoord{X: bxMin, Y: byMin}.BlockCoord()
+				for bx := start.X; bx <= bxMax; bx += 16 {
+					for by := start.Y; by <= byMax; by += 16 {
 						origin := util.NewDFCoord(bx, by, z).BlockCoord()
 						if !foundBlockMap[origin] {
-							s.store.MarkAsEmpty(origin)
+							if s.store.MarkAsEmpty(origin) {
+								s.hub.BroadcastEmptyChunk(origin)
+							}
 						}
 					}
 				}
@@ -217,7 +241,7 @@ func (s *ServerScanner) StartFullScan() {
 						for _, block := range list.MapBlocks {
 							s.store.StoreSingleBlock(&block)
 							blocksInLayer++
-							foundInBatch[util.NewDFCoord(block.MapX*16, block.MapY*16, block.MapZ).BlockCoord()] = true
+							foundInBatch[responseBlockOrigin(block)] = true
 						}
 					}
 

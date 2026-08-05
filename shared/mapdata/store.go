@@ -3,6 +3,7 @@ package mapdata
 import (
 	"log"
 	"math"
+	"reflect"
 	"sync"
 
 	"FortressVision/shared/pkg/dfproto"
@@ -79,12 +80,117 @@ type Chunk struct {
 	Plants            []dfproto.PlantDetail      // Cache de plantas (shrubs/saplings)
 	Buildings         []dfproto.BuildingInstance // Construções no bloco
 	Items             []dfproto.Item             // Itens soltos no bloco
+	Flows             []dfproto.FlowInfo         // Gases e outros fluxos
 	ConstructionItems []dfproto.MatPair          // Itens de construção (ex: paredes manuais)
 	SpatterPile       []dfproto.SpatterPile      // Manchas e sujeiras (ID 25)
 	Engravings        []dfproto.Engraving        // Gravuras e entalhes (ID 32)
 	MTime             int64                      // Contador de modificações / versão
 	IsDirty           bool                       // Indica que o chunk foi alterado e precisa salvar
 	IsEmpty           bool                       // Indica que o bloco é ar/vazio
+}
+
+// ChunkSnapshot é o payload visual completo de um bloco enviado ao cliente.
+// Tiles continuam sendo a base do terreno; os demais campos permitem desenhar
+// construções, itens e detalhes que não fazem parte da malha voxel.
+type ChunkSnapshot struct {
+	Tiles             [16][16]Tile
+	TilePresent       [16][16]bool
+	Plants            []dfproto.PlantDetail
+	Buildings         []dfproto.BuildingInstance
+	Items             []dfproto.Item
+	ConstructionItems []dfproto.MatPair
+	Flows             []dfproto.FlowInfo
+	SpatterPile       []dfproto.SpatterPile
+	Engravings        []dfproto.Engraving
+}
+
+func (c *Chunk) Snapshot() ChunkSnapshot {
+	if c == nil {
+		return ChunkSnapshot{}
+	}
+	// Chunks são compartilhados pelo scanner, pelo streaming e pelo renderer.
+	// Quando o chunk ainda carrega uma referência a um tile do store, proteger
+	// a cópia evita que uma atualização do DFHack altere uma slice enquanto o
+	// gob está sendo codificado.
+	if owner := c.ownerStore(); owner != nil {
+		owner.Mu.RLock()
+		defer owner.Mu.RUnlock()
+	}
+	return c.snapshotUnlocked()
+}
+
+func (c *Chunk) ownerStore() *MapDataStore {
+	for x := 0; x < 16; x++ {
+		for y := 0; y < 16; y++ {
+			if tile := c.Tiles[x][y]; tile != nil && tile.container != nil {
+				return tile.container
+			}
+		}
+	}
+	return nil
+}
+
+func (c *Chunk) snapshotUnlocked() ChunkSnapshot {
+	snapshot := ChunkSnapshot{
+		Plants:            append([]dfproto.PlantDetail(nil), c.Plants...),
+		Buildings:         append([]dfproto.BuildingInstance(nil), c.Buildings...),
+		Items:             append([]dfproto.Item(nil), c.Items...),
+		ConstructionItems: append([]dfproto.MatPair(nil), c.ConstructionItems...),
+		Flows:             append([]dfproto.FlowInfo(nil), c.Flows...),
+		SpatterPile:       append([]dfproto.SpatterPile(nil), c.SpatterPile...),
+		Engravings:        append([]dfproto.Engraving(nil), c.Engravings...),
+	}
+	for x := 0; x < 16; x++ {
+		for y := 0; y < 16; y++ {
+			if c.Tiles[x][y] != nil {
+				snapshot.Tiles[x][y] = *c.Tiles[x][y]
+				snapshot.TilePresent[x][y] = true
+			}
+		}
+	}
+	return snapshot
+}
+
+// Clone cria uma cópia estável para consumidores assíncronos, como o mesher.
+// Os tiles continuam ligados ao mesmo MapDataStore para que Shape() e as
+// cores dos materiais permaneçam disponíveis, mas nenhum ponteiro mutável do
+// chunk original é compartilhado com o worker.
+func (c *Chunk) Clone() *Chunk {
+	if c == nil {
+		return nil
+	}
+	owner := c.ownerStore()
+	if owner != nil {
+		owner.Mu.RLock()
+		defer owner.Mu.RUnlock()
+	}
+	return c.cloneUnlocked(owner)
+}
+
+func (c *Chunk) cloneUnlocked(owner *MapDataStore) *Chunk {
+	clone := &Chunk{
+		Origin:            c.Origin,
+		Plants:            append([]dfproto.PlantDetail(nil), c.Plants...),
+		Buildings:         append([]dfproto.BuildingInstance(nil), c.Buildings...),
+		Items:             append([]dfproto.Item(nil), c.Items...),
+		ConstructionItems: append([]dfproto.MatPair(nil), c.ConstructionItems...),
+		Flows:             append([]dfproto.FlowInfo(nil), c.Flows...),
+		SpatterPile:       append([]dfproto.SpatterPile(nil), c.SpatterPile...),
+		Engravings:        append([]dfproto.Engraving(nil), c.Engravings...),
+		MTime:             c.MTime,
+		IsDirty:           c.IsDirty,
+		IsEmpty:           c.IsEmpty,
+	}
+	for x := 0; x < 16; x++ {
+		for y := 0; y < 16; y++ {
+			if tile := c.Tiles[x][y]; tile != nil {
+				copyTile := *tile
+				copyTile.container = owner
+				clone.Tiles[x][y] = &copyTile
+			}
+		}
+	}
+	return clone
 }
 
 // NewMapDataStore cria um novo repositório de dados do mapa.
@@ -111,17 +217,37 @@ func (s *MapDataStore) GetMTime(origin util.DFCoord) int64 {
 
 // MarkAsEmpty marca um chunk como conhecido e vazio (Ar).
 // Isso evita que o servidor fique requisitando o mesmo céu repetidamente.
-func (s *MapDataStore) MarkAsEmpty(origin util.DFCoord) {
+func (s *MapDataStore) MarkAsEmpty(origin util.DFCoord) bool {
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
-	if _, exists := s.Chunks[origin]; !exists {
+	chunk, exists := s.Chunks[origin]
+	if !exists {
 		s.Chunks[origin] = &Chunk{
 			Origin:  origin,
 			IsEmpty: true,
 			MTime:   1,    // Versão mínima
 			IsDirty: true, // DEVE ser salvo no banco para não perder a informação do vazio no Purge
 		}
+		return false
 	}
+	if chunk.IsEmpty {
+		return false
+	}
+	chunk.Tiles = [16][16]*Tile{}
+	chunk.Plants = nil
+	chunk.Buildings = nil
+	chunk.Items = nil
+	chunk.Flows = nil
+	chunk.ConstructionItems = nil
+	chunk.SpatterPile = nil
+	chunk.Engravings = nil
+	chunk.IsEmpty = true
+	chunk.MTime++
+	if chunk.MTime == 0 {
+		chunk.MTime = 1
+	}
+	chunk.IsDirty = true
+	return true
 }
 
 // GetTile retorna um tile em coordenadas globais. Retorna nil se não existir.
@@ -225,6 +351,11 @@ func (s *MapDataStore) StoreBlocks(list *dfproto.BlockList) {
 // StoreSingleBlock converte um bloco do Raw Proto e armazena/atualiza no store.
 // Retorna o tipo de mudança detectada (NoChange, TerrainChange ou VegetationChange).
 func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
+	change, _ := s.StoreSingleBlockWithAffected(block)
+	return change
+}
+
+func (s *MapDataStore) StoreSingleBlockWithAffected(block *dfproto.MapBlock) (ChangeType, []util.DFCoord) {
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
 
@@ -246,6 +377,10 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 	// Flag para indicar se houve mudança real nos dados deste chunk
 	chunkChanged := false
 	vegChanged := false
+	if chunk.IsEmpty {
+		chunk.IsEmpty = false
+		chunkChanged = true
+	}
 
 	// Pré-processa os fluxos (Flows) para busca rápida por coordenada
 	flowMap := make(map[util.DFCoord]util.DFCoord)
@@ -335,82 +470,60 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 					chunkChanged = true
 				}
 			}
+			intAt := func(values []int32, index int) int32 {
+				if index >= 0 && index < len(values) {
+					return values[index]
+				}
+				return 0
+			}
+			boolAt := func(values []bool, index int) bool {
+				return index >= 0 && index < len(values) && values[index]
+			}
+			matAt := func(values []dfproto.MatPair, index int) dfproto.MatPair {
+				if index >= 0 && index < len(values) {
+					return values[index]
+				}
+				return dfproto.MatPair{}
+			}
 
 			// Preenche dados básicos se presentes no bloco e marca se mudou
 			if len(block.Tiles) > int(idx) {
 				checkChange("TileType", &tile.TileType, block.Tiles[idx])
 			}
-			if len(block.Materials) > int(idx) {
-				checkChangeMatPair("Material", &tile.Material, block.Materials[idx])
+			checkChangeMatPair("Material", &tile.Material, matAt(block.Materials, int(idx)))
+			checkChangeMatPair("BaseMaterial", &tile.BaseMaterial, matAt(block.BaseMaterials, int(idx)))
+			checkChangeMatPair("LayerMaterial", &tile.LayerMaterial, matAt(block.LayerMaterials, int(idx)))
+			checkChangeMatPair("VeinMaterial", &tile.VeinMaterial, matAt(block.VeinMaterials, int(idx)))
+			checkChange("WaterLevel", &tile.WaterLevel, intAt(block.Water, int(idx)))
+			checkChange("MagmaLevel", &tile.MagmaLevel, intAt(block.Magma, int(idx)))
+			checkChangeBool("Hidden", &tile.Hidden, boolAt(block.Hidden, int(idx)))
+			checkChangeBool("Light", &tile.Light, boolAt(block.Light, int(idx)))
+			checkChangeBool("Subterranean", &tile.Subterranean, boolAt(block.Subterranean, int(idx)))
+			checkChangeBool("Outside", &tile.Outside, boolAt(block.Outside, int(idx)))
+			checkChangeBool("Aquifer", &tile.Aquifer, boolAt(block.Aquifer, int(idx)))
+			checkChangeBool("WaterStagnant", &tile.WaterStagnant, boolAt(block.WaterStagnant, int(idx)))
+			checkChangeBool("WaterSalt", &tile.WaterSalt, boolAt(block.WaterSalt, int(idx)))
+			checkChangeMatPair("ConstructionItem", &tile.ConstructionItem, matAt(block.ConstructionItems, int(idx)))
+			newDig := dfproto.DigNone
+			if int(idx) < len(block.TileDigDesignation) {
+				newDig = block.TileDigDesignation[idx]
 			}
-			if len(block.BaseMaterials) > int(idx) {
-				checkChangeMatPair("BaseMaterial", &tile.BaseMaterial, block.BaseMaterials[idx])
+			if tile.DigDesignation != newDig {
+				tile.DigDesignation = newDig
+				chunkChanged = true
 			}
-			if len(block.LayerMaterials) > int(idx) {
-				checkChangeMatPair("LayerMaterial", &tile.LayerMaterial, block.LayerMaterials[idx])
-			}
-			if len(block.VeinMaterials) > int(idx) {
-				checkChangeMatPair("VeinMaterial", &tile.VeinMaterial, block.VeinMaterials[idx])
-			}
-			if len(block.Water) > int(idx) {
-				checkChange("WaterLevel", &tile.WaterLevel, int32(block.Water[idx]))
-			}
-			if len(block.Magma) > int(idx) {
-				checkChange("MagmaLevel", &tile.MagmaLevel, int32(block.Magma[idx]))
-			}
-			if len(block.Hidden) > int(idx) {
-				checkChangeBool("Hidden", &tile.Hidden, block.Hidden[idx])
-			}
-			if len(block.Light) > int(idx) {
-				checkChangeBool("Light", &tile.Light, block.Light[idx])
-			}
-			if len(block.Subterranean) > int(idx) {
-				checkChangeBool("Subterranean", &tile.Subterranean, block.Subterranean[idx])
-			}
-			if len(block.Outside) > int(idx) {
-				checkChangeBool("Outside", &tile.Outside, block.Outside[idx])
-			}
-			if len(block.Aquifer) > int(idx) {
-				checkChangeBool("Aquifer", &tile.Aquifer, block.Aquifer[idx])
-			}
-			if len(block.WaterStagnant) > int(idx) {
-				checkChangeBool("WaterStagnant", &tile.WaterStagnant, block.WaterStagnant[idx])
-			}
-			if len(block.WaterSalt) > int(idx) {
-				checkChangeBool("WaterSalt", &tile.WaterSalt, block.WaterSalt[idx])
-			}
-			if len(block.ConstructionItems) > int(idx) {
-				checkChangeMatPair("ConstructionItem", &tile.ConstructionItem, block.ConstructionItems[idx])
-			}
-			if len(block.TileDigDesignation) > int(idx) {
-				newDig := block.TileDigDesignation[idx]
-				if tile.DigDesignation != newDig {
-					tile.DigDesignation = newDig
-					chunkChanged = true
-				}
-			}
-			if len(block.DigDesignationMarker) > int(idx) {
-				checkChangeBool("DigMarker", &tile.DigMarker, block.DigDesignationMarker[idx])
-			}
-			if len(block.DigDesignationAuto) > int(idx) {
-				checkChangeBool("DigAuto", &tile.DigAuto, block.DigDesignationAuto[idx])
-			}
-			if len(block.GrassPercent) > int(idx) {
-				checkChange("GrassPercent", &tile.GrassPercent, block.GrassPercent[idx])
-			}
+			checkChangeBool("DigMarker", &tile.DigMarker, boolAt(block.DigDesignationMarker, int(idx)))
+			checkChangeBool("DigAuto", &tile.DigAuto, boolAt(block.DigDesignationAuto, int(idx)))
+			checkChange("GrassPercent", &tile.GrassPercent, intAt(block.GrassPercent, int(idx)))
 
 			// Dados de árvores (Tronco e Galhos)
-			if len(block.TreePercent) > int(idx) {
-				newVal := uint8(block.TreePercent[idx])
-				if tile.TrunkPercent != newVal {
-					tile.TrunkPercent = newVal
-					chunkChanged = true
-				}
+			newVal := uint8(intAt(block.TreePercent, int(idx)))
+			if tile.TrunkPercent != newVal {
+				tile.TrunkPercent = newVal
+				chunkChanged = true
 			}
-			if len(block.TreeX) > int(idx) && len(block.TreeY) > int(idx) && len(block.TreeZ) > int(idx) {
-				treePos := util.NewDFCoord(block.TreeX[idx], block.TreeY[idx], block.TreeZ[idx])
-				checkChangeCoord("PositionOnTree", &tile.PositionOnTree, treePos)
-			}
+			treePos := util.NewDFCoord(intAt(block.TreeX, int(idx)), intAt(block.TreeY, int(idx)), intAt(block.TreeZ, int(idx)))
+			checkChangeCoord("PositionOnTree", &tile.PositionOnTree, treePos)
 
 			// Procura por fluxo na posição global
 			flowDir, hasFlow := flowMap[worldCoord]
@@ -424,29 +537,34 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 	}
 
 	// Sincroniza Entidades (Construções e Itens)
-	if len(block.Buildings) > 0 || len(chunk.Buildings) > 0 {
-		chunk.Buildings = block.Buildings
+	if !reflect.DeepEqual(chunk.Buildings, block.Buildings) {
+		chunk.Buildings = append([]dfproto.BuildingInstance(nil), block.Buildings...)
 		chunkChanged = true
 	}
-	if len(block.Items) > 0 || len(chunk.Items) > 0 {
-		chunk.Items = block.Items
+	if !reflect.DeepEqual(chunk.Items, block.Items) {
+		chunk.Items = append([]dfproto.Item(nil), block.Items...)
 		chunkChanged = true
 	}
-	if len(block.ConstructionItems) > 0 || len(chunk.ConstructionItems) > 0 {
-		chunk.ConstructionItems = block.ConstructionItems
+	if !reflect.DeepEqual(chunk.ConstructionItems, block.ConstructionItems) {
+		chunk.ConstructionItems = append([]dfproto.MatPair(nil), block.ConstructionItems...)
 		chunkChanged = true
 	}
-	if len(block.SpatterPile) > 0 || len(chunk.SpatterPile) > 0 {
-		chunk.SpatterPile = block.SpatterPile
+	if !flowListsEqual(chunk.Flows, block.Flows) {
+		chunk.Flows = append([]dfproto.FlowInfo(nil), block.Flows...)
 		chunkChanged = true
 	}
-	if len(block.Engravings) > 0 || len(chunk.Engravings) > 0 {
-		chunk.Engravings = block.Engravings
+	if !reflect.DeepEqual(chunk.SpatterPile, block.SpatterPile) {
+		chunk.SpatterPile = append([]dfproto.SpatterPile(nil), block.SpatterPile...)
+		chunkChanged = true
+	}
+	if !reflect.DeepEqual(chunk.Engravings, block.Engravings) {
+		chunk.Engravings = append([]dfproto.Engraving(nil), block.Engravings...)
 		chunkChanged = true
 	}
 
 	// Coleta dados de vegetação (saplings e shrubs)
-	if len(s.recalculateRampTypesLocked(origin)) > 0 {
+	affectedRampChunks := s.recalculateRampTypesLocked(origin)
+	if len(affectedRampChunks) > 0 {
 		chunkChanged = true
 	}
 
@@ -495,15 +613,27 @@ func (s *MapDataStore) StoreSingleBlock(block *dfproto.MapBlock) ChangeType {
 	}
 
 	if chunkChanged {
-		return TerrainChange
+		return TerrainChange, affectedRampChunks
 	}
 	if vegChanged {
-		return VegetationChange
+		return VegetationChange, affectedRampChunks
 	}
-	return NoChange
+	return NoChange, affectedRampChunks
 }
 
 // StorePlants processa atualizações específicas de vegetação enviadas via rede.
+func flowListsEqual(a, b []dfproto.FlowInfo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *MapDataStore) StorePlants(chunkX, chunkY, chunkZ int32, plants []dfproto.PlantDetail) {
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
@@ -943,6 +1073,17 @@ func (s *MapDataStore) UpdateUnit(u *UnitInstance) {
 	s.Units[u.ID] = u
 }
 
+// ReplaceUnits substitui o snapshot de unidades recebido do DFHack.
+func (s *MapDataStore) ReplaceUnits(units []UnitInstance) {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+	s.Units = make(map[int32]*UnitInstance, len(units))
+	for i := range units {
+		u := units[i]
+		s.Units[u.ID] = &u
+	}
+}
+
 // ClearEntities remove todas as entidades (útil ao mudar de mapa).
 func (s *MapDataStore) ClearEntities() {
 	s.Mu.Lock()
@@ -954,7 +1095,7 @@ func (s *MapDataStore) ClearEntities() {
 
 // GetRAMChunkCount retorna o n�mero de chunks atualmente carregados na mem�ria.
 func (s *MapDataStore) GetRAMChunkCount() int {
-s.Mu.RLock()
-defer s.Mu.RUnlock()
-return len(s.Chunks)
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
+	return len(s.Chunks)
 }

@@ -49,6 +49,8 @@ message ClientRequestRegion {
     int32 center_y = 2;
     int32 center_z = 3;
     int32 radius = 4;
+    int32 levels_down = 5;
+    int32 levels_up = 6;
 }
 
 message ServerStatus {

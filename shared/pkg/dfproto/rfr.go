@@ -2035,6 +2035,7 @@ func (u *UnitWound) Unmarshal(data []byte) error {
 type UnitDefinition struct {
 	ID             int32
 	IsValid        bool
+	IsValidSet     bool
 	PosX           int32
 	PosY           int32
 	PosZ           int32
@@ -2073,6 +2074,7 @@ func (u *UnitDefinition) Unmarshal(data []byte) error {
 			v, _ := d.ReadVarint()
 			u.ID = int32(v)
 		case 2:
+			u.IsValidSet = true
 			u.IsValid, _ = d.ReadBool()
 		case 3:
 			v, _ := d.ReadVarint()
@@ -2153,6 +2155,13 @@ func (u *UnitDefinition) Unmarshal(data []byte) error {
 		}
 	}
 	return nil
+}
+
+// IsValidForDisplay preserva unidades retornadas pelo DFHack quando o campo
+// opcional isValid não foi serializado. O proto2 usa ausência para o valor
+// default, mas GetUnitList já é uma lista de unidades do mundo para exibição.
+func (u UnitDefinition) IsValidForDisplay() bool {
+	return u.IsValid || !u.IsValidSet
 }
 
 // UnitList contém a lista de unidades.

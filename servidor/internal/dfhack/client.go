@@ -10,6 +10,7 @@ import (
 	"FortressVision/shared/pkg/dfclient"
 	"FortressVision/shared/pkg/dfnet"
 	"FortressVision/shared/pkg/dfproto"
+	"FortressVision/shared/util"
 )
 
 // Client é uma fachada fina que gerencia a vida útil da conexão.
@@ -216,9 +217,32 @@ func (c *Client) GetBlockList(minX, minY, minZ, maxX, maxY, maxZ, blocksNeeded i
 			// Apenas o MapZ precisa ser ajustado se estivermos usando o sistema de índices locais (0-N).
 			res.MapBlocks[i].MapZ += info.BlockPosZ
 		}
+		for i := range res.Engravings {
+			res.Engravings[i].Pos.Z += info.BlockPosZ
+		}
 	}
+	attachEngravingsToBlocks(res)
 
 	return res, err
+}
+
+// attachEngravingsToBlocks distribui as gravuras do BlockList para o chunk
+// correspondente. O protocolo do RemoteFortressReader as envia no envelope
+// da lista, enquanto o restante do renderer trabalha por MapBlock.
+func attachEngravingsToBlocks(list *dfproto.BlockList) {
+	if list == nil || len(list.Engravings) == 0 {
+		return
+	}
+
+	byChunk := make(map[util.DFCoord][]dfproto.Engraving)
+	for _, engraving := range list.Engravings {
+		origin := util.NewDFCoord(engraving.Pos.X, engraving.Pos.Y, engraving.Pos.Z).BlockCoord()
+		byChunk[origin] = append(byChunk[origin], engraving)
+	}
+	for i := range list.MapBlocks {
+		origin := util.NewDFCoord(list.MapBlocks[i].MapX, list.MapBlocks[i].MapY, list.MapBlocks[i].MapZ).BlockCoord()
+		list.MapBlocks[i].Engravings = append(list.MapBlocks[i].Engravings, byChunk[origin]...)
+	}
 }
 
 func (c *Client) GetInterestZ() int32 {

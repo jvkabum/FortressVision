@@ -5,19 +5,22 @@ import (
 	"FortressVision/cliente/internal/hud"
 	"FortressVision/cliente/internal/mesher"
 	"FortressVision/cliente/internal/network"
+	"FortressVision/cliente/internal/render"
 	"FortressVision/cliente/internal/world"
 	"FortressVision/shared/mapdata"
 	"FortressVision/shared/proto/fvnet"
+	"FortressVision/shared/util"
 	"fmt"
 )
 
 // BridgeConfig contém as instâncias necessárias para configurar a orquestração do app.
 type BridgeConfig struct {
-	Net     *network.Client
-	World   *world.Manager
-	Mesher  *mesher.Manager
-	HUD     *hud.HUD
-	Camera  *camera.Controller
+	Net      *network.Client
+	World    *world.Manager
+	Mesher   *mesher.Manager
+	HUD      *hud.HUD
+	Camera   *camera.Controller
+	Renderer *render.TerrainRenderer
 }
 
 // SetupBridge estabelece as conexões de eventos entre os diferentes módulos do cliente.
@@ -30,7 +33,19 @@ func SetupBridge(cfg BridgeConfig) {
 	// 2. Conexão Mundo -> Mesher (Geometria do Terreno)
 	cfg.World.OnMapChunkUpdated = func(chunk *mapdata.Chunk) {
 		if chunk != nil {
+			if cfg.Renderer != nil {
+				cfg.Renderer.UpdateChunkEntities(chunk)
+			}
 			cfg.Mesher.RequestMeshUpdate(chunk)
+		}
+	}
+	if cfg.Renderer != nil {
+		cfg.World.OnUnitsUpdated = cfg.Renderer.UpdateUnits
+	}
+	cfg.World.OnMapChunkRemoved = func(origin util.DFCoord) {
+		cfg.Mesher.RemoveChunk(origin)
+		if cfg.Renderer != nil {
+			cfg.Renderer.RemoveChunk(origin)
 		}
 	}
 

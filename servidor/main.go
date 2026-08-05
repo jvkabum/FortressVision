@@ -119,6 +119,19 @@ func (h *Hub) run() {
 	}
 }
 
+// registerClient conclui o registro antes de qualquer mensagem inicial ser
+// enviada pelo serveWs. O envio por canal sozinho permitia uma corrida entre
+// o recebimento do valor e a inserÃ§Ã£o efetiva no mapa de clientes.
+func (h *Hub) registerClient(client *websocket.Conn) {
+	h.mu.Lock()
+	h.clients[client] = &sync.Mutex{}
+	h.mu.Unlock()
+	h.regionMu.Lock()
+	h.regionSeq[client] = 0
+	h.regionMu.Unlock()
+	log.Printf("Cliente registrado: %s", client.RemoteAddr())
+}
+
 func (h *Hub) beginRegion(conn *websocket.Conn) uint64 {
 	h.regionMu.Lock()
 	defer h.regionMu.Unlock()
@@ -182,6 +195,29 @@ func (h *Hub) BroadcastMapChunk(chunkX, chunkY, chunkZ int32, voxelData []byte) 
 }
 
 // BroadcastVegetation envia apenas os deltas de vegetação de um chunk
+// BroadcastChunkSnapshot propaga um snapshot completo de chunk para os
+// clientes conectados quando o scanner detecta qualquer mudanÃ§a no MapBlock.
+// BroadcastEmptyChunk remove do cliente um chunk que deixou de existir no mapa.
+func (h *Hub) BroadcastEmptyChunk(origin util.DFCoord) {
+	if h == nil {
+		return
+	}
+	h.BroadcastMapChunk(origin.X, origin.Y, origin.Z, nil)
+}
+
+func (h *Hub) BroadcastChunkSnapshot(chunk *mapdata.Chunk) {
+	if h == nil || chunk == nil {
+		return
+	}
+
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(chunk.Snapshot()); err != nil {
+		log.Printf("[Hub] erro ao codificar snapshot dinÃ¢mico de %v: %v", chunk.Origin, err)
+		return
+	}
+	h.BroadcastMapChunk(chunk.Origin.X, chunk.Origin.Y, chunk.Origin.Z, buf.Bytes())
+}
+
 func (h *Hub) BroadcastVegetation(chunkX, chunkY, chunkZ int32, plants []dfproto.PlantDetail) {
 	if h == nil {
 		return
@@ -209,6 +245,26 @@ func (h *Hub) BroadcastVegetation(chunkX, chunkY, chunkZ int32, plants []dfproto
 	h.safeSend(data)
 }
 
+// BroadcastCreatureUpdate envia um snapshot das unidades atuais para os clientes.
+func (h *Hub) BroadcastCreatureUpdate(units []mapdata.UnitInstance) {
+	msg := &fvnet.CreatureUpdateMessage{Units: units}
+	payload, err := msg.Marshal()
+	if err != nil {
+		log.Printf("[Hub] Erro ao serializar unidades: %v", err)
+		return
+	}
+	envelope := &fvnet.Envelope{
+		Type:    fvnet.Envelope_CREATURE_UPDATE,
+		Payload: payload,
+	}
+	data, err := proto.Marshal(envelope)
+	if err != nil {
+		log.Printf("[Hub] Erro ao empacotar unidades: %v", err)
+		return
+	}
+	h.safeSend(data)
+}
+
 // BroadcastServerStatus envia uma mensagem de status/notificação para todos os clientes
 func (h *Hub) BroadcastServerStatus(message string, dfConnected bool) {
 	msg := &fvnet.ServerStatus{
@@ -227,10 +283,10 @@ func (h *Hub) BroadcastServerStatus(message string, dfConnected bool) {
 func main() {
 	// Desativado durante o desenvolvimento para não quebrar o 'go run'
 	/*
-	if exePath, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exePath)
-		os.Chdir(exeDir)
-	}
+		if exePath, err := os.Executable(); err == nil {
+			exeDir := filepath.Dir(exePath)
+			os.Chdir(exeDir)
+		}
 	*/
 
 	log.SetFlags(log.Ltime | log.Lshortfile)
@@ -376,21 +432,28 @@ func main() {
 				if dfClient != nil && dfClient.IsConnected() {
 					units, err := dfClient.GetUnitList()
 					if err == nil && units != nil {
+						snapshot := make([]mapdata.UnitInstance, 0, len(units.CreatureList))
 						for _, u := range units.CreatureList {
 							// Converter para nossa estrutura interna
 							instance := &mapdata.UnitInstance{
-								ID:     u.ID,
-								Name:   u.Name,
-								Race:   u.Race,
-								Pos:    util.DFCoord{X: u.PosX, Y: u.PosY, Z: u.PosZ},
-								SubPos: util.Vector3{X: u.SubposX, Y: u.SubposY, Z: u.SubposZ},
-								Flags1: u.Flags1,
-								Flags2: u.Flags2,
-								Flags3: u.Flags3,
-								IsDead: !u.IsValid,
+								ID:              u.ID,
+								Name:            u.Name,
+								Race:            u.Race,
+								ProfessionColor: u.ProfessionCol,
+								SizeCurrent:     u.SizeInfo.SizeCur,
+								SizeBase:        u.SizeInfo.SizeBase,
+								IsSoldier:       u.IsSoldier,
+								Pos:             util.DFCoord{X: u.PosX, Y: u.PosY, Z: u.PosZ},
+								SubPos:          util.Vector3{X: u.SubposX, Y: u.SubposY, Z: u.SubposZ},
+								Flags1:          u.Flags1,
+								Flags2:          u.Flags2,
+								Flags3:          u.Flags3,
+								IsDead:          !u.IsValidForDisplay(),
 							}
 							store.UpdateUnit(instance)
+							snapshot = append(snapshot, *instance)
 						}
+						hub.BroadcastCreatureUpdate(snapshot)
 					}
 				}
 			}()
@@ -500,7 +563,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request, dfClient *dfhack.
 		log.Printf("Erro no upgrade do WebSocket: %v", err)
 		return
 	}
-	hub.register <- conn
+	hub.registerClient(conn)
 
 	// Enviar status inicial
 	status := &fvnet.ServerStatus{
@@ -589,6 +652,32 @@ func handleClientMessage(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Client
 	}
 }
 
+func regionZLevels(center, levelsDown, levelsUp int32) []int32 {
+	if levelsDown < 0 {
+		levelsDown = 0
+	}
+	if levelsUp < 0 {
+		levelsUp = 0
+	}
+	if levelsDown > 32 {
+		levelsDown = 32
+	}
+	if levelsUp > 32 {
+		levelsUp = 32
+	}
+	levels := make([]int32, 0, int(levelsDown+levelsUp+1))
+	levels = append(levels, center)
+	for offset := int32(1); offset <= levelsDown || offset <= levelsUp; offset++ {
+		if offset <= levelsDown {
+			levels = append(levels, center-offset)
+		}
+		if offset <= levelsUp {
+			levels = append(levels, center+offset)
+		}
+	}
+	return levels
+}
+
 func streamRegionToClient(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Client, store *mapdata.MapDataStore, req *fvnet.ClientRequestRegion, scanner *ServerScanner, requestID uint64) {
 	// Streaming agora é permitido mesmo durante o Full Scan para uma experiência fluida (Fase 8)
 
@@ -597,120 +686,124 @@ func streamRegionToClient(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Clien
 	maxX := req.CenterX + req.Radius
 	minY := req.CenterY - req.Radius
 	maxY := req.CenterY + req.Radius
-	z := req.CenterZ
+	zLevels := regionZLevels(req.CenterZ, req.LevelsDown, req.LevelsUp)
 
 	chunksSent := 0
 	chunksEmpty := 0
 	// Ajustar limites para alinhar com a grade de 16-tiles
-	startX := (minX / 16) * 16
-	startY := (minY / 16) * 16
+	start := util.DFCoord{X: minX, Y: minY}.BlockCoord()
+	startX := start.X
+	startY := start.Y
 
-	// Iterar em blocos de 16
-	for x := startX; x <= maxX; x += 16 {
-		if !hub.isCurrentRegion(conn, requestID) {
-			return
-		}
-		for y := startY; y <= maxY; y += 16 {
+	// Iterar primeiro o nível central e depois os níveis vizinhos.
+	for _, z := range zLevels {
+		for x := startX; x <= maxX; x += 16 {
 			if !hub.isCurrentRegion(conn, requestID) {
 				return
 			}
-			origin := util.DFCoord{X: x, Y: y, Z: z}.BlockCoord()
+			for y := startY; y <= maxY; y += 16 {
+				if !hub.isCurrentRegion(conn, requestID) {
+					return
+				}
+				origin := util.DFCoord{X: x, Y: y, Z: z}.BlockCoord()
 
-			chunk, exists := store.GetChunk(origin)
+				chunk, exists := store.GetChunk(origin)
 
-			if !exists {
-				var err error
-				chunk, err = store.LoadChunk(origin)
-				if err != nil {
-					// Fallback On-Demand: Tenta buscar os blocos faltantes diretamente na memória do DFHack
-					if dfClient != nil && dfClient.IsConnected() && dfClient.MapInfo != nil {
-						info := dfClient.MapInfo
-						// Verifica se a coordenada está dentro dos limites reais da fortaleza no mundo (Absoluto)
-						if origin.X < info.BlockPosX*16 || origin.X >= (info.BlockPosX+info.BlockSizeX)*16 ||
-							origin.Y < info.BlockPosY*16 || origin.Y >= (info.BlockPosY+info.BlockSizeY)*16 ||
-							origin.Z < info.BlockPosZ || origin.Z >= info.BlockPosZ+info.BlockSizeZ {
-							// Fora dos limites do mapa gerado, é vazio.
-							store.MarkAsEmpty(origin)
+				if !exists {
+					var err error
+					chunk, err = store.LoadChunk(origin)
+					if err != nil {
+						// Fallback On-Demand: Tenta buscar os blocos faltantes diretamente na memória do DFHack
+						if dfClient != nil && dfClient.IsConnected() && dfClient.MapInfo != nil {
+							info := dfClient.MapInfo
+							// Verifica se a coordenada está dentro dos limites reais da fortaleza no mundo (Absoluto)
+							if origin.X < info.BlockPosX*16 || origin.X >= (info.BlockPosX+info.BlockSizeX)*16 ||
+								origin.Y < info.BlockPosY*16 || origin.Y >= (info.BlockPosY+info.BlockSizeY)*16 ||
+								origin.Z < info.BlockPosZ || origin.Z >= info.BlockPosZ+info.BlockSizeZ {
+								// Fora dos limites do mapa gerado, é vazio.
+								store.MarkAsEmpty(origin)
+								continue
+							}
+
+							log.Printf("[WS-Fallback] Chunk %v não encontrado. Requisitando ao DFHack...", origin)
+							// Converter Tile Coord (Origin) de volta para Block Index para a RPC
+							bx, by := origin.X/16, origin.Y/16
+							list, rpcErr := dfClient.GetBlockList(bx, by, origin.Z, bx, by, origin.Z, 1)
+							if rpcErr == nil && list != nil && len(list.MapBlocks) > 0 {
+								for _, block := range list.MapBlocks {
+									store.StoreSingleBlock(&block)
+								}
+								chunk, exists = store.GetChunk(origin)
+								if exists {
+									log.Printf("[WS-Fallback] Chunk %v recuperado com sucesso via DFHack! (Enviando ao cliente)", origin)
+								}
+							} else {
+								// Se rpcErr for nil mas list vazio, logar também
+								if rpcErr == nil {
+									log.Printf("[WS-Fallback] Chunk %v retornou VAZIO do DFHack (Céu/Ar). Memorizando...", origin)
+									store.MarkAsEmpty(origin)
+								} else {
+									log.Printf("[WS-Fallback] ERRO ao recuperar %v: %v", origin, rpcErr)
+								}
+							}
+						}
+						if !exists {
+							chunksEmpty++
+							// Notifica o cliente que o chunk é "Ar" (vazio) para progresso de loading
+							msg := &fvnet.MapChunkMessage{
+								ChunkX:    origin.X,
+								ChunkY:    origin.Y,
+								ChunkZ:    origin.Z,
+								VoxelData: nil, // VoxelData nil = Chunk Vazio/Ar
+							}
+							hub.SendProtoMessage(conn, fvnet.Envelope_MAP_CHUNK, msg)
 							continue
 						}
-
-						log.Printf("[WS-Fallback] Chunk %v não encontrado. Requisitando ao DFHack...", origin)
-						// Converter Tile Coord (Origin) de volta para Block Index para a RPC
-						bx, by := origin.X/16, origin.Y/16
-						list, rpcErr := dfClient.GetBlockList(bx, by, origin.Z, bx, by, origin.Z, 1)
-						if rpcErr == nil && list != nil && len(list.MapBlocks) > 0 {
-							for _, block := range list.MapBlocks {
-								store.StoreSingleBlock(&block)
-							}
-							chunk, exists = store.GetChunk(origin)
-							if exists {
-								log.Printf("[WS-Fallback] Chunk %v recuperado com sucesso via DFHack! (Enviando ao cliente)", origin)
-							}
-						} else {
-							// Se rpcErr for nil mas list vazio, logar também
-							if rpcErr == nil {
-								log.Printf("[WS-Fallback] Chunk %v retornou VAZIO do DFHack (Céu/Ar). Memorizando...", origin)
-								store.MarkAsEmpty(origin)
-							} else {
-								log.Printf("[WS-Fallback] ERRO ao recuperar %v: %v", origin, rpcErr)
-							}
+					} else {
+						// Blocos carregados do SQLite devem voltar pro Cache ativo para evitar hit de disco repetido.
+						store.Mu.Lock()
+						if store.Chunks == nil {
+							store.Chunks = make(map[util.DFCoord]*mapdata.Chunk)
 						}
+						store.Chunks[origin] = chunk
+						store.Mu.Unlock()
 					}
-					if !exists {
+				}
+
+				if chunk != nil {
+					// Se for um bloco conhecido como vazio (Ar), enviamos sem VoxelData
+					if chunk.IsEmpty {
 						chunksEmpty++
-						// Notifica o cliente que o chunk é "Ar" (vazio) para progresso de loading
 						msg := &fvnet.MapChunkMessage{
 							ChunkX:    origin.X,
 							ChunkY:    origin.Y,
 							ChunkZ:    origin.Z,
-							VoxelData: nil, // VoxelData nil = Chunk Vazio/Ar
+							VoxelData: nil,
 						}
 						hub.SendProtoMessage(conn, fvnet.Envelope_MAP_CHUNK, msg)
 						continue
 					}
-				} else {
-					// Blocos carregados do SQLite devem voltar pro Cache ativo para evitar hit de disco repetido.
-					store.Mu.Lock()
-					if store.Chunks == nil {
-						store.Chunks = make(map[util.DFCoord]*mapdata.Chunk)
-					}
-					store.Chunks[origin] = chunk
-					store.Mu.Unlock()
-				}
-			}
 
-			if chunk != nil {
-				// Se for um bloco conhecido como vazio (Ar), enviamos sem VoxelData
-				if chunk.IsEmpty {
-					chunksEmpty++
+					var buf bytes.Buffer
+					enc := gob.NewEncoder(&buf)
+					if err := enc.Encode(chunk.Snapshot()); err != nil {
+						log.Printf("[WS] Erro ao codificar tiles para chunk (%d,%d,%d): %v", origin.X, origin.Y, origin.Z, err)
+						continue
+					}
+
 					msg := &fvnet.MapChunkMessage{
 						ChunkX:    origin.X,
 						ChunkY:    origin.Y,
 						ChunkZ:    origin.Z,
-						VoxelData: nil,
+						VoxelData: buf.Bytes(),
 					}
 					hub.SendProtoMessage(conn, fvnet.Envelope_MAP_CHUNK, msg)
-					continue
+					chunksSent++
 				}
-
-				var buf bytes.Buffer
-				enc := gob.NewEncoder(&buf)
-				if err := enc.Encode(chunk.Tiles); err != nil {
-					log.Printf("[WS] Erro ao codificar tiles para chunk (%d,%d,%d): %v", origin.X, origin.Y, origin.Z, err)
-					continue
-				}
-
-				msg := &fvnet.MapChunkMessage{
-					ChunkX:    origin.X,
-					ChunkY:    origin.Y,
-					ChunkZ:    origin.Z,
-					VoxelData: buf.Bytes(),
-				}
-				hub.SendProtoMessage(conn, fvnet.Envelope_MAP_CHUNK, msg)
-				chunksSent++
 			}
 		}
 	}
+	z := req.CenterZ
 	if chunksSent > 0 {
 		log.Printf("[WS] Streaming → %d chunks enviados, %d ar/céu (Z=%d)", chunksSent, chunksEmpty, z)
 	}
@@ -776,7 +869,7 @@ func broadcastWorldStatus(hub *Hub, dfClient *dfhack.Client, store *mapdata.MapD
 		if err == nil && units != nil {
 			count := 0
 			for _, u := range units.CreatureList {
-				if u.IsValid {
+				if u.IsValidForDisplay() {
 					count++
 				}
 			}

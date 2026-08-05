@@ -18,11 +18,12 @@ type Client struct {
 	url       string
 	connected bool
 	mu        sync.RWMutex
+	connectMu sync.Mutex
 
 	// Sistema de Eventos: Handlers podem ser injetados pelo "Mestre de Obras"
 	// para despachar mensagens a outros módulos (como o internal/world).
-	OnEnvelope func(env *fvnet.Envelope)
-	OnConnect  func()
+	OnEnvelope   func(env *fvnet.Envelope)
+	OnConnect    func()
 	OnDisconnect func()
 }
 
@@ -39,8 +40,17 @@ func (c *Client) Connect() error {
 		HandshakeTimeout: 5 * time.Second,
 	}
 
+	c.connectMu.Lock()
+	defer c.connectMu.Unlock()
+	if c.IsConnected() {
+		return nil
+	}
+
 	var err error
-	maxRetries := 10
+	// O servidor pode levar alguns minutos para abrir o banco/cache do mundo.
+	// Mantemos a janela de retry longa para evitar um cliente vazio quando ele
+	// for iniciado junto com o launcher.
+	maxRetries := 300
 	for i := 0; i < maxRetries; i++ {
 		log.Printf("[Network] Tentativa %d/%d em %s...", i+1, maxRetries, c.url)
 		c.conn, _, err = dialer.Dial(c.url, nil)
@@ -150,7 +160,7 @@ func (c *Client) disconnectLocally() {
 	if c.conn != nil {
 		c.conn.Close()
 	}
-	
+
 	if wasConnected && c.OnDisconnect != nil {
 		c.OnDisconnect()
 	}

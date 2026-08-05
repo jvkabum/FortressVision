@@ -54,6 +54,7 @@ type chunkData struct {
 	Buildings         []dfproto.BuildingInstance
 	Items             []dfproto.Item
 	ConstructionItems []dfproto.MatPair
+	Flows             []dfproto.FlowInfo
 	SpatterPile       []dfproto.SpatterPile
 	Engravings        []dfproto.Engraving
 }
@@ -148,15 +149,21 @@ func (s *MapDataStore) GetMapInfo() (x, y, z int32, err error) {
 			MaxZ int32
 		}
 		s.DB.Model(&ChunkModel{}).Where("is_empty = ?", false).Select("MAX(x) as max_x, MAX(y) as max_y, MAX(z) as max_z").Scan(&res)
-		
+
 		if res.MaxX > 0 && res.MaxY > 0 {
 			// Nota: Isso é o ORIGIN do último bloco. Adicionamos 16 para fechar a borda.
 			x, y, z = res.MaxX+16, res.MaxY+16, res.MaxZ+1
-			
+
 			// Sanity check: Se os valores forem astronômicos, clipamos para um padrão seguro (ex: 4096x4096x246)
-			if x > 4096 { x = 4096 }
-			if y > 4096 { y = 4096 }
-			if z > 1000 { z = 1000 }
+			if x > 4096 {
+				x = 4096
+			}
+			if y > 4096 {
+				y = 4096
+			}
+			if z > 1000 {
+				z = 1000
+			}
 
 			log.Printf("[Persistence] Heurística (Sólida): Mapa estimado em %dx%dx%d", x, y, z)
 			return x, y, z, nil
@@ -246,6 +253,7 @@ func (s *MapDataStore) SaveChunk(chunk *Chunk) error {
 			Buildings:         chunk.Buildings,
 			Items:             chunk.Items,
 			ConstructionItems: chunk.ConstructionItems,
+			Flows:             chunk.Flows,
 			SpatterPile:       chunk.SpatterPile,
 			Engravings:        chunk.Engravings,
 		}
@@ -296,6 +304,7 @@ func (s *MapDataStore) LoadChunk(origin util.DFCoord) (*Chunk, error) {
 	var buildings []dfproto.BuildingInstance
 	var items []dfproto.Item
 	var constrItems []dfproto.MatPair
+	var flows []dfproto.FlowInfo
 	var spatter []dfproto.SpatterPile
 	var engravings []dfproto.Engraving
 
@@ -309,6 +318,7 @@ func (s *MapDataStore) LoadChunk(origin util.DFCoord) (*Chunk, error) {
 			buildings = cData.Buildings
 			items = cData.Items
 			constrItems = cData.ConstructionItems
+			flows = cData.Flows
 			spatter = cData.SpatterPile
 			engravings = cData.Engravings
 		} else {
@@ -327,6 +337,7 @@ func (s *MapDataStore) LoadChunk(origin util.DFCoord) (*Chunk, error) {
 		Buildings:         buildings,
 		Items:             items,
 		ConstructionItems: constrItems,
+		Flows:             flows,
 		SpatterPile:       spatter,
 		Engravings:        engravings,
 		MTime:             model.MTime,
@@ -403,6 +414,7 @@ func (s *MapDataStore) Save(worldName string) (int, error) {
 					Buildings:         chunk.Buildings,
 					Items:             chunk.Items,
 					ConstructionItems: chunk.ConstructionItems,
+					Flows:             chunk.Flows,
 				}
 				if err := enc.Encode(cData); err != nil {
 					log.Printf("[Persistence] ERRO Crítico GOB: %v", err)

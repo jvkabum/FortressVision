@@ -104,6 +104,16 @@ func (s *MaterialStore) GetTileColor(tile *Tile) Color {
 	return Color{R: 150, G: 150, B: 150, A: 255} // Fallback absoluto
 }
 
+// GetMaterialColor retorna a cor real do par recebido do DFHack, quando ela
+// já foi carregada. Entidades como itens e construções não possuem um Tile
+// próprio, então precisam consultar o cache diretamente.
+func (s *MaterialStore) GetMaterialColor(pair dfproto.MatPair) (Color, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	color, ok := s.Colors[pair]
+	return color, ok
+}
+
 // LoadFromDB carrega todos os materiais salvos no SQLite para o cache.
 func (s *MaterialStore) LoadFromDB() error {
 	if s.DB == nil {

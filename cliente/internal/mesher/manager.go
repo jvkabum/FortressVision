@@ -2,6 +2,7 @@ package mesher
 
 import (
 	"FortressVision/shared/mapdata"
+	"FortressVision/shared/util"
 	"log"
 	"sync"
 )
@@ -13,6 +14,7 @@ type Manager struct {
 	pendingChunks chan string
 	pending       map[string]*mapdata.Chunk
 	queued        map[string]bool
+	removed       map[string]bool
 
 	OnMeshGenerated func(mesh *ChunkMesh)
 }
@@ -24,6 +26,7 @@ func NewManager() *Manager {
 		pendingChunks: make(chan string, 100),
 		pending:       make(map[string]*mapdata.Chunk),
 		queued:        make(map[string]bool),
+		removed:       make(map[string]bool),
 	}
 
 	// Worker pool para meshing asíncrono
@@ -37,8 +40,13 @@ func (m *Manager) RequestMeshUpdate(chunk *mapdata.Chunk) {
 	if chunk == nil {
 		return
 	}
+	// O scanner pode atualizar o mesmo chunk enquanto o worker está lendo a
+	// geometria. Enfileirar uma cópia elimina essa corrida e mantém cada mesh
+	// coerente com um único instante do DFHack.
+	chunk = chunk.Clone()
 	key := chunk.Origin.String()
 	m.mu.Lock()
+	delete(m.removed, key)
 	m.pending[key] = chunk
 	shouldQueue := !m.queued[key]
 	if shouldQueue {
@@ -48,6 +56,17 @@ func (m *Manager) RequestMeshUpdate(chunk *mapdata.Chunk) {
 	if shouldQueue {
 		m.pendingChunks <- key
 	}
+}
+
+// RemoveChunk cancela uma malha pendente e impede que o worker publique um
+// chunk que o streaming já classificou como ar.
+func (m *Manager) RemoveChunk(origin util.DFCoord) {
+	key := origin.String()
+	m.mu.Lock()
+	delete(m.pending, key)
+	delete(m.meshes, key)
+	m.removed[key] = true
+	m.mu.Unlock()
 }
 
 func (m *Manager) worker() {
@@ -65,6 +84,9 @@ func (m *Manager) worker() {
 		delete(m.pending, key)
 		m.mu.Unlock()
 		if chunk == nil {
+			m.mu.Lock()
+			delete(m.queued, key)
+			m.mu.Unlock()
 			continue
 		}
 
@@ -73,11 +95,14 @@ func (m *Manager) worker() {
 
 		m.mu.Lock()
 		meshKey := chunk.Origin.String()
-		m.meshes[meshKey] = mesh
+		removed := m.removed[meshKey]
+		if !removed {
+			m.meshes[meshKey] = mesh
+		}
 		cb := m.OnMeshGenerated
 		m.mu.Unlock()
 
-		if cb != nil {
+		if cb != nil && !removed {
 			cb(mesh)
 		}
 

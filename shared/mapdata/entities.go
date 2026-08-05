@@ -30,6 +30,12 @@ type UnitInstance struct {
 	ID   int32
 	Name string
 	Race dfproto.MatPair
+	// Appearance básica recebida do UnitList do DFHack. Mantê-la no snapshot
+	// permite diferenciar criaturas sem carregar uma malha individual por raça.
+	ProfessionColor dfproto.ColorDefinition
+	SizeCurrent     int32
+	SizeBase        int32
+	IsSoldier       bool
 
 	Pos    util.DFCoord
 	SubPos util.Vector3 // Posição detalhada (subtile)
@@ -47,10 +53,9 @@ type UnitInstance struct {
 func (u *UnitInstance) IsValid() bool {
 	// Flags típicas de morte ou remoção (baseado em UnitFlags.cs)
 	// dead (1), left (2), caged (8), forest (16)
-	if (u.Flags1&0x01) != 0 || (u.Flags1&0x02) != 0 {
-		return false
-	}
-	return !u.IsDead
+	// Flags como caged/forest descrevem o estado da criatura, mas nÃ£o devem
+	// removÃª-la da visualizaÃ§Ã£o 3D.
+	return !u.IsDead && !u.IsHidden
 }
 
 // ItemInstance representa um item solto no mapa.

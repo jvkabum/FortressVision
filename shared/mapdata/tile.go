@@ -185,6 +185,7 @@ func (t *Tile) IsFloor() bool {
 	shape := t.Shape()
 	switch shape {
 	case dfproto.ShapeRamp, dfproto.ShapeRampTop, dfproto.ShapeFloor, dfproto.ShapeBoulder, dfproto.ShapePebbles,
+		dfproto.ShapeBrookBed, dfproto.ShapeBrookTop,
 		dfproto.ShapeSapling, dfproto.ShapeShrub, dfproto.ShapeBranch, dfproto.ShapeTrunkBranch:
 		return true
 	default:

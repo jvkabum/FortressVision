@@ -33,17 +33,23 @@ func NewAppController(host *engine.Host) *AppController {
 	c := camera.New(host)
 	h := hud.New(host)
 	n := network.NewClient(cfg.ServerURL)
+	// O servidor pode ainda estar carregando o mundo quando o cliente abre.
+	// Se a conexao cair durante a navegacao, o cliente tenta voltar.
+	n.OnDisconnect = func() {
+		go n.Connect()
+	}
 	m := mesher.NewManager()
 	r := render.NewTerrainRenderer(host, m)
 	s := world.NewSyncManager(w, n, c, cfg)
 
 	// Configurar a ponte de eventos (Bridge) entre os subsistemas
 	SetupBridge(BridgeConfig{
-		Net:    n,
-		World:  w,
-		Mesher: m,
-		HUD:    h,
-		Camera: c,
+		Net:      n,
+		World:    w,
+		Mesher:   m,
+		HUD:      h,
+		Camera:   c,
+		Renderer: r,
 	})
 
 	// Iniciar diagnósticos visuais e conexão de rede

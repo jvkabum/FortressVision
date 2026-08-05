@@ -69,7 +69,7 @@ func (s *SyncManager) Update() {
 		if radiusTiles < util.BlockSize {
 			radiusTiles = util.BlockSize
 		}
-		s.world.RequestRegion(s.net.Send, dfCoord, radiusTiles)
+		s.world.RequestRegion(s.net.Send, dfCoord, radiusTiles, s.cfg.DrawRangeDown, s.cfg.DrawRangeUp)
 		s.lastRegion = region
 		s.hasRegionRequest = true
 		s.lastRequestAt = time.Now()
