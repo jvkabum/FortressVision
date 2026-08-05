@@ -38,6 +38,9 @@ func TestMeshBoulderHasExternalVolume(t *testing.T) {
 	if maxY-minY < 0.3 {
 		t.Fatalf("boulder was flattened: vertical span %.3f", maxY-minY)
 	}
+	if minY < voxelTopY {
+		t.Fatalf("boulder starts below the voxel surface: minY=%.3f top=%.3f", minY, voxelTopY)
+	}
 }
 
 func TestMeshPebblesHasSeveralVolumes(t *testing.T) {
@@ -67,5 +70,8 @@ func TestMeshEndlessPitHasDepth(t *testing.T) {
 	}
 	if maxY-minY < 3.9 {
 		t.Fatalf("endless pit was not deep enough: %.3f", maxY-minY)
+	}
+	if maxY != voxelTopY {
+		t.Fatalf("endless pit opening is not aligned to the voxel surface: maxY=%.3f top=%.3f", maxY, voxelTopY)
 	}
 }

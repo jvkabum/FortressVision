@@ -63,6 +63,15 @@ func TestMakeDetailTextureIsOpaqueAndNonUniform(t *testing.T) {
 	}
 }
 
+func TestTileSurfaceYStartsAtVoxelTop(t *testing.T) {
+	if got := tileSurfaceY(12, 0); got != 13 {
+		t.Fatalf("tile surface y = %f, want 13", got)
+	}
+	if got := tileSurfaceY(-3, 0.02); got != -1.98 {
+		t.Fatalf("tile surface offset y = %f, want -1.98", got)
+	}
+}
+
 func TestItemMeshKindUsesRemoteItemState(t *testing.T) {
 	if got := itemMeshKind(dfproto.Item{Projectile: true}); got != "cone" {
 		t.Fatalf("projectile mesh = %q, want cone", got)

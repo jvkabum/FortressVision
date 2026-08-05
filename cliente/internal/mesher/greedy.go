@@ -9,6 +9,11 @@ import (
 	"math"
 )
 
+// voxelTopY Ã© a altura do topo de um tile. Paredes e pisos do mesher ocupam
+// o intervalo local [0, 1]; objetos que ficam sobre o tile precisam partir
+// deste limite, e nÃ£o do fundo do voxel.
+const voxelTopY matrix.Float = 1.0
+
 // materialKey identifica o par completo (tipo + índice), evitando colisões
 // entre materiais que compartilham o mesmo MatIndex em categorias diferentes.
 func materialKey(pair dfproto.MatPair) int32 {
@@ -436,20 +441,22 @@ func meshSpecials(chunk *mapdata.Chunk, md *MeshData) {
 // meshBoulder cria uma rocha facetada, pequena o bastante para ficar dentro
 // do tile, mas com base, ombros e topo para que ela não pareça um quad plano.
 func meshBoulder(md *MeshData, fx, fy matrix.Float, color matrix.Color) {
-	meshRock(md, fx+0.5, -(fy + 0.5), 0.47, 0.43, 0.48, 0.0, color)
+	meshRock(md, fx+0.5, -(fy + 0.5), 0.47, 0.43, 0.48, 0.0, voxelTopY, color)
 }
 
 // meshPebbles representa o tile de pedregulhos como três pedras menores. Os
 // offsets são fixos para a mesma geometria em qualquer atualização do chunk.
 func meshPebbles(md *MeshData, fx, fy matrix.Float, color matrix.Color) {
 	cx, cz := fx+0.5, -(fy + 0.5)
-	meshRock(md, cx-0.20, cz+0.14, 0.17, 0.14, 0.18, 0.20, color)
-	meshRock(md, cx+0.12, cz-0.12, 0.20, 0.16, 0.22, 1.35, color)
-	meshRock(md, cx+0.22, cz+0.18, 0.13, 0.12, 0.14, 2.35, color)
+	meshRock(md, cx-0.20, cz+0.14, 0.17, 0.14, 0.18, 0.20, voxelTopY, color)
+	meshRock(md, cx+0.12, cz-0.12, 0.20, 0.16, 0.22, 1.35, voxelTopY, color)
+	meshRock(md, cx+0.22, cz+0.18, 0.13, 0.12, 0.14, 2.35, voxelTopY, color)
 }
 
 func meshEndlessPit(md *MeshData, fx, fy matrix.Float, color matrix.Color) {
 	const pitDepth matrix.Float = 4.0
+	const pitTopY matrix.Float = voxelTopY
+	pitBottomY := pitTopY - pitDepth
 	x0, x1 := fx, fx+1
 	z0, z1 := -fy, -(fy + 1)
 	pitColor := matrix.NewColor(color.R()*0.12, color.G()*0.12, color.B()*0.14, color.A())
@@ -457,43 +464,43 @@ func meshEndlessPit(md *MeshData, fx, fy matrix.Float, color matrix.Color) {
 	// Paredes internas: o fundo fica abaixo de vários níveis e não tampa a
 	// geometria real dos andares inferiores quando eles estiverem carregados.
 	addDoubleSidedQuad(md,
-		rendering.Vertex{Position: matrix.NewVec3(x0, 0, z0), Normal: matrix.Vec3Left(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x0, 0, z1), Normal: matrix.Vec3Left(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x0, -pitDepth, z1), Normal: matrix.Vec3Left(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x0, -pitDepth, z0), Normal: matrix.Vec3Left(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x0, pitTopY, z0), Normal: matrix.Vec3Left(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x0, pitTopY, z1), Normal: matrix.Vec3Left(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x0, pitBottomY, z1), Normal: matrix.Vec3Left(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x0, pitBottomY, z0), Normal: matrix.Vec3Left(), Color: pitColor},
 	)
 	addDoubleSidedQuad(md,
-		rendering.Vertex{Position: matrix.NewVec3(x1, 0, z1), Normal: matrix.Vec3Right(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x1, 0, z0), Normal: matrix.Vec3Right(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x1, -pitDepth, z0), Normal: matrix.Vec3Right(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x1, -pitDepth, z1), Normal: matrix.Vec3Right(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x1, pitTopY, z1), Normal: matrix.Vec3Right(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x1, pitTopY, z0), Normal: matrix.Vec3Right(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x1, pitBottomY, z0), Normal: matrix.Vec3Right(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x1, pitBottomY, z1), Normal: matrix.Vec3Right(), Color: pitColor},
 	)
 	addDoubleSidedQuad(md,
-		rendering.Vertex{Position: matrix.NewVec3(x0, 0, z1), Normal: matrix.Vec3Forward(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x1, 0, z1), Normal: matrix.Vec3Forward(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x1, -pitDepth, z1), Normal: matrix.Vec3Forward(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x0, -pitDepth, z1), Normal: matrix.Vec3Forward(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x0, pitTopY, z1), Normal: matrix.Vec3Forward(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x1, pitTopY, z1), Normal: matrix.Vec3Forward(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x1, pitBottomY, z1), Normal: matrix.Vec3Forward(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x0, pitBottomY, z1), Normal: matrix.Vec3Forward(), Color: pitColor},
 	)
 	addDoubleSidedQuad(md,
-		rendering.Vertex{Position: matrix.NewVec3(x1, 0, z0), Normal: matrix.Vec3Backward(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x0, 0, z0), Normal: matrix.Vec3Backward(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x0, -pitDepth, z0), Normal: matrix.Vec3Backward(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x1, -pitDepth, z0), Normal: matrix.Vec3Backward(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x1, pitTopY, z0), Normal: matrix.Vec3Backward(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x0, pitTopY, z0), Normal: matrix.Vec3Backward(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x0, pitBottomY, z0), Normal: matrix.Vec3Backward(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x1, pitBottomY, z0), Normal: matrix.Vec3Backward(), Color: pitColor},
 	)
 	addDoubleSidedQuad(md,
-		rendering.Vertex{Position: matrix.NewVec3(x0, -pitDepth, z0), Normal: matrix.Vec3Up(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x0, -pitDepth, z1), Normal: matrix.Vec3Up(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x1, -pitDepth, z1), Normal: matrix.Vec3Up(), Color: pitColor},
-		rendering.Vertex{Position: matrix.NewVec3(x1, -pitDepth, z0), Normal: matrix.Vec3Up(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x0, pitBottomY, z0), Normal: matrix.Vec3Up(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x0, pitBottomY, z1), Normal: matrix.Vec3Up(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x1, pitBottomY, z1), Normal: matrix.Vec3Up(), Color: pitColor},
+		rendering.Vertex{Position: matrix.NewVec3(x1, pitBottomY, z0), Normal: matrix.Vec3Up(), Color: pitColor},
 	)
 }
 
 // meshRock emite um elipsoide low-poly com faces duplicadas. A duplicação é
 // intencional: o material básico usa back-face culling e a rocha precisa
 // continuar visível quando a câmera passa para qualquer lado do voxel.
-func meshRock(md *MeshData, cx, cz, radiusX, radiusZ, height, phase matrix.Float, color matrix.Color) {
+func meshRock(md *MeshData, cx, cz, radiusX, radiusZ, height, phase, baseY matrix.Float, color matrix.Color) {
 	const segments = 8
-	baseY := matrix.Float(0.015)
+	baseY += matrix.Float(0.015)
 	base := make([]rendering.Vertex, segments)
 	lower := make([]rendering.Vertex, segments)
 	upper := make([]rendering.Vertex, segments)
@@ -502,13 +509,13 @@ func meshRock(md *MeshData, cx, cz, radiusX, radiusZ, height, phase matrix.Float
 		angle := phase + matrix.Float(2*math.Pi*float64(i)/segments)
 		cosA := matrix.Float(math.Cos(float64(angle)))
 		sinA := matrix.Float(math.Sin(float64(angle)))
-		base[i] = rockVertex(cx+cosA*radiusX*0.72, baseY, cz+sinA*radiusZ*0.72, cx, cz, radiusX, radiusZ, height, color)
-		lower[i] = rockVertex(cx+cosA*radiusX, height*0.34, cz+sinA*radiusZ, cx, cz, radiusX, radiusZ, height, color)
-		upper[i] = rockVertex(cx+cosA*radiusX*0.63, height*0.77, cz+sinA*radiusZ*0.63, cx, cz, radiusX, radiusZ, height, color)
+		base[i] = rockVertex(cx+cosA*radiusX*0.72, baseY, cz+sinA*radiusZ*0.72, cx, cz, radiusX, radiusZ, height, baseY, color)
+		lower[i] = rockVertex(cx+cosA*radiusX, baseY+height*0.34, cz+sinA*radiusZ, cx, cz, radiusX, radiusZ, height, baseY, color)
+		upper[i] = rockVertex(cx+cosA*radiusX*0.63, baseY+height*0.77, cz+sinA*radiusZ*0.63, cx, cz, radiusX, radiusZ, height, baseY, color)
 	}
 
-	top := rockVertex(cx, height, cz, cx, cz, radiusX, radiusZ, height, color)
-	bottom := rockVertex(cx, 0, cz, cx, cz, radiusX, radiusZ, height, color)
+	top := rockVertex(cx, baseY+height, cz, cx, cz, radiusX, radiusZ, height, baseY, color)
+	bottom := rockVertex(cx, baseY-matrix.Float(0.015), cz, cx, cz, radiusX, radiusZ, height, baseY, color)
 	for i := 0; i < segments; i++ {
 		next := (i + 1) % segments
 
@@ -521,11 +528,11 @@ func meshRock(md *MeshData, cx, cz, radiusX, radiusZ, height, phase matrix.Float
 	}
 }
 
-func rockVertex(x, y, z, cx, cz, radiusX, radiusZ, height matrix.Float, color matrix.Color) rendering.Vertex {
+func rockVertex(x, y, z, cx, cz, radiusX, radiusZ, height, baseY matrix.Float, color matrix.Color) rendering.Vertex {
 	// Normal elipsoidal aproximada: dá um sombreado contínuo sem precisar de
 	// uma malha densa, mantendo o aspecto low-poly nas arestas.
 	nx := (x - cx) / radiusX
-	ny := (y - height*0.48) / (height * 0.55)
+	ny := (y - (baseY + height*0.48)) / (height * 0.55)
 	nz := (z - cz) / radiusZ
 	length := matrix.Float(math.Sqrt(float64(nx*nx + ny*ny + nz*nz)))
 	if length <= 0 {
@@ -556,7 +563,7 @@ func addDoubleSidedQuad(md *MeshData, v0, v1, v2, v3 rendering.Vertex) {
 }
 
 func meshVegetationTile(md *MeshData, shape dfproto.TiletypeShape, fx, fy matrix.Float, color matrix.Color) {
-	center := matrix.NewVec3(fx+0.5, 0, -(fy + 0.5))
+	center := matrix.NewVec3(fx+0.5, voxelTopY, -(fy + 0.5))
 	leafColor := matrix.NewColor(color.R()*0.75, color.G()*1.05, color.B()*0.65, color.A())
 	if leafColor.G() > 1 {
 		leafColor = matrix.NewColor(leafColor.R(), 1, leafColor.B(), leafColor.A())

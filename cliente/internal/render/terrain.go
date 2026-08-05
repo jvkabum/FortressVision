@@ -30,6 +30,15 @@ type unitEquipmentDrawing struct {
 	scale   unitPosition
 }
 
+// tileSurfaceOffset Ã© a altura local onde termina o voxel do terreno. Itens,
+// manchas e marcaÃ§Ãµes do DF ficam apoiados nessa superfÃ­cie; usar apenas a
+// coordenada-base do tile os deixa enterrados ou visualmente desalinhados.
+const tileSurfaceOffset matrix.Float = 1.0
+
+func tileSurfaceY(tileBaseY, localOffset matrix.Float) matrix.Float {
+	return tileBaseY + tileSurfaceOffset + localOffset
+}
+
 func (p unitPosition) vec() matrix.Vec3 {
 	return matrix.NewVec3(p.x, p.y, p.z)
 }
@@ -173,7 +182,7 @@ func (tr *TerrainRenderer) applyUnits(units []mapdata.UnitInstance) {
 			pos := util.DFToWorldPos(unit.Pos)
 			target := unitPosition{
 				x: matrix.Float(pos.X) + 0.5 + matrix.Float(unit.SubPos.X),
-				y: matrix.Float(pos.Y) + 0.5 + matrix.Float(unit.SubPos.Z),
+				y: tileSurfaceY(matrix.Float(pos.Y), 0.35*scale+matrix.Float(unit.SubPos.Z)),
 				z: matrix.Float(pos.Z) - 0.5 - matrix.Float(unit.SubPos.Y),
 			}
 			if _, exists := tr.unitPositions[unit.ID]; !exists {
@@ -681,7 +690,7 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 		if roof != nil {
 			roof.transform.SetPosition(matrix.NewVec3(
 				matrix.Float(building.PosXMin)+width*0.5,
-				matrix.Float(building.PosZMax)+0.06,
+				matrix.Float(building.PosZMin)+height+0.06,
 				-(matrix.Float(building.PosYMin) + depth*0.5),
 			))
 			roof.transform.SetScale(matrix.NewVec3(width*0.92, 0.12, depth*0.92))
@@ -712,7 +721,7 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 			itemSize, itemHeight := itemDimensions(item)
 			detail.transform.SetPosition(matrix.NewVec3(
 				matrix.Float(pos.X)+0.5+matrix.Float(item.SubposX),
-				matrix.Float(pos.Y)+itemHeight*0.5+matrix.Float(item.SubposZ),
+				tileSurfaceY(matrix.Float(pos.Y), itemHeight*0.5+matrix.Float(item.SubposZ)),
 				matrix.Float(pos.Z)-0.5-matrix.Float(item.SubposY),
 			))
 			detail.transform.SetScale(itemVisualScale(item, itemSize, itemHeight))
@@ -731,7 +740,7 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 		size, stackHeight := itemDimensions(item)
 		drawing.transform.SetPosition(matrix.NewVec3(
 			matrix.Float(pos.X)+0.5+matrix.Float(item.SubposX),
-			matrix.Float(pos.Y)+stackHeight*0.5+matrix.Float(item.SubposZ),
+			tileSurfaceY(matrix.Float(pos.Y), stackHeight*0.5+matrix.Float(item.SubposZ)),
 			matrix.Float(pos.Z)-0.5-matrix.Float(item.SubposY),
 		))
 		drawing.transform.SetScale(itemVisualScale(item, size, stackHeight))
@@ -815,7 +824,7 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 		if engraving.IsFloor {
 			drawing.transform.SetPosition(matrix.NewVec3(
 				matrix.Float(pos.X)+0.5,
-				matrix.Float(pos.Y)+0.015,
+				tileSurfaceY(matrix.Float(pos.Y), 0.015),
 				matrix.Float(pos.Z)-0.5,
 			))
 			drawing.transform.SetScale(matrix.NewVec3(0.7, 0.02, 0.7))
@@ -844,7 +853,7 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 				if engraving.IsFloor {
 					marker.transform.SetPosition(matrix.NewVec3(
 						matrix.Float(pos.X)+0.5+spread*0.14,
-						matrix.Float(pos.Y)+0.045,
+						tileSurfaceY(matrix.Float(pos.Y), 0.045),
 						matrix.Float(pos.Z)-0.5+matrix.Float(elementIndex%3-1)*0.12,
 					))
 					marker.transform.SetScale(matrix.NewVec3(0.07, 0.025, 0.07))
@@ -886,7 +895,7 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 			pos := util.DFToWorldPos(util.DFCoord{X: origin.X + int32(x), Y: origin.Y + int32(y), Z: origin.Z})
 			drawing.transform.SetPosition(matrix.NewVec3(
 				matrix.Float(pos.X)+0.5,
-				matrix.Float(pos.Y)+spatterHeight*0.5,
+				tileSurfaceY(matrix.Float(pos.Y), spatterHeight*0.5),
 				matrix.Float(pos.Z)-0.5,
 			))
 			drawing.transform.SetScale(matrix.NewVec3(0.35, spatterHeight, 0.35))
@@ -913,7 +922,7 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 			pos := util.DFToWorldPos(util.DFCoord{X: origin.X + int32(x), Y: origin.Y + int32(y), Z: origin.Z})
 			drawing.transform.SetPosition(matrix.NewVec3(
 				matrix.Float(pos.X)+0.5,
-				matrix.Float(pos.Y)+0.035,
+				tileSurfaceY(matrix.Float(pos.Y), 0.035),
 				matrix.Float(pos.Z)-0.5,
 			))
 			drawing.transform.SetScale(matrix.NewVec3(0.55, 0.025, 0.55))
