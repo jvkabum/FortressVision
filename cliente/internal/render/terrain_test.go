@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"FortressVision/cliente/internal/mesher"
+	"FortressVision/shared/mapdata"
 	"FortressVision/shared/pkg/dfproto"
 	"kaijuengine.com/matrix"
 	"kaijuengine.com/rendering"
@@ -77,6 +78,23 @@ func TestItemMeshKindUsesRemoteItemState(t *testing.T) {
 	}
 }
 
+func TestItemVisualScaleReflectsProjectileVelocity(t *testing.T) {
+	base := itemVisualScale(dfproto.Item{}, 0.16, 0.14)
+	projectile := itemVisualScale(dfproto.Item{
+		Projectile: true,
+		VelocityX:  2,
+		VelocityY:  1,
+		VelocityZ:  3,
+	}, 0.16, 0.14)
+	if projectile.X() <= base.X() || projectile.Y() <= base.Y() || projectile.Z() <= base.Z() {
+		t.Fatalf("projectile scale did not reflect velocity: base=%v projectile=%v", base, projectile)
+	}
+	tooFast := itemVisualScale(dfproto.Item{Projectile: true, VelocityX: 100, VelocityY: 100, VelocityZ: 100}, 0.16, 0.14)
+	if tooFast.X() > 0.4 || tooFast.Y() > 0.4 || tooFast.Z() > 0.4 {
+		t.Fatalf("projectile scale exceeded safety bound: %v", tooFast)
+	}
+}
+
 func TestFlowVisualSizeIsBoundedByDensity(t *testing.T) {
 	small := flowVisualSize(dfproto.FlowInfo{Density: 0})
 	large := flowVisualSize(dfproto.FlowInfo{Density: 1000})
@@ -95,6 +113,13 @@ func TestWaveVisualScaleIsFlatAndBounded(t *testing.T) {
 	}
 	if scale.X() > 0.45 || scale.Z() > 0.45 {
 		t.Fatalf("wave marker exceeded visual bound: %v", scale)
+	}
+}
+
+func TestArtImageElementColorUsesSemanticFallback(t *testing.T) {
+	color := artImageElementColor(mapdata.ChunkSnapshot{}, dfproto.ArtImageElement{Type: dfproto.ImagePlant})
+	if color.G() <= color.R() || color.G() <= color.B() {
+		t.Fatalf("plant engraving marker was not green-biased: %v", color)
 	}
 }
 

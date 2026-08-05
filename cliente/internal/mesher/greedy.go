@@ -46,12 +46,54 @@ func getTileColor(tile *mapdata.Tile) matrix.Color {
 		if constructionColor, ok := matStore.GetMaterialColor(tile.ConstructionItem); ok {
 			color = constructionColor
 		}
+		return matrix.NewColor(
+			matrix.Float(color.R)/255.0,
+			matrix.Float(color.G)/255.0,
+			matrix.Float(color.B)/255.0,
+			matrix.Float(color.A)/255.0,
+		)
+	}
+
+	// O MapBlock também traz o material do veio. Misturá-lo com a camada
+	// principal revela minério sem transformar a malha em um segundo voxel por
+	// tile; a cor permanece estável e é atualizada quando o DFHack muda o bloco.
+	if tile.VeinMaterial != (dfproto.MatPair{}) {
+		if vein, ok := matStore.GetMaterialColor(tile.VeinMaterial); ok {
+			base := matrix.NewColor(
+				matrix.Float(color.R)/255.0,
+				matrix.Float(color.G)/255.0,
+				matrix.Float(color.B)/255.0,
+				matrix.Float(color.A)/255.0,
+			)
+			ore := matrix.NewColor(
+				matrix.Float(vein.R)/255.0,
+				matrix.Float(vein.G)/255.0,
+				matrix.Float(vein.B)/255.0,
+				matrix.Float(vein.A)/255.0,
+			)
+			return blendTileColor(base, ore, matrix.Float(0.62))
+		}
 	}
 	return matrix.NewColor(
 		matrix.Float(color.R)/255.0,
 		matrix.Float(color.G)/255.0,
 		matrix.Float(color.B)/255.0,
 		matrix.Float(color.A)/255.0,
+	)
+}
+
+func blendTileColor(base, overlay matrix.Color, amount matrix.Float) matrix.Color {
+	if amount < 0 {
+		amount = 0
+	}
+	if amount > 1 {
+		amount = 1
+	}
+	return matrix.NewColor(
+		base.R()+(overlay.R()-base.R())*amount,
+		base.G()+(overlay.G()-base.G())*amount,
+		base.B()+(overlay.B()-base.B())*amount,
+		base.A()+(overlay.A()-base.A())*amount,
 	)
 }
 

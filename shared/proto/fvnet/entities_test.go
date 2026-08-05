@@ -18,6 +18,8 @@ func TestCreatureUpdateMessageRoundTrip(t *testing.T) {
 			Mode: 1,
 			Item: dfproto.Item{Type: dfproto.MatPair{MatType: 4, MatIndex: 7}, StackSize: 1},
 		}},
+		Wounds:      []dfproto.UnitWound{{SeveredPart: true}},
+		Facing:      dfproto.Coord{X: 1, Y: 0, Z: 0},
 		SizeCurrent: 120,
 		SizeBase:    100,
 		IsSoldier:   true,
@@ -41,7 +43,8 @@ func TestCreatureUpdateMessageRoundTrip(t *testing.T) {
 	if len(got.Units) != 1 || got.Units[0].ID != want[0].ID || got.Units[0].Pos != want[0].Pos ||
 		got.Units[0].ProfessionColor != want[0].ProfessionColor || got.Units[0].SizeCurrent != want[0].SizeCurrent ||
 		!got.Units[0].IsSoldier || len(got.Units[0].Inventory) != 1 ||
-		got.Units[0].Inventory[0].Item.Type != want[0].Inventory[0].Item.Type {
+		got.Units[0].Inventory[0].Item.Type != want[0].Inventory[0].Item.Type ||
+		len(got.Units[0].Wounds) != 1 || !got.Units[0].Wounds[0].SeveredPart || got.Units[0].Facing != want[0].Facing {
 		t.Fatalf("round trip mismatch: got %#v, want %#v", got.Units, want)
 	}
 }

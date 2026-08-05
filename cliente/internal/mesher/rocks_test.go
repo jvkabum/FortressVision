@@ -6,6 +6,15 @@ import (
 	"kaijuengine.com/matrix"
 )
 
+func TestBlendTileColorRevealsVeinWithoutReplacingBase(t *testing.T) {
+	base := matrix.NewColor(0.8, 0.2, 0.1, 1)
+	ore := matrix.NewColor(0.1, 0.8, 0.2, 1)
+	mixed := blendTileColor(base, ore, 0.5)
+	if mixed == base || mixed == ore {
+		t.Fatalf("vein blend did not preserve both colors: %v", mixed)
+	}
+}
+
 func TestMeshBoulderHasExternalVolume(t *testing.T) {
 	mesh := NewMeshData()
 	meshBoulder(mesh, 4, 7, matrix.ColorWhite())

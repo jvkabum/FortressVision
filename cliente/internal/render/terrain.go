@@ -74,6 +74,7 @@ type TerrainRenderer struct {
 	unitTargets       map[int32]unitPosition
 	unitPositions     map[int32]unitPosition
 	unitEquipment     map[int32]map[string]*unitEquipmentDrawing
+	unitAppearance    map[int32]map[string]*unitEquipmentDrawing
 	unitMesh          *rendering.Mesh
 	unitMaterial      *rendering.Material
 	entityMeshes      map[string]*rendering.Mesh
@@ -98,6 +99,7 @@ func NewTerrainRenderer(host *engine.Host, meshingMgr *mesher.Manager) *TerrainR
 		unitTargets:     make(map[int32]unitPosition),
 		unitPositions:   make(map[int32]unitPosition),
 		unitEquipment:   make(map[int32]map[string]*unitEquipmentDrawing),
+		unitAppearance:  make(map[int32]map[string]*unitEquipmentDrawing),
 		entityMeshes:    make(map[string]*rendering.Mesh),
 		entityDrawings:  make(map[string]*unitDrawing),
 		chunkEntityKeys: make(map[string]map[string]struct{}),
@@ -180,11 +182,13 @@ func (tr *TerrainRenderer) applyUnits(units []mapdata.UnitInstance) {
 			}
 			tr.unitTargets[unit.ID] = target
 			tr.updateUnitEquipment(unit)
+			tr.updateUnitAppearance(unit)
 		} else {
 			drawing.shaderData.Deactivate()
 			delete(tr.unitTargets, unit.ID)
 			delete(tr.unitPositions, unit.ID)
 			tr.clearUnitEquipment(unit.ID)
+			tr.clearUnitAppearance(unit.ID)
 		}
 	}
 
@@ -194,6 +198,7 @@ func (tr *TerrainRenderer) applyUnits(units []mapdata.UnitInstance) {
 			delete(tr.unitTargets, id)
 			delete(tr.unitPositions, id)
 			tr.clearUnitEquipment(id)
+			tr.clearUnitAppearance(id)
 		}
 	}
 }
@@ -240,6 +245,115 @@ func (tr *TerrainRenderer) clearUnitEquipment(id int32) {
 		delete(tr.entityDrawings, key)
 	}
 	delete(tr.unitEquipment, id)
+}
+
+func (tr *TerrainRenderer) updateUnitAppearance(unit mapdata.UnitInstance) {
+	previous := tr.unitAppearance[unit.ID]
+	current := make(map[string]*unitEquipmentDrawing, 5)
+	unitScaleValue := unitScale(unit)
+
+	addPart := func(key string, meshKind string, color matrix.Color, offset, scale unitPosition) {
+		drawing := tr.ensureEntityDrawingWithMesh(key, color, tr.entityMesh(meshKind))
+		if drawing == nil {
+			return
+		}
+		current[key] = &unitEquipmentDrawing{drawing: drawing, offset: offset, scale: scale}
+	}
+
+	// O corpo principal continua sendo a cápsula; estas peças dão silhueta
+	// estável às criaturas mesmo quando não há sprite/raw gráfico disponível.
+	addPart(
+		fmt.Sprintf("unit:%d:appearance:head", unit.ID),
+		"sphere",
+		appearanceColor(unit, 0, darkenColor(unitColor(unit), 0.9)),
+		unitPosition{x: 0, y: 0.34 * unitScaleValue, z: 0},
+		unitPosition{x: 0.22 * unitScaleValue, y: 0.22 * unitScaleValue, z: 0.22 * unitScaleValue},
+	)
+
+	if unit.Appearance.Hair.Length > 0 {
+		hairSize := matrix.Float(0.16) + matrix.Float(minInt32(unit.Appearance.Hair.Length, 40))*matrix.Float(0.002)
+		addPart(
+			fmt.Sprintf("unit:%d:appearance:hair", unit.ID),
+			"sphere",
+			appearanceColor(unit, 1, matrix.NewColor(0.12, 0.07, 0.04, 1)),
+			unitPosition{x: 0, y: 0.48 * unitScaleValue, z: 0},
+			unitPosition{x: hairSize * unitScaleValue, y: 0.08 * unitScaleValue, z: hairSize * unitScaleValue},
+		)
+	}
+
+	if unit.Appearance.Beard.Length > 0 || unit.Appearance.Moustache.Length > 0 {
+		addPart(
+			fmt.Sprintf("unit:%d:appearance:beard", unit.ID),
+			"sphere",
+			appearanceColor(unit, 1, matrix.NewColor(0.1, 0.06, 0.035, 1)),
+			unitPosition{x: 0, y: 0.28 * unitScaleValue, z: -0.17 * unitScaleValue},
+			unitPosition{x: 0.11 * unitScaleValue, y: 0.12 * unitScaleValue, z: 0.045 * unitScaleValue},
+		)
+	}
+
+	woundIndex := 0
+	for _, wound := range unit.Wounds {
+		if !wound.SeveredPart && len(wound.Parts) == 0 {
+			continue
+		}
+		if woundIndex >= 3 {
+			break
+		}
+		key := fmt.Sprintf("unit:%d:appearance:wound:%d", unit.ID, woundIndex)
+		offset := unitPosition{
+			x: (matrix.Float(woundIndex%3) - 1) * matrix.Float(0.14) * unitScaleValue,
+			y: matrix.Float(0.02+float32(woundIndex)*0.16) * unitScaleValue,
+			z: -0.18 * unitScaleValue,
+		}
+		addPart(key, "sphere", matrix.NewColor(0.8, 0.06, 0.035, 0.9), offset, unitPosition{
+			x: 0.055 * unitScaleValue, y: 0.055 * unitScaleValue, z: 0.025 * unitScaleValue,
+		})
+		woundIndex++
+	}
+
+	for key, old := range previous {
+		if _, stillPresent := current[key]; !stillPresent {
+			old.drawing.shaderData.Deactivate()
+			delete(tr.entityDrawings, key)
+		}
+	}
+	tr.unitAppearance[unit.ID] = current
+}
+
+func (tr *TerrainRenderer) clearUnitAppearance(id int32) {
+	for key, part := range tr.unitAppearance[id] {
+		if part != nil && part.drawing != nil {
+			part.drawing.shaderData.Deactivate()
+		}
+		delete(tr.entityDrawings, key)
+	}
+	delete(tr.unitAppearance, id)
+}
+
+func appearanceColor(unit mapdata.UnitInstance, index int, fallback matrix.Color) matrix.Color {
+	if index >= 0 && index < len(unit.Appearance.Colors) {
+		colorIndex := unit.Appearance.Colors[index]
+		if colorIndex >= 0 && colorIndex < int32(len(mapdata.DFColorList)) {
+			color := mapdata.DFColorList[colorIndex]
+			return matrix.NewColor(
+				matrix.Float(color.R)/255,
+				matrix.Float(color.G)/255,
+				matrix.Float(color.B)/255,
+				1,
+			)
+		}
+	}
+	return fallback
+}
+
+func minInt32(value, max int32) int32 {
+	if value < 0 {
+		return 0
+	}
+	if value > max {
+		return max
+	}
+	return value
 }
 
 func unitEquipmentOffset(index int, mode int32) unitPosition {
@@ -505,6 +619,26 @@ func designationColor(designation dfproto.TileDigDesignation, marker, auto bool)
 	}
 }
 
+func artImageElementColor(snapshot mapdata.ChunkSnapshot, element dfproto.ArtImageElement) matrix.Color {
+	fallback := matrix.NewColor(0.75, 0.75, 0.78, 1)
+	switch element.Type {
+	case dfproto.ImageCreature:
+		fallback = matrix.NewColor(0.9, 0.35, 0.3, 1)
+	case dfproto.ImagePlant:
+		fallback = matrix.NewColor(0.35, 0.85, 0.3, 1)
+	case dfproto.ImageTree:
+		fallback = matrix.NewColor(0.55, 0.28, 0.12, 1)
+	case dfproto.ImageShape:
+		fallback = matrix.NewColor(0.7, 0.35, 0.9, 1)
+	case dfproto.ImageItem:
+		fallback = matrix.NewColor(1.0, 0.75, 0.25, 1)
+	}
+	if element.Material != (dfproto.MatPair{}) {
+		return entityMaterialColor(snapshot, element.Material, fallback)
+	}
+	return fallback
+}
+
 func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapdata.ChunkSnapshot) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
@@ -581,7 +715,7 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 				matrix.Float(pos.Y)+itemHeight*0.5+matrix.Float(item.SubposZ),
 				matrix.Float(pos.Z)-0.5-matrix.Float(item.SubposY),
 			))
-			detail.transform.SetScale(matrix.NewVec3(itemSize, itemHeight, itemSize))
+			detail.transform.SetScale(itemVisualScale(item, itemSize, itemHeight))
 		}
 	}
 
@@ -596,11 +730,11 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 		pos := util.DFToWorldPos(util.DFCoord{X: item.Pos.X, Y: item.Pos.Y, Z: item.Pos.Z})
 		size, stackHeight := itemDimensions(item)
 		drawing.transform.SetPosition(matrix.NewVec3(
-			matrix.Float(pos.X)+0.5,
-			matrix.Float(pos.Y)+stackHeight*0.5,
-			matrix.Float(pos.Z)-0.5,
+			matrix.Float(pos.X)+0.5+matrix.Float(item.SubposX),
+			matrix.Float(pos.Y)+stackHeight*0.5+matrix.Float(item.SubposZ),
+			matrix.Float(pos.Z)-0.5-matrix.Float(item.SubposY),
 		))
-		drawing.transform.SetScale(matrix.NewVec3(size, stackHeight, size))
+		drawing.transform.SetScale(itemVisualScale(item, size, stackHeight))
 	}
 
 	for _, flow := range snapshot.Flows {
@@ -692,6 +826,37 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 				matrix.Float(pos.Z)-0.985,
 			))
 			drawing.transform.SetScale(matrix.NewVec3(0.7, 0.7, 0.02))
+		}
+
+		for elementIndex, element := range engraving.Image.Elements {
+			count := minInt32(element.Count, 4)
+			if count < 1 {
+				count = 1
+			}
+			for mark := int32(0); mark < count; mark++ {
+				key := fmt.Sprintf("engraving:%d:%d:%d:image:%d:%d", engraving.Pos.X, engraving.Pos.Y, engraving.Pos.Z, elementIndex, mark)
+				seen[key] = struct{}{}
+				marker := tr.ensureEntityDrawing(key, artImageElementColor(snapshot, element))
+				if marker == nil {
+					continue
+				}
+				spread := matrix.Float(mark) - matrix.Float(count-1)*matrix.Float(0.5)
+				if engraving.IsFloor {
+					marker.transform.SetPosition(matrix.NewVec3(
+						matrix.Float(pos.X)+0.5+spread*0.14,
+						matrix.Float(pos.Y)+0.045,
+						matrix.Float(pos.Z)-0.5+matrix.Float(elementIndex%3-1)*0.12,
+					))
+					marker.transform.SetScale(matrix.NewVec3(0.07, 0.025, 0.07))
+				} else {
+					marker.transform.SetPosition(matrix.NewVec3(
+						matrix.Float(pos.X)+0.5+spread*0.14,
+						matrix.Float(pos.Y)+0.5+matrix.Float(elementIndex%3-1)*0.12,
+						matrix.Float(pos.Z)-0.965,
+					))
+					marker.transform.SetScale(matrix.NewVec3(0.07, 0.07, 0.025))
+				}
+			}
 		}
 	}
 
@@ -793,6 +958,32 @@ func itemDimensions(item dfproto.Item) (matrix.Float, matrix.Float) {
 		}
 	}
 	return size, stackHeight
+}
+
+// itemVisualScale traduz dados físicos do RemoteFortressReader em uma forma
+// simples: projéteis ficam alongados conforme a velocidade e volumes grandes
+// ganham presença, sem alterar a posição do tile de origem.
+func itemVisualScale(item dfproto.Item, size, height matrix.Float) matrix.Vec3 {
+	if item.Projectile {
+		velocityX := matrix.Abs(matrix.Float(item.VelocityX))
+		velocityY := matrix.Abs(matrix.Float(item.VelocityY))
+		velocityZ := matrix.Abs(matrix.Float(item.VelocityZ))
+		if velocityX > 4 {
+			velocityX = 4
+		}
+		if velocityY > 4 {
+			velocityY = 4
+		}
+		if velocityZ > 4 {
+			velocityZ = 4
+		}
+		size += (velocityX + velocityY) * matrix.Float(0.025)
+		height += velocityZ * matrix.Float(0.025)
+		if height < matrix.Float(0.16) {
+			height = matrix.Float(0.16)
+		}
+	}
+	return matrix.NewVec3(size, height, size)
 }
 
 func itemMeshKind(item dfproto.Item) string {
@@ -1163,6 +1354,13 @@ func (tr *TerrainRenderer) Render() {
 			}
 			equipment.drawing.transform.SetPosition(addUnitPosition(current, equipment.offset).vec())
 			equipment.drawing.transform.SetScale(equipment.scale.vec())
+		}
+		for _, part := range tr.unitAppearance[id] {
+			if part == nil || part.drawing == nil {
+				continue
+			}
+			part.drawing.transform.SetPosition(addUnitPosition(current, part.offset).vec())
+			part.drawing.transform.SetScale(part.scale.vec())
 		}
 	}
 }

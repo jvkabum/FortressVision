@@ -442,6 +442,8 @@ func main() {
 								ProfessionColor: u.ProfessionCol,
 								Appearance:      u.Appearance,
 								Inventory:       append([]dfproto.InventoryItem(nil), u.Inventory...),
+								Wounds:          append([]dfproto.UnitWound(nil), u.Wounds...),
+								Facing:          u.Facing,
 								SizeCurrent:     u.SizeInfo.SizeCur,
 								SizeBase:        u.SizeInfo.SizeBase,
 								IsSoldier:       u.IsSoldier,

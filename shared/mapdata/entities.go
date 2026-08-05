@@ -35,6 +35,8 @@ type UnitInstance struct {
 	ProfessionColor dfproto.ColorDefinition
 	Appearance      dfproto.UnitAppearance
 	Inventory       []dfproto.InventoryItem
+	Wounds          []dfproto.UnitWound
+	Facing          dfproto.Coord
 	SizeCurrent     int32
 	SizeBase        int32
 	IsSoldier       bool
