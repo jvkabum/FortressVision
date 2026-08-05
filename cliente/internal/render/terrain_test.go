@@ -127,6 +127,7 @@ func TestItemHasSolidSupportRejectsAirAndAcceptsFloor(t *testing.T) {
 	store := mapdata.NewMapDataStore()
 	store.Tiletypes[1] = dfproto.Tiletype{ID: 1, Shape: dfproto.ShapeEmpty}
 	store.Tiletypes[2] = dfproto.Tiletype{ID: 2, Shape: dfproto.ShapeFloor}
+	store.Tiletypes[3] = dfproto.Tiletype{ID: 3, Shape: dfproto.ShapeBranch}
 
 	origin := util.DFCoord{X: 16, Y: 32, Z: 4}
 	snapshot := mapdata.ChunkSnapshot{}
@@ -144,6 +145,13 @@ func TestItemHasSolidSupportRejectsAirAndAcceptsFloor(t *testing.T) {
 	snapshot.Tiles[0][0] = *floor
 	if !itemHasSolidSupport(snapshot, origin, dfproto.Coord{X: 16, Y: 32, Z: 4}) {
 		t.Fatal("item should be rendered over a solid floor")
+	}
+
+	branch := mapdata.NewTile(store, origin)
+	branch.TileType = 3
+	snapshot.Tiles[0][0] = *branch
+	if itemHasSolidSupport(snapshot, origin, dfproto.Coord{X: 16, Y: 32, Z: 4}) {
+		t.Fatal("vegetation must not be treated as structural item support")
 	}
 }
 

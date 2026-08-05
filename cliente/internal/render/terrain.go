@@ -727,14 +727,6 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 				continue
 			}
 			item := *buildingItem.Item
-			itemKind := itemMeshKind(item)
-			key := fmt.Sprintf("building:%d:item:%d:%s", building.Index, itemIndex, itemKind)
-			seen[key] = struct{}{}
-			itemColor := entityMaterialColor(snapshot, item.Material, darkenColor(entityMaterialColor(snapshot, building.Material, matrix.NewColor(0.6, 0.6, 0.65, 1)), 1.1))
-			detail := tr.ensureEntityDrawingWithMesh(key, itemColor, tr.entityMesh(itemKind))
-			if detail == nil {
-				continue
-			}
 			itemPos := item.Pos
 			if itemPos == (dfproto.Coord{}) {
 				itemPos = dfproto.Coord{
@@ -743,7 +735,21 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 					Z: building.PosZMin,
 				}
 			}
-			pos := util.DFToWorldPos(util.DFCoord{X: itemPos.X, Y: itemPos.Y, Z: itemPos.Z})
+			support, supported := tr.itemSupportPosition(snapshot, origin, itemPos)
+			if !supported {
+				// Itens de construcoes tambem dependem de um tile estrutural.
+				// Antes eles ignoravam a validacao e podiam ficar suspensos.
+				continue
+			}
+			itemKind := itemMeshKind(item)
+			key := fmt.Sprintf("building:%d:item:%d:%s", building.Index, itemIndex, itemKind)
+			seen[key] = struct{}{}
+			itemColor := entityMaterialColor(snapshot, item.Material, darkenColor(entityMaterialColor(snapshot, building.Material, matrix.NewColor(0.6, 0.6, 0.65, 1)), 1.1))
+			detail := tr.ensureEntityDrawingWithMesh(key, itemColor, tr.entityMesh(itemKind))
+			if detail == nil {
+				continue
+			}
+			pos := util.DFToWorldPos(support)
 			itemSize, itemHeight := itemDimensions(item)
 			detail.transform.SetPosition(matrix.NewVec3(
 				matrix.Float(pos.X)+0.5+matrix.Float(item.SubposX),
@@ -1015,33 +1021,11 @@ func itemHasSolidSupport(snapshot mapdata.ChunkSnapshot, origin util.DFCoord, po
 		return false
 	}
 
-	shape := snapshot.Tiles[localX][localY].Shape()
-	switch shape {
-	case dfproto.ShapeNoShape, dfproto.ShapeEmpty:
-		tile := snapshot.Tiles[localX][localY]
-		if tile.DigDesignation != dfproto.DigNone || tile.DigMarker || tile.DigAuto || tile.WaterLevel > 0 || tile.MagmaLevel > 0 {
-			return false
-		}
-		return snapshotHasSolidNeighbors(snapshot, localX, localY)
-	case dfproto.ShapeEndlessPit:
-		return false
-	default:
-		return true
-	}
+	return snapshot.Tiles[localX][localY].IsGroundSupport()
 }
 
 func renderSupportTile(tile *mapdata.Tile) bool {
-	if tile == nil || tile.Hidden {
-		return false
-	}
-	switch tile.Shape() {
-	case dfproto.ShapeNoShape, dfproto.ShapeEmpty, dfproto.ShapeEndlessPit:
-		return false
-	case dfproto.ShapeRampTop, dfproto.ShapeStairUp, dfproto.ShapeStairDown, dfproto.ShapeStairUpDown:
-		return true
-	default:
-		return tile.IsFloor() || tile.IsWall()
-	}
+	return tile != nil && tile.IsGroundSupport()
 }
 
 func (tr *TerrainRenderer) itemSupportPosition(snapshot mapdata.ChunkSnapshot, origin util.DFCoord, pos dfproto.Coord) (util.DFCoord, bool) {
@@ -1051,6 +1035,9 @@ func (tr *TerrainRenderer) itemSupportPosition(snapshot mapdata.ChunkSnapshot, o
 	}
 	if tr.store == nil {
 		return util.DFCoord{}, false
+	}
+	if tile := tr.store.GetTile(current); renderSupportTile(tile) {
+		return current, true
 	}
 
 	// Itens em uma célula de ar podem estar caindo ou apoiados no nível
@@ -1063,24 +1050,6 @@ func (tr *TerrainRenderer) itemSupportPosition(snapshot mapdata.ChunkSnapshot, o
 		}
 	}
 	return util.DFCoord{}, false
-}
-
-func snapshotHasSolidNeighbors(snapshot mapdata.ChunkSnapshot, x, y int) bool {
-	solidNeighbors := 0
-	for _, offset := range [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
-		nx, ny := x+offset[0], y+offset[1]
-		if nx < 0 || nx >= 16 || ny < 0 || ny >= 16 || !snapshot.TilePresent[nx][ny] {
-			continue
-		}
-		shape := snapshot.Tiles[nx][ny].Shape()
-		switch shape {
-		case dfproto.ShapeNoShape, dfproto.ShapeEmpty, dfproto.ShapeEndlessPit:
-			continue
-		default:
-			solidNeighbors++
-		}
-	}
-	return solidNeighbors >= 3
 }
 
 // itemVisualScale traduz dados físicos do RemoteFortressReader em uma forma

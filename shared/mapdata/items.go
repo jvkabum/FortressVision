@@ -185,17 +185,7 @@ func (s *MapDataStore) itemSupportPositionLocked(pos util.DFCoord) util.DFCoord 
 }
 
 func itemSupportTile(tile *Tile) bool {
-	if tile == nil || tile.Hidden {
-		return false
-	}
-	switch tile.Shape() {
-	case dfproto.ShapeNoShape, dfproto.ShapeEmpty, dfproto.ShapeEndlessPit:
-		return false
-	case dfproto.ShapeRampTop, dfproto.ShapeStairUp, dfproto.ShapeStairDown, dfproto.ShapeStairUpDown:
-		return true
-	default:
-		return tile.IsFloor() || tile.IsWall()
-	}
+	return tile != nil && tile.IsGroundSupport()
 }
 
 func itemRayDistance(ray util.Ray, item dfproto.Item, pos util.DFCoord, maxDistance float32) (float32, bool) {

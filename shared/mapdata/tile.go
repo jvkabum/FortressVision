@@ -193,6 +193,36 @@ func (t *Tile) IsFloor() bool {
 	}
 }
 
+// IsGroundSupport informa se o tile pode sustentar visualmente um item.
+//
+// IsFloor() tambem inclui formas de vegetacao porque elas ocupam a celula do
+// DF. Isso e util para colisao e para a malha da arvore, mas nao significa que
+// exista um chao sob um item. Manter essa regra separada evita que galhos,
+// copas ou arbustos sejam usados como piso estrutural.
+func (t *Tile) IsGroundSupport() bool {
+	if t == nil || t.Hidden {
+		return false
+	}
+
+	switch t.Shape() {
+	case dfproto.ShapeFloor,
+		dfproto.ShapeWall,
+		dfproto.ShapeFortification,
+		dfproto.ShapeStairUp,
+		dfproto.ShapeStairDown,
+		dfproto.ShapeStairUpDown,
+		dfproto.ShapeRamp,
+		dfproto.ShapeRampTop,
+		dfproto.ShapeBoulder,
+		dfproto.ShapePebbles,
+		dfproto.ShapeBrookBed,
+		dfproto.ShapeBrookTop:
+		return true
+	default:
+		return false
+	}
+}
+
 // Vizinhos (Helpers)
 
 // GetStore retorna o MapDataStore que contém este tile.

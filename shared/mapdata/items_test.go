@@ -65,6 +65,24 @@ func TestItemDisplayNameIncludesMaterialAndType(t *testing.T) {
 	}
 }
 
+func TestItemSupportRejectsVegetationAndAcceptsGround(t *testing.T) {
+	store := NewMapDataStore()
+	store.Tiletypes[1] = dfproto.Tiletype{ID: 1, Shape: dfproto.ShapeBranch}
+	store.Tiletypes[2] = dfproto.Tiletype{ID: 2, Shape: dfproto.ShapeFloor}
+
+	branch := NewTile(store, util.DFCoord{})
+	branch.TileType = 1
+	if itemSupportTile(branch) {
+		t.Fatal("branch must not be accepted as item ground support")
+	}
+
+	floor := NewTile(store, util.DFCoord{})
+	floor.TileType = 2
+	if !itemSupportTile(floor) {
+		t.Fatal("floor must be accepted as item ground support")
+	}
+}
+
 func TestFindTileByRayReturnsVisibleBlock(t *testing.T) {
 	store := NewMapDataStore()
 	store.Tiletypes[1] = dfproto.Tiletype{ID: 1, Shape: dfproto.ShapeFloor, Material: dfproto.TilematStone}
