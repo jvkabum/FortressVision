@@ -28,7 +28,7 @@ func TestPadMeshDataKeepsTrianglesAndAddsDegenerateSlots(t *testing.T) {
 		Indices: []uint32{0, 1, 2},
 	}
 
-	verts, indices := padMeshData(data, 2)
+	verts, indices := padMeshData(data, 2, matrix.NewVec3(0, 0, 0))
 	if len(verts) != 6 || len(indices) != 6 {
 		t.Fatalf("padded mesh lengths = %d/%d, want 6/6", len(verts), len(indices))
 	}
@@ -40,6 +40,19 @@ func TestPadMeshDataKeepsTrianglesAndAddsDegenerateSlots(t *testing.T) {
 	}
 	if verts[0].Position != data.Vertices[0].Position || verts[2].Position != data.Vertices[2].Position {
 		t.Fatalf("original triangle vertices changed")
+	}
+}
+
+func TestPadMeshDataUsesChunkOriginForDetailUV(t *testing.T) {
+	data := &mesher.MeshData{
+		Vertices: []rendering.Vertex{{Position: matrix.NewVec3(1, 0, -2)}},
+		Indices:  []uint32{0, 0, 0},
+	}
+
+	verts, _ := padMeshData(data, 1, matrix.NewVec3(16, 3, -32))
+	want := matrix.NewVec2((1+16)*0.42, (-2-32)*0.42)
+	if verts[0].UV0 != want {
+		t.Fatalf("detail UV = %v, want global-coordinate UV %v", verts[0].UV0, want)
 	}
 }
 

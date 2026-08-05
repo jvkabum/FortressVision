@@ -35,6 +35,11 @@ type unitEquipmentDrawing struct {
 // coordenada-base do tile os deixa enterrados ou visualmente desalinhados.
 const tileSurfaceOffset matrix.Float = 1.0
 
+// tileOverlayThickness/epsilon mantêm overlays coplanares com o piso sem
+// deixá-los atravessar o terreno nem parecerem placas suspensas.
+const tileOverlayThickness matrix.Float = 0.012
+const tileOverlayEpsilon matrix.Float = 0.001
+
 func tileSurfaceY(tileBaseY, localOffset matrix.Float) matrix.Float {
 	return tileBaseY + tileSurfaceOffset + localOffset
 }
@@ -824,10 +829,10 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 		if engraving.IsFloor {
 			drawing.transform.SetPosition(matrix.NewVec3(
 				matrix.Float(pos.X)+0.5,
-				tileSurfaceY(matrix.Float(pos.Y), 0.015),
+				tileSurfaceY(matrix.Float(pos.Y), tileOverlayEpsilon+tileOverlayThickness*0.5),
 				matrix.Float(pos.Z)-0.5,
 			))
-			drawing.transform.SetScale(matrix.NewVec3(0.7, 0.02, 0.7))
+			drawing.transform.SetScale(matrix.NewVec3(0.56, tileOverlayThickness, 0.56))
 		} else {
 			drawing.transform.SetPosition(matrix.NewVec3(
 				matrix.Float(pos.X)+0.5,
@@ -853,10 +858,10 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 				if engraving.IsFloor {
 					marker.transform.SetPosition(matrix.NewVec3(
 						matrix.Float(pos.X)+0.5+spread*0.14,
-						tileSurfaceY(matrix.Float(pos.Y), 0.045),
+						tileSurfaceY(matrix.Float(pos.Y), tileOverlayEpsilon+0.025),
 						matrix.Float(pos.Z)-0.5+matrix.Float(elementIndex%3-1)*0.12,
 					))
-					marker.transform.SetScale(matrix.NewVec3(0.07, 0.025, 0.07))
+					marker.transform.SetScale(matrix.NewVec3(0.055, 0.018, 0.055))
 				} else {
 					marker.transform.SetPosition(matrix.NewVec3(
 						matrix.Float(pos.X)+0.5+spread*0.14,
@@ -883,9 +888,9 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 			for _, spatter := range pile.Spatters {
 				amount += spatter.Amount
 			}
-			spatterHeight := matrix.Float(0.02) + matrix.Float(amount)/1000
-			if spatterHeight > 0.1 {
-				spatterHeight = 0.1
+			spatterHeight := matrix.Float(0.008) + matrix.Float(amount)/2500
+			if spatterHeight > 0.06 {
+				spatterHeight = 0.06
 			}
 			spatterColor := entityMaterialColor(snapshot, pile.Spatters[0].Material, matrix.NewColor(0.45, 0.08, 0.04, 1))
 			drawing := tr.ensureEntityDrawing(key, spatterColor)
@@ -898,7 +903,7 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 				tileSurfaceY(matrix.Float(pos.Y), spatterHeight*0.5),
 				matrix.Float(pos.Z)-0.5,
 			))
-			drawing.transform.SetScale(matrix.NewVec3(0.35, spatterHeight, 0.35))
+			drawing.transform.SetScale(matrix.NewVec3(0.22, spatterHeight, 0.22))
 		}
 	}
 
@@ -922,10 +927,10 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 			pos := util.DFToWorldPos(util.DFCoord{X: origin.X + int32(x), Y: origin.Y + int32(y), Z: origin.Z})
 			drawing.transform.SetPosition(matrix.NewVec3(
 				matrix.Float(pos.X)+0.5,
-				tileSurfaceY(matrix.Float(pos.Y), 0.035),
+				tileSurfaceY(matrix.Float(pos.Y), tileOverlayEpsilon+tileOverlayThickness*0.5),
 				matrix.Float(pos.Z)-0.5,
 			))
-			drawing.transform.SetScale(matrix.NewVec3(0.55, 0.025, 0.55))
+			drawing.transform.SetScale(matrix.NewVec3(0.38, tileOverlayThickness, 0.38))
 		}
 	}
 
@@ -1154,14 +1159,14 @@ func (tr *TerrainRenderer) applyMeshGenerated(mesh *mesher.ChunkMesh) {
 		triangleCount := len(data.Indices) / 3
 		state := states[matID]
 		if state != nil && triangleCount <= state.capacity {
-			verts, _ := padMeshData(data, state.capacity)
+			verts, _ := padMeshData(data, state.capacity, mesh.Origin)
 			tr.host.MeshCache().UpdateMeshVertices(state.meshKey, verts)
 			state.shaderData.Activate()
 			continue
 		}
 
 		capacity := nextPowerOfTwo(triangleCount)
-		verts, indices := padMeshData(data, capacity)
+		verts, indices := padMeshData(data, capacity, mesh.Origin)
 		meshKey := fmt.Sprintf("chunk_%s_%d_dynamic_%d", key, matID, capacity)
 		dynamicMesh := tr.host.MeshCache().DynamicMesh(meshKey, verts, indices)
 		sd := shader_data_registry.Create("basic")
@@ -1258,7 +1263,7 @@ func nextPowerOfTwo(value int) int {
 
 // padMeshData reserva uma quantidade fixa de triângulos. Os slots não usados
 // viram triângulos degenerados e, portanto, não alteram a imagem.
-func padMeshData(data *mesher.MeshData, capacity int) ([]rendering.Vertex, []uint32) {
+func padMeshData(data *mesher.MeshData, capacity int, origin matrix.Vec3) ([]rendering.Vertex, []uint32) {
 	if capacity < 1 {
 		capacity = 1
 	}
@@ -1283,7 +1288,7 @@ func padMeshData(data *mesher.MeshData, capacity int) ([]rendering.Vertex, []uin
 				sourceIndex := data.Indices[base+corner]
 				if int(sourceIndex) < len(data.Vertices) {
 					verts[base+corner] = data.Vertices[sourceIndex]
-					verts[base+corner].UV0 = terrainDetailUV(verts[base+corner].Position)
+					verts[base+corner].UV0 = terrainDetailUV(verts[base+corner].Position, origin)
 				} else {
 					verts[base+corner] = fallback
 				}
@@ -1297,8 +1302,11 @@ func padMeshData(data *mesher.MeshData, capacity int) ([]rendering.Vertex, []uin
 	return verts, indices
 }
 
-func terrainDetailUV(position matrix.Vec3) matrix.Vec2 {
-	return matrix.NewVec2(position.X()*0.42, position.Z()*0.42)
+func terrainDetailUV(position, origin matrix.Vec3) matrix.Vec2 {
+	return matrix.NewVec2(
+		(position.X()+origin.X())*0.42,
+		(position.Z()+origin.Z())*0.42,
+	)
 }
 
 func makeDetailTexture(width, height int) []byte {

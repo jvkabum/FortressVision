@@ -35,6 +35,25 @@ func isVegetationShape(shape dfproto.TiletypeShape) bool {
 	}
 }
 
+// isVegetationTile cobre tiles em que algum world/raw do DFHack nÃ£o informa
+// um Shape de Ã¡rvore confiÃ¡vel, mas ainda preserva a categoria vegetal.
+// Isso Ã© importante enquanto a vegetaÃ§Ã£o estÃ¡ temporariamente desativada:
+// uma parede de material TREE/PLANT nÃ£o pode reaparecer como tronco gigante.
+func isVegetationTile(tile *mapdata.Tile) bool {
+	if tile == nil {
+		return false
+	}
+	if isVegetationShape(tile.Shape()) {
+		return true
+	}
+	switch tile.MaterialCategory() {
+	case dfproto.TilematTreeMaterial, dfproto.TilematPlant, dfproto.TilematMushroom:
+		return true
+	default:
+		return false
+	}
+}
+
 // getTileColor usa as cores reais recebidas do DFHack. O fallback cinza é
 // usado apenas durante a janela em que a lista de materiais ainda não chegou.
 func getTileColor(tile *mapdata.Tile) matrix.Color {
@@ -144,7 +163,7 @@ func shouldDrawFace(chunk *mapdata.Chunk, x, y int, dx, dy int, isFloor bool) bo
 	if shape == dfproto.ShapeNoShape {
 		return true
 	}
-	if !renderVegetation && isVegetationShape(shape) {
+	if !renderVegetation && isVegetationTile(neighbor) {
 		return true
 	}
 
@@ -177,7 +196,8 @@ func meshGreedy2D(chunk *mapdata.Chunk, md *MeshData) {
 				shape = tile.Shape()
 			}
 			if tile == nil || tile.Hidden || shape == dfproto.ShapeRamp ||
-				shape == dfproto.ShapeBoulder || shape == dfproto.ShapePebbles || isVegetationShape(shape) {
+				shape == dfproto.ShapeBoulder || shape == dfproto.ShapePebbles ||
+				(!renderVegetation && isVegetationTile(tile)) {
 				continue
 			}
 
@@ -335,7 +355,7 @@ func meshSpecials(chunk *mapdata.Chunk, md *MeshData) {
 			if tile == nil || tile.Hidden {
 				continue
 			}
-			if !renderVegetation && isVegetationShape(tile.Shape()) {
+			if !renderVegetation && isVegetationTile(tile) {
 				continue
 			}
 
