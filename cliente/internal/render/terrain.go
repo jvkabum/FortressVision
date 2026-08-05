@@ -20,6 +20,34 @@ type unitDrawing struct {
 	shaderData rendering.DrawInstance
 }
 
+type unitPosition struct {
+	x, y, z matrix.Float
+}
+
+type unitEquipmentDrawing struct {
+	drawing *unitDrawing
+	offset  unitPosition
+	scale   unitPosition
+}
+
+func (p unitPosition) vec() matrix.Vec3 {
+	return matrix.NewVec3(p.x, p.y, p.z)
+}
+
+func lerpUnitPosition(current, target unitPosition, alpha matrix.Float) unitPosition {
+	if alpha < 0 {
+		alpha = 0
+	}
+	if alpha > 1 {
+		alpha = 1
+	}
+	return unitPosition{
+		x: current.x + (target.x-current.x)*alpha,
+		y: current.y + (target.y-current.y)*alpha,
+		z: current.z + (target.z-current.z)*alpha,
+	}
+}
+
 type chunkDrawing struct {
 	mesh       *rendering.Mesh
 	meshKey    string
@@ -43,6 +71,9 @@ type TerrainRenderer struct {
 	terrainMaterial   *rendering.Material
 	liquidMaterial    *rendering.Material
 	unitDrawings      map[int32]*unitDrawing
+	unitTargets       map[int32]unitPosition
+	unitPositions     map[int32]unitPosition
+	unitEquipment     map[int32]map[string]*unitEquipmentDrawing
 	unitMesh          *rendering.Mesh
 	unitMaterial      *rendering.Material
 	entityMeshes      map[string]*rendering.Mesh
@@ -64,6 +95,9 @@ func NewTerrainRenderer(host *engine.Host, meshingMgr *mesher.Manager) *TerrainR
 		meshingMgr:      meshingMgr,
 		chunkDrawings:   make(map[string]map[int32]*chunkDrawing),
 		unitDrawings:    make(map[int32]*unitDrawing),
+		unitTargets:     make(map[int32]unitPosition),
+		unitPositions:   make(map[int32]unitPosition),
+		unitEquipment:   make(map[int32]map[string]*unitEquipmentDrawing),
 		entityMeshes:    make(map[string]*rendering.Mesh),
 		entityDrawings:  make(map[string]*unitDrawing),
 		chunkEntityKeys: make(map[string]map[string]struct{}),
@@ -135,21 +169,101 @@ func (tr *TerrainRenderer) applyUnits(units []mapdata.UnitInstance) {
 			scale := unitScale(unit)
 			drawing.transform.SetScale(matrix.NewVec3(0.35*scale, 0.7*scale, 0.35*scale))
 			pos := util.DFToWorldPos(unit.Pos)
-			drawing.transform.SetPosition(matrix.NewVec3(
-				matrix.Float(pos.X)+0.5+matrix.Float(unit.SubPos.X),
-				matrix.Float(pos.Y)+0.5+matrix.Float(unit.SubPos.Z),
-				matrix.Float(pos.Z)-0.5-matrix.Float(unit.SubPos.Y),
-			))
+			target := unitPosition{
+				x: matrix.Float(pos.X) + 0.5 + matrix.Float(unit.SubPos.X),
+				y: matrix.Float(pos.Y) + 0.5 + matrix.Float(unit.SubPos.Z),
+				z: matrix.Float(pos.Z) - 0.5 - matrix.Float(unit.SubPos.Y),
+			}
+			if _, exists := tr.unitPositions[unit.ID]; !exists {
+				tr.unitPositions[unit.ID] = target
+				drawing.transform.SetPosition(target.vec())
+			}
+			tr.unitTargets[unit.ID] = target
+			tr.updateUnitEquipment(unit)
 		} else {
 			drawing.shaderData.Deactivate()
+			delete(tr.unitTargets, unit.ID)
+			delete(tr.unitPositions, unit.ID)
+			tr.clearUnitEquipment(unit.ID)
 		}
 	}
 
 	for id, drawing := range tr.unitDrawings {
 		if _, ok := seen[id]; !ok {
 			drawing.shaderData.Deactivate()
+			delete(tr.unitTargets, id)
+			delete(tr.unitPositions, id)
+			tr.clearUnitEquipment(id)
 		}
 	}
+}
+
+func (tr *TerrainRenderer) updateUnitEquipment(unit mapdata.UnitInstance) {
+	previous := tr.unitEquipment[unit.ID]
+	current := make(map[string]*unitEquipmentDrawing, len(unit.Inventory))
+	unitScaleValue := unitScale(unit)
+	for index, inventory := range unit.Inventory {
+		item := inventory.Item
+		key := fmt.Sprintf("unit:%d:inventory:%d:%d", unit.ID, index, item.Type.MatType)
+		mesh := tr.entityMesh(itemMeshKind(item))
+		drawing := tr.ensureEntityDrawingWithMesh(key, unitEquipmentColor(unit, item), mesh)
+		if drawing == nil {
+			continue
+		}
+		offset := unitEquipmentOffset(index, inventory.Mode)
+		itemSize, itemHeight := itemDimensions(item)
+		current[key] = &unitEquipmentDrawing{
+			drawing: drawing,
+			offset:  offset,
+			scale: unitPosition{
+				x: itemSize * unitScaleValue,
+				y: itemHeight * unitScaleValue,
+				z: itemSize * unitScaleValue,
+			},
+		}
+	}
+
+	for key, old := range previous {
+		if _, stillPresent := current[key]; !stillPresent {
+			old.drawing.shaderData.Deactivate()
+			delete(tr.entityDrawings, key)
+		}
+	}
+	tr.unitEquipment[unit.ID] = current
+}
+
+func (tr *TerrainRenderer) clearUnitEquipment(id int32) {
+	for key, equipment := range tr.unitEquipment[id] {
+		if equipment != nil && equipment.drawing != nil {
+			equipment.drawing.shaderData.Deactivate()
+		}
+		delete(tr.entityDrawings, key)
+	}
+	delete(tr.unitEquipment, id)
+}
+
+func unitEquipmentOffset(index int, mode int32) unitPosition {
+	side := matrix.Float(-1)
+	if index%2 == 1 {
+		side = 1
+	}
+	return unitPosition{
+		x: side * (matrix.Float(0.22) + matrix.Float(index/2)*matrix.Float(0.04)),
+		y: matrix.Float(0.05) + matrix.Float(index%3)*matrix.Float(0.1),
+		z: matrix.Float(0.08) + matrix.Float(mode&1)*matrix.Float(0.03),
+	}
+}
+
+func unitEquipmentColor(unit mapdata.UnitInstance, item dfproto.Item) matrix.Color {
+	if item.Dye.Red != 0 || item.Dye.Green != 0 || item.Dye.Blue != 0 {
+		return matrix.NewColor(
+			matrix.Float(item.Dye.Red)/255,
+			matrix.Float(item.Dye.Green)/255,
+			matrix.Float(item.Dye.Blue)/255,
+			1,
+		)
+	}
+	return darkenColor(unitColor(unit), 0.78)
 }
 
 func unitColor(unit mapdata.UnitInstance) matrix.Color {
@@ -400,7 +514,7 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 	}
 
 	chunkKey := origin.String()
-	seen := make(map[string]struct{}, len(snapshot.Buildings)+len(snapshot.Items))
+	seen := make(map[string]struct{}, len(snapshot.Buildings)+len(snapshot.Items)+len(snapshot.OceanWaves))
 	for _, building := range snapshot.Buildings {
 		key := fmt.Sprintf("building:%d", building.Index)
 		seen[key] = struct{}{}
@@ -515,6 +629,34 @@ func (tr *TerrainRenderer) applyChunkEntities(origin util.DFCoord, snapshot mapd
 			matrix.Float(pos.Z)-0.5,
 		))
 		drawing.transform.SetScale(matrix.NewVec3(size, size, size))
+	}
+
+	// OceanWaves chegam no envelope do BlockList do RemoteFortressReader. Elas
+	// representam a frente da onda entre Pos e Dest; um marcador achatado e
+	// alongado mantém o efeito legível sem criar uma malha por tile.
+	for _, wave := range snapshot.OceanWaves {
+		key := fmt.Sprintf("wave:%s:%d:%d:%d:%d:%d:%d", chunkKey,
+			wave.Pos.X, wave.Pos.Y, wave.Pos.Z, wave.Dest.X, wave.Dest.Y, wave.Dest.Z)
+		seen[key] = struct{}{}
+		waveMaterial := tr.ensureLiquidMaterial()
+		if waveMaterial == nil {
+			waveMaterial = tr.unitMaterial
+		}
+		drawing := tr.ensureEntityDrawingWithMeshMaterial(key, waveColor(), tr.entityMesh("sphere"), waveMaterial)
+		if drawing == nil {
+			continue
+		}
+		pos := util.DFToWorldPos(util.DFCoord{
+			X: (wave.Pos.X + wave.Dest.X) / 2,
+			Y: (wave.Pos.Y + wave.Dest.Y) / 2,
+			Z: (wave.Pos.Z + wave.Dest.Z) / 2,
+		})
+		drawing.transform.SetPosition(matrix.NewVec3(
+			matrix.Float(pos.X)+0.5,
+			matrix.Float(pos.Y)+0.56,
+			matrix.Float(pos.Z)-0.5,
+		))
+		drawing.transform.SetScale(waveVisualScale(wave))
 	}
 
 	for _, engraving := range snapshot.Engravings {
@@ -708,6 +850,26 @@ func flowVisualSize(flow dfproto.FlowInfo) matrix.Float {
 		density = 100
 	}
 	return matrix.Float(0.12) + density/matrix.Float(100)*matrix.Float(0.28)
+}
+
+func waveColor() matrix.Color {
+	return matrix.NewColor(0.22, 0.78, 1.0, 0.82)
+}
+
+func waveVisualScale(wave dfproto.Wave) matrix.Vec3 {
+	spanX := matrix.Abs(matrix.Float(wave.Dest.X - wave.Pos.X))
+	spanY := matrix.Abs(matrix.Float(wave.Dest.Y - wave.Pos.Y))
+	if spanX > 4 {
+		spanX = 4
+	}
+	if spanY > 4 {
+		spanY = 4
+	}
+	return matrix.NewVec3(
+		matrix.Float(0.16)+spanX*matrix.Float(0.07),
+		matrix.Float(0.045),
+		matrix.Float(0.16)+spanY*matrix.Float(0.07),
+	)
 }
 
 func (tr *TerrainRenderer) onMeshGenerated(mesh *mesher.ChunkMesh) {
@@ -976,4 +1138,42 @@ func makeDetailTexture(width, height int) []byte {
 // Render mantém a API do controlador; os desenhos já são registrados quando a
 // malha termina de ser gerada e permanecem persistentes na KaijuEngine.
 func (tr *TerrainRenderer) Render() {
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+
+	// O UnitList chega em snapshots discretos. Um fator fixo por frame produz
+	// uma interpolação estável sem depender da frequência das RPCs do DFHack.
+	const interpolationAlpha matrix.Float = 0.18
+	for id, target := range tr.unitTargets {
+		current, ok := tr.unitPositions[id]
+		if !ok {
+			current = target
+		}
+		current = lerpUnitPosition(current, target, interpolationAlpha)
+		if closeUnitPosition(current, target) {
+			current = target
+		}
+		tr.unitPositions[id] = current
+		if drawing := tr.unitDrawings[id]; drawing != nil {
+			drawing.transform.SetPosition(current.vec())
+		}
+		for _, equipment := range tr.unitEquipment[id] {
+			if equipment == nil || equipment.drawing == nil {
+				continue
+			}
+			equipment.drawing.transform.SetPosition(addUnitPosition(current, equipment.offset).vec())
+			equipment.drawing.transform.SetScale(equipment.scale.vec())
+		}
+	}
+}
+
+func addUnitPosition(a, b unitPosition) unitPosition {
+	return unitPosition{x: a.x + b.x, y: a.y + b.y, z: a.z + b.z}
+}
+
+func closeUnitPosition(a, b unitPosition) bool {
+	const epsilon matrix.Float = 0.002
+	return matrix.Abs(a.x-b.x) <= epsilon &&
+		matrix.Abs(a.y-b.y) <= epsilon &&
+		matrix.Abs(a.z-b.z) <= epsilon
 }

@@ -20,6 +20,7 @@ func TestStoreSingleBlockDoesNotReportUnchangedEntitiesAsChanges(t *testing.T) {
 		Items:       []dfproto.Item{{ID: 9, StackSize: 2}},
 		SpatterPile: []dfproto.SpatterPile{{Spatters: []dfproto.Spatter{{Amount: 3}}}},
 		Engravings:  []dfproto.Engraving{{Pos: dfproto.Coord{X: 1, Y: 1, Z: 0}}},
+		OceanWaves:  []dfproto.Wave{{Pos: dfproto.Coord{X: 2, Y: 2, Z: 0}, Dest: dfproto.Coord{X: 3, Y: 2, Z: 0}}},
 	}
 
 	if first := store.StoreSingleBlock(&block); first == NoChange {

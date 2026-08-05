@@ -1257,6 +1257,7 @@ type MapBlock struct {
 	Plants               []PlantDetail
 	SpatterPile          []SpatterPile // ID 25
 	Engravings           []Engraving   // ID 31
+	OceanWaves           []Wave        // envelope BlockList ID 5, agrupado por chunk
 }
 
 func (m *MapBlock) Unmarshal(data []byte) error {

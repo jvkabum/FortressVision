@@ -220,6 +220,10 @@ func (c *Client) GetBlockList(minX, minY, minZ, maxX, maxY, maxZ, blocksNeeded i
 		for i := range res.Engravings {
 			res.Engravings[i].Pos.Z += info.BlockPosZ
 		}
+		for i := range res.OceanWaves {
+			res.OceanWaves[i].Pos.Z += info.BlockPosZ
+			res.OceanWaves[i].Dest.Z += info.BlockPosZ
+		}
 	}
 	attachEngravingsToBlocks(res)
 
@@ -230,7 +234,7 @@ func (c *Client) GetBlockList(minX, minY, minZ, maxX, maxY, maxZ, blocksNeeded i
 // correspondente. O protocolo do RemoteFortressReader as envia no envelope
 // da lista, enquanto o restante do renderer trabalha por MapBlock.
 func attachEngravingsToBlocks(list *dfproto.BlockList) {
-	if list == nil || len(list.Engravings) == 0 {
+	if list == nil || (len(list.Engravings) == 0 && len(list.OceanWaves) == 0) {
 		return
 	}
 
@@ -239,9 +243,15 @@ func attachEngravingsToBlocks(list *dfproto.BlockList) {
 		origin := util.NewDFCoord(engraving.Pos.X, engraving.Pos.Y, engraving.Pos.Z).BlockCoord()
 		byChunk[origin] = append(byChunk[origin], engraving)
 	}
+	wavesByChunk := make(map[util.DFCoord][]dfproto.Wave)
+	for _, wave := range list.OceanWaves {
+		origin := util.NewDFCoord(wave.Pos.X, wave.Pos.Y, wave.Pos.Z).BlockCoord()
+		wavesByChunk[origin] = append(wavesByChunk[origin], wave)
+	}
 	for i := range list.MapBlocks {
 		origin := util.NewDFCoord(list.MapBlocks[i].MapX, list.MapBlocks[i].MapY, list.MapBlocks[i].MapZ).BlockCoord()
 		list.MapBlocks[i].Engravings = append(list.MapBlocks[i].Engravings, byChunk[origin]...)
+		list.MapBlocks[i].OceanWaves = append(list.MapBlocks[i].OceanWaves, wavesByChunk[origin]...)
 	}
 }
 

@@ -92,6 +92,9 @@ func TestChunkSnapshotGobRoundTrip(t *testing.T) {
 		Items:     []dfproto.Item{{ID: 9, StackSize: 3}},
 		Plants:    []dfproto.PlantDetail{{Pos: dfproto.Coord{X: 1, Y: 2}}},
 		Flows:     []dfproto.FlowInfo{{Index: 4, Type: dfproto.FlowSteam}},
+		OceanWaves: []dfproto.Wave{{
+			Pos: dfproto.Coord{X: 3, Y: 4, Z: 5}, Dest: dfproto.Coord{X: 4, Y: 4, Z: 5},
+		}},
 	}
 
 	var buf bytes.Buffer
@@ -102,7 +105,7 @@ func TestChunkSnapshotGobRoundTrip(t *testing.T) {
 	if err := gob.NewDecoder(&buf).Decode(&got); err != nil {
 		t.Fatalf("decode chunk snapshot: %v", err)
 	}
-	if len(got.Buildings) != 1 || len(got.Items) != 1 || len(got.Plants) != 1 || len(got.Flows) != 1 || got.Flows[0].Type != dfproto.FlowSteam {
+	if len(got.Buildings) != 1 || len(got.Items) != 1 || len(got.Plants) != 1 || len(got.Flows) != 1 || got.Flows[0].Type != dfproto.FlowSteam || len(got.OceanWaves) != 1 || got.OceanWaves[0].Dest.X != 4 {
 		t.Fatalf("chunk snapshot round trip lost visual entities: %#v", got)
 	}
 }

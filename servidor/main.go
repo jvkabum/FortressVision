@@ -440,6 +440,8 @@ func main() {
 								Name:            u.Name,
 								Race:            u.Race,
 								ProfessionColor: u.ProfessionCol,
+								Appearance:      u.Appearance,
+								Inventory:       append([]dfproto.InventoryItem(nil), u.Inventory...),
 								SizeCurrent:     u.SizeInfo.SizeCur,
 								SizeBase:        u.SizeInfo.SizeBase,
 								IsSoldier:       u.IsSoldier,
@@ -450,9 +452,11 @@ func main() {
 								Flags3:          u.Flags3,
 								IsDead:          !u.IsValidForDisplay(),
 							}
-							store.UpdateUnit(instance)
 							snapshot = append(snapshot, *instance)
 						}
+						// Substituir o snapshot remove unidades que morreram ou
+						// deixaram o mapa, evitando fantasmas no estado do servidor.
+						store.ReplaceUnits(snapshot)
 						hub.BroadcastCreatureUpdate(snapshot)
 					}
 				}
@@ -865,16 +869,7 @@ func broadcastWorldStatus(hub *Hub, dfClient *dfhack.Client, store *mapdata.MapD
 		}
 
 		// 2. População
-		units, err := dfClient.GetUnitList()
-		if err == nil && units != nil {
-			count := 0
-			for _, u := range units.CreatureList {
-				if u.IsValidForDisplay() {
-					count++
-				}
-			}
-			status.Population = int32(count)
-		}
+		status.Population = store.PopulationCount()
 
 		// 3. Sincronização de Visão (Z-Sync Inteligente Unificado)
 		status.ViewZ = dfClient.GetInterestZ()

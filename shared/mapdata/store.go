@@ -84,6 +84,7 @@ type Chunk struct {
 	ConstructionItems []dfproto.MatPair          // Itens de construção (ex: paredes manuais)
 	SpatterPile       []dfproto.SpatterPile      // Manchas e sujeiras (ID 25)
 	Engravings        []dfproto.Engraving        // Gravuras e entalhes (ID 32)
+	OceanWaves        []dfproto.Wave             // Ondas do oceano (RemoteFortressReader)
 	MTime             int64                      // Contador de modificações / versão
 	IsDirty           bool                       // Indica que o chunk foi alterado e precisa salvar
 	IsEmpty           bool                       // Indica que o bloco é ar/vazio
@@ -102,6 +103,7 @@ type ChunkSnapshot struct {
 	Flows             []dfproto.FlowInfo
 	SpatterPile       []dfproto.SpatterPile
 	Engravings        []dfproto.Engraving
+	OceanWaves        []dfproto.Wave
 }
 
 func (c *Chunk) Snapshot() ChunkSnapshot {
@@ -139,6 +141,7 @@ func (c *Chunk) snapshotUnlocked() ChunkSnapshot {
 		Flows:             append([]dfproto.FlowInfo(nil), c.Flows...),
 		SpatterPile:       append([]dfproto.SpatterPile(nil), c.SpatterPile...),
 		Engravings:        append([]dfproto.Engraving(nil), c.Engravings...),
+		OceanWaves:        append([]dfproto.Wave(nil), c.OceanWaves...),
 	}
 	for x := 0; x < 16; x++ {
 		for y := 0; y < 16; y++ {
@@ -177,6 +180,7 @@ func (c *Chunk) cloneUnlocked(owner *MapDataStore) *Chunk {
 		Flows:             append([]dfproto.FlowInfo(nil), c.Flows...),
 		SpatterPile:       append([]dfproto.SpatterPile(nil), c.SpatterPile...),
 		Engravings:        append([]dfproto.Engraving(nil), c.Engravings...),
+		OceanWaves:        append([]dfproto.Wave(nil), c.OceanWaves...),
 		MTime:             c.MTime,
 		IsDirty:           c.IsDirty,
 		IsEmpty:           c.IsEmpty,
@@ -241,6 +245,7 @@ func (s *MapDataStore) MarkAsEmpty(origin util.DFCoord) bool {
 	chunk.ConstructionItems = nil
 	chunk.SpatterPile = nil
 	chunk.Engravings = nil
+	chunk.OceanWaves = nil
 	chunk.IsEmpty = true
 	chunk.MTime++
 	if chunk.MTime == 0 {
@@ -559,6 +564,10 @@ func (s *MapDataStore) StoreSingleBlockWithAffected(block *dfproto.MapBlock) (Ch
 	}
 	if !reflect.DeepEqual(chunk.Engravings, block.Engravings) {
 		chunk.Engravings = append([]dfproto.Engraving(nil), block.Engravings...)
+		chunkChanged = true
+	}
+	if !reflect.DeepEqual(chunk.OceanWaves, block.OceanWaves) {
+		chunk.OceanWaves = append([]dfproto.Wave(nil), block.OceanWaves...)
 		chunkChanged = true
 	}
 
@@ -1082,6 +1091,21 @@ func (s *MapDataStore) ReplaceUnits(units []UnitInstance) {
 		u := units[i]
 		s.Units[u.ID] = &u
 	}
+}
+
+// PopulationCount retorna a quantidade de unidades visíveis no snapshot mais
+// recente. A leitura local evita consultar o DFHack repetidamente apenas para
+// atualizar o HUD.
+func (s *MapDataStore) PopulationCount() int32 {
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
+	var count int32
+	for _, unit := range s.Units {
+		if unit != nil && unit.IsValid() {
+			count++
+		}
+	}
+	return count
 }
 
 // ClearEntities remove todas as entidades (útil ao mudar de mapa).

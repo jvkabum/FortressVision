@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"log"
+	"sync"
 	"time"
 
 	"FortressVision/shared/mapdata"
@@ -19,6 +20,9 @@ import (
 type Manager struct {
 	Store *mapdata.MapDataStore
 
+	regionMu     sync.RWMutex
+	activeRegion *regionWindow
+
 	// Eventos
 	OnMapChunkUpdated func(chunk *mapdata.Chunk)
 	OnMapChunkRemoved func(origin util.DFCoord)
@@ -27,11 +31,92 @@ type Manager struct {
 	OnStatusMsg       func(msg string, dfConnected bool)
 }
 
+type regionWindow struct {
+	center     util.DFCoord
+	radius     int32
+	levelsDown int32
+	levelsUp   int32
+}
+
+func (r regionWindow) contains(origin util.DFCoord) bool {
+	minX := r.center.X - r.radius
+	maxX := r.center.X + r.radius
+	minY := r.center.Y - r.radius
+	maxY := r.center.Y + r.radius
+	if origin.X > maxX || origin.X+util.BlockSize-1 < minX {
+		return false
+	}
+	if origin.Y > maxY || origin.Y+util.BlockSize-1 < minY {
+		return false
+	}
+	return origin.Z >= r.center.Z-r.levelsDown && origin.Z <= r.center.Z+r.levelsUp
+}
+
 // NewManager cria uma nova gestão de mundo com armazenamento vazio.
 func NewManager() *Manager {
 	return &Manager{
 		Store: mapdata.NewMapDataStore(),
 	}
+}
+
+// SetActiveRegion atualiza a janela solicitada pelo cliente e remove do
+// store/renderizador os chunks que ficaram definitivamente fora dela. Sem
+// essa poda, cada deslocamento acumulava malhas e entidades antigas e o
+// cliente podia piscar ou encerrar ao caminhar rapidamente pelo mapa.
+func (m *Manager) SetActiveRegion(center util.DFCoord, radius, levelsDown, levelsUp int32) {
+	if radius < 0 {
+		radius = 0
+	}
+	if levelsDown < 0 {
+		levelsDown = 0
+	}
+	if levelsDown > 32 {
+		levelsDown = 32
+	}
+	if levelsUp < 0 {
+		levelsUp = 0
+	}
+	if levelsUp > 32 {
+		levelsUp = 32
+	}
+	region := regionWindow{
+		center:     center,
+		radius:     radius,
+		levelsDown: levelsDown,
+		levelsUp:   levelsUp,
+	}
+
+	m.regionMu.Lock()
+	m.activeRegion = &region
+	m.regionMu.Unlock()
+
+	removed := make([]util.DFCoord, 0)
+	m.Store.Mu.Lock()
+	for origin := range m.Store.Chunks {
+		if !region.contains(origin) {
+			delete(m.Store.Chunks, origin)
+			removed = append(removed, origin)
+		}
+	}
+	m.Store.Mu.Unlock()
+
+	if m.OnMapChunkRemoved != nil {
+		for _, origin := range removed {
+			m.OnMapChunkRemoved(origin)
+		}
+	}
+}
+
+func (m *Manager) acceptsOrigin(origin util.DFCoord) bool {
+	m.regionMu.RLock()
+	region := m.activeRegion
+	if region == nil {
+		m.regionMu.RUnlock()
+		return true
+	}
+	accepted := region.contains(origin)
+	m.regionMu.RUnlock()
+	return accepted
 }
 
 // HandleEnvelope processa os envelopes (mensagens) recebidos da rede.
@@ -105,6 +190,12 @@ func (m *Manager) HandleEnvelope(env *fvnet.Envelope) {
 // processChunk extrai do Envelope o bloco codificado com GOB e armazena na memória (Store).
 func (m *Manager) processChunk(msg *fvnet.MapChunkMessage) {
 	origin := util.DFCoord{X: msg.ChunkX, Y: msg.ChunkY, Z: msg.ChunkZ}
+	if !m.acceptsOrigin(origin) {
+		// Um stream antigo pode concluir depois que a cÃ¢mera jÃ¡ mudou de
+		// regiÃ£o. Ignorar essa mensagem impede que geometria obsoleta volte ao
+		// renderer e cresÃ§a indefinidamente na memÃ³ria.
+		return
+	}
 
 	// Chunk de "Ar" (vazio)
 	if msg.VoxelData == nil {
@@ -148,6 +239,7 @@ func (m *Manager) processChunk(msg *fvnet.MapChunkMessage) {
 		Flows:             snapshot.Flows,
 		SpatterPile:       snapshot.SpatterPile,
 		Engravings:        snapshot.Engravings,
+		OceanWaves:        snapshot.OceanWaves,
 		MTime:             time.Now().UnixNano(),
 	}
 
@@ -185,6 +277,9 @@ func (m *Manager) processChunk(msg *fvnet.MapChunkMessage) {
 // processVegetation propaga mudanças apenas nas vegetações (Shrubs, Trees) para o Store.
 func (m *Manager) processVegetation(msg *fvnet.VegetationUpdateMessage) {
 	origin := util.DFCoord{X: msg.ChunkX, Y: msg.ChunkY, Z: msg.ChunkZ}
+	if !m.acceptsOrigin(origin) {
+		return
+	}
 
 	var plants []dfproto.PlantDetail
 	for _, p := range msg.Plants {
@@ -211,6 +306,7 @@ func (m *Manager) RequestRegion(sendFunc func(msgType fvnet.Envelope_Type, msg p
 	if levelsUp < 0 {
 		levelsUp = 0
 	}
+	m.SetActiveRegion(center, radius, levelsDown, levelsUp)
 	req := &fvnet.ClientRequestRegion{
 		CenterX:    center.X,
 		CenterY:    center.Y,

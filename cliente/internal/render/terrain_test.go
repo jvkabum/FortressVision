@@ -84,3 +84,37 @@ func TestFlowVisualSizeIsBoundedByDensity(t *testing.T) {
 		t.Fatalf("unexpected flow sizes: small=%f large=%f", small, large)
 	}
 }
+
+func TestWaveVisualScaleIsFlatAndBounded(t *testing.T) {
+	scale := waveVisualScale(dfproto.Wave{
+		Pos:  dfproto.Coord{X: 10, Y: 10, Z: 4},
+		Dest: dfproto.Coord{X: 30, Y: 12, Z: 4},
+	})
+	if scale.Y() <= 0 || scale.Y() >= scale.X() || scale.Y() >= scale.Z() {
+		t.Fatalf("wave marker is not flat: %v", scale)
+	}
+	if scale.X() > 0.45 || scale.Z() > 0.45 {
+		t.Fatalf("wave marker exceeded visual bound: %v", scale)
+	}
+}
+
+func TestLerpUnitPositionMovesTowardTarget(t *testing.T) {
+	current := unitPosition{x: 0, y: 2, z: -4}
+	target := unitPosition{x: 10, y: 4, z: 6}
+	got := lerpUnitPosition(current, target, 0.25)
+	want := unitPosition{x: 2.5, y: 2.5, z: -1.5}
+	if got != want {
+		t.Fatalf("lerped unit position = %+v, want %+v", got, want)
+	}
+}
+
+func TestLerpUnitPositionClampsAlpha(t *testing.T) {
+	current := unitPosition{x: 1, y: 2, z: 3}
+	target := unitPosition{x: 4, y: 5, z: 6}
+	if got := lerpUnitPosition(current, target, -1); got != current {
+		t.Fatalf("negative alpha changed position: %+v", got)
+	}
+	if got := lerpUnitPosition(current, target, 2); got != target {
+		t.Fatalf("alpha above one did not reach target: %+v", got)
+	}
+}

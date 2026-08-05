@@ -19,3 +19,15 @@ func TestUnitValidityHonorsLifecycleState(t *testing.T) {
 		t.Fatalf("hidden unit must not be rendered")
 	}
 }
+
+func TestPopulationCountUsesCurrentUnitSnapshot(t *testing.T) {
+	store := NewMapDataStore()
+	store.ReplaceUnits([]UnitInstance{
+		{ID: 1},
+		{ID: 2, IsDead: true},
+		{ID: 3, IsHidden: true},
+	})
+	if got := store.PopulationCount(); got != 1 {
+		t.Fatalf("population count = %d, want 1", got)
+	}
+}

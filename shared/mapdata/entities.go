@@ -33,6 +33,8 @@ type UnitInstance struct {
 	// Appearance básica recebida do UnitList do DFHack. Mantê-la no snapshot
 	// permite diferenciar criaturas sem carregar uma malha individual por raça.
 	ProfessionColor dfproto.ColorDefinition
+	Appearance      dfproto.UnitAppearance
+	Inventory       []dfproto.InventoryItem
 	SizeCurrent     int32
 	SizeBase        int32
 	IsSoldier       bool

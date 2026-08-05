@@ -57,6 +57,7 @@ type chunkData struct {
 	Flows             []dfproto.FlowInfo
 	SpatterPile       []dfproto.SpatterPile
 	Engravings        []dfproto.Engraving
+	OceanWaves        []dfproto.Wave
 }
 
 // OpenInitialize abre (ou cria) o banco de dados SQLite para o mundo e roda migrações.
@@ -256,6 +257,7 @@ func (s *MapDataStore) SaveChunk(chunk *Chunk) error {
 			Flows:             chunk.Flows,
 			SpatterPile:       chunk.SpatterPile,
 			Engravings:        chunk.Engravings,
+			OceanWaves:        chunk.OceanWaves,
 		}
 
 		if err := enc.Encode(cData); err != nil {
@@ -307,6 +309,7 @@ func (s *MapDataStore) LoadChunk(origin util.DFCoord) (*Chunk, error) {
 	var flows []dfproto.FlowInfo
 	var spatter []dfproto.SpatterPile
 	var engravings []dfproto.Engraving
+	var oceanWaves []dfproto.Wave
 
 	if !model.IsEmpty && len(model.Data) > 0 {
 		dec := gob.NewDecoder(bytes.NewReader(model.Data))
@@ -321,6 +324,7 @@ func (s *MapDataStore) LoadChunk(origin util.DFCoord) (*Chunk, error) {
 			flows = cData.Flows
 			spatter = cData.SpatterPile
 			engravings = cData.Engravings
+			oceanWaves = cData.OceanWaves
 		} else {
 			// Fallback: Tenta formato antigo (apenas tiles)
 			decOld := gob.NewDecoder(bytes.NewReader(model.Data))
@@ -340,6 +344,7 @@ func (s *MapDataStore) LoadChunk(origin util.DFCoord) (*Chunk, error) {
 		Flows:             flows,
 		SpatterPile:       spatter,
 		Engravings:        engravings,
+		OceanWaves:        oceanWaves,
 		MTime:             model.MTime,
 		IsEmpty:           model.IsEmpty,
 	}
@@ -415,6 +420,9 @@ func (s *MapDataStore) Save(worldName string) (int, error) {
 					Items:             chunk.Items,
 					ConstructionItems: chunk.ConstructionItems,
 					Flows:             chunk.Flows,
+					SpatterPile:       chunk.SpatterPile,
+					Engravings:        chunk.Engravings,
+					OceanWaves:        chunk.OceanWaves,
 				}
 				if err := enc.Encode(cData); err != nil {
 					log.Printf("[Persistence] ERRO Crítico GOB: %v", err)
