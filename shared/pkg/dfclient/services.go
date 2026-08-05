@@ -44,7 +44,6 @@ var signatures = map[string][2]string{
 	"GetMapInfo":         {"dfproto.EmptyMessage", "RemoteFortressReader.MapInfo"},
 	"GetWorldMapCenter":  {"dfproto.EmptyMessage", "RemoteFortressReader.WorldMap"},
 	"GetBuildingDefList": {"dfproto.EmptyMessage", "RemoteFortressReader.BuildingList"},
-	"GetBuildingList":    {"dfproto.EmptyMessage", "RemoteFortressReader.BuildingInstanceList"},
 	"GetLanguage":        {"dfproto.EmptyMessage", "RemoteFortressReader.Language"},
 }
 
@@ -126,12 +125,6 @@ func (s *RemoteFortressService) GetPlantList() (*dfproto.PlantRawList, error) {
 func (s *RemoteFortressService) GetBuildingDefList() (*dfproto.BuildingList, error) {
 	resp := &dfproto.BuildingList{}
 	err := s.call("GetBuildingDefList", &dfproto.EmptyMessage{}, resp)
-	return resp, err
-}
-
-func (s *RemoteFortressService) GetBuildingList() (*dfproto.BuildingInstanceList, error) {
-	resp := &dfproto.BuildingInstanceList{}
-	err := s.call("GetBuildingList", &dfproto.EmptyMessage{}, resp)
 	return resp, err
 }
 

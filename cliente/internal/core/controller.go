@@ -8,8 +8,10 @@ import (
 	"FortressVision/cliente/internal/render"
 	"FortressVision/cliente/internal/world"
 	"FortressVision/shared/config"
+	"FortressVision/shared/util"
 
 	"kaijuengine.com/engine"
+	"kaijuengine.com/platform/hid"
 )
 
 // AppController centraliza a gestão dos subsistemas do FortressVision.
@@ -76,6 +78,7 @@ func (ac *AppController) Update(dt float64) {
 	// 1. Gestão de Câmera (Input e Interpolação)
 	ac.Camera.HandleInput(dt32, &ac.Host.Window.Keyboard, &ac.Host.Window.Mouse)
 	ac.Camera.Update(dt32)
+	ac.handleItemSelection()
 
 	// 2. Gestão de Interface (HUD e Painéis)
 	ac.HUD.Update(dt, ac.Camera.TargetLookAt)
@@ -85,4 +88,41 @@ func (ac *AppController) Update(dt float64) {
 
 	// 4. Sincronização de Região (Monitoramento de Posição DF)
 	ac.Sync.Update()
+}
+
+// handleItemSelection seleciona o item sob o cursor quando o botão esquerdo
+// é pressionado. A seleção acontece depois da atualização da câmera para que
+// o raio use a posição/rotação exibida no frame atual.
+func (ac *AppController) handleItemSelection() {
+	mouse := &ac.Host.Window.Mouse
+	if !mouse.Pressed(hid.MouseButtonLeft) {
+		return
+	}
+
+	ray := ac.Host.PrimaryCamera().RayCast(mouse.ScreenPosition())
+	selectionRay := util.Ray{
+		Origin: util.Vector3{
+			X: float32(ray.Origin[0]),
+			Y: float32(ray.Origin[1]),
+			Z: float32(ray.Origin[2]),
+		},
+		Direction: util.Vector3{
+			X: float32(ray.Direction[0]),
+			Y: float32(ray.Direction[1]),
+			Z: float32(ray.Direction[2]),
+		},
+	}
+
+	item, found := ac.World.Store.FindItemByRay(selectionRay, 2000)
+	if found {
+		ac.HUD.UpdateInspectItem(ac.World.Store.ItemDisplayName(item), item.StackSize)
+		return
+	}
+
+	tile, _, foundTile := ac.World.Store.FindTileByRay(selectionRay, 2000)
+	if foundTile {
+		ac.HUD.UpdateInspectItem(ac.World.Store.TileDisplayName(tile), 0)
+		return
+	}
+	ac.HUD.UpdateInspectItem("", 0)
 }

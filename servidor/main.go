@@ -389,29 +389,32 @@ func main() {
 		}
 
 		// Carregar Construções Iniciais (Fase 6) - Assíncrono para retorno rápido
-		if dfClient != nil {
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("[Startup-Buildings] Recuperado de pânico: %v", r)
+		/*
+			if dfClient != nil {
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("[Startup-Buildings] Recuperado de pânico: %v", r)
+						}
+					}()
+					log.Println("[Startup] Sincronizando construções do mundo...")
+					var bList *dfproto.BuildingInstanceList
+					var err error
+					if err == nil && bList != nil {
+						for _, b := range bList.BuildingList {
+							instance := &mapdata.BuildingInstance{
+								Index:     b.Index,
+								MinPos:    util.DFCoord{X: b.PosXMin, Y: b.PosYMin, Z: b.PosZMin},
+								MaxPos:    util.DFCoord{X: b.PosXMax, Y: b.PosYMax, Z: b.PosZMax},
+								Direction: b.Direction,
+							}
+							store.AddBuilding(instance)
+						}
+						log.Printf("  → %d construções indexadas", len(bList.BuildingList))
 					}
 				}()
-				log.Println("[Startup] Sincronizando construções do mundo...")
-				bList, err := dfClient.GetBuildingList()
-				if err == nil && bList != nil {
-					for _, b := range bList.BuildingList {
-						instance := &mapdata.BuildingInstance{
-							Index:     b.Index,
-							MinPos:    util.DFCoord{X: b.PosXMin, Y: b.PosYMin, Z: b.PosZMin},
-							MaxPos:    util.DFCoord{X: b.PosXMax, Y: b.PosYMax, Z: b.PosZMax},
-							Direction: b.Direction,
-						}
-						store.AddBuilding(instance)
-					}
-					log.Printf("  → %d construções indexadas", len(bList.BuildingList))
-				}
-			}()
-		}
+			}
+		*/
 	}
 
 	// Iniciar Scanner
@@ -876,7 +879,9 @@ func broadcastWorldStatus(hub *Hub, dfClient *dfhack.Client, store *mapdata.MapD
 		// 3. Sincronização de Visão (Z-Sync Inteligente Unificado)
 		status.ViewZ = dfClient.GetInterestZ()
 		if dfClient.MapInfo != nil {
-			status.ZOffset = dfClient.MapInfo.BlockPosZ
+			// O servidor transmite coordenadas absolutas; o HUD não deve aplicar
+			// novamente o deslocamento local do mapa.
+			status.ZOffset = 0
 		}
 		view, err := dfClient.GetViewInfo()
 		if err == nil && view != nil {

@@ -24,10 +24,13 @@ type Client struct {
 	reconnectMu   sync.Mutex
 
 	// Cache de dados estáticos
-	TiletypeList *dfproto.TiletypeList
-	MaterialList *dfproto.MaterialList
-	PlantRawList *dfproto.PlantRawList
-	MapInfo      *dfproto.MapInfo
+	TiletypeList  *dfproto.TiletypeList
+	MaterialList  *dfproto.MaterialList
+	PlantRawList  *dfproto.PlantRawList
+	MapInfo       *dfproto.MapInfo
+	coordinates   CoordinateNormalizer
+	lastRawCursor util.DFCoord
+	haveRawCursor bool
 
 	address string
 
@@ -137,6 +140,9 @@ func (c *Client) FetchStaticData() error {
 	if err != nil {
 		return err
 	}
+	c.mu.Lock()
+	c.coordinates = NewCoordinateNormalizer(c.MapInfo)
+	c.mu.Unlock()
 	fmt.Printf("  → Mundo: %s\n", c.MapInfo.WorldNameEn)
 
 	c.PlantRawList, err = c.Service.GetPlantList()
@@ -152,8 +158,32 @@ func (c *Client) GetViewInfo() (*dfproto.ViewInfo, error) {
 	res, err := c.Service.GetViewInfo()
 	if err != nil {
 		c.Reconnect(err)
+	} else {
+		normalizer := c.Coordinates()
+		sample := normalizer.SampleViewInfo(res)
+		if sample.RawCursor != (util.DFCoord{}) {
+			c.mu.Lock()
+			changed := !c.haveRawCursor || c.lastRawCursor != sample.RawCursor
+			if changed {
+				c.lastRawCursor = sample.RawCursor
+				c.haveRawCursor = true
+			}
+			c.mu.Unlock()
+			if changed {
+				fmt.Printf("[coords] cursor RFR raw=%v -> absoluto=%v (offset Z=%d)\n", sample.RawCursor, sample.AbsoluteCursor, normalizer.blockOrigin.Z)
+			}
+		}
+		normalizer.NormalizeViewInfo(res)
 	}
 	return res, err
+}
+
+// Coordinates returns the immutable coordinate contract captured from the
+// current MapInfo.
+func (c *Client) Coordinates() CoordinateNormalizer {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.coordinates
 }
 
 func (c *Client) GetWorldMapCenter() (*dfproto.WorldMap, error) {
@@ -168,40 +198,18 @@ func (c *Client) GetUnitList() (*dfproto.UnitList, error) {
 	res, err := c.Service.GetUnitList()
 	if err != nil {
 		c.Reconnect(err)
-	}
-	return res, err
-}
-
-func (c *Client) GetBuildingList() (*dfproto.BuildingInstanceList, error) {
-	res, err := c.Service.GetBuildingList()
-	if err != nil {
-		c.Reconnect(err)
+	} else {
+		c.Coordinates().NormalizeUnitList(res)
 	}
 	return res, err
 }
 
 func (c *Client) GetBlockList(minX, minY, minZ, maxX, maxY, maxZ, blocksNeeded int32) (*dfproto.BlockList, error) {
-	c.mu.RLock()
-	info := c.MapInfo
-	c.mu.RUnlock()
+	normalizer := c.Coordinates()
 
-	req := &dfproto.BlockRequest{
-		BlocksNeeded: blocksNeeded,
-		MinX:         minX, MaxX: maxX,
-		MinY: minY, MaxY: maxY,
-		MinZ: minZ, MaxZ: maxZ,
-		ForceReload: true,
-	}
+	req := normalizer.ToRemoteBlockRequest(minX, minY, minZ, maxX, maxY, maxZ, blocksNeeded)
 
 	// Tradução Global -> Local para o DFHack 53.10
-	if info != nil {
-		req.MinX -= info.BlockPosX
-		req.MaxX -= info.BlockPosX
-		req.MinY -= info.BlockPosY
-		req.MaxY -= info.BlockPosY
-		req.MinZ -= info.BlockPosZ
-		req.MaxZ -= info.BlockPosZ
-	}
 
 	res, err := c.Service.GetBlockList(req)
 	if err != nil {
@@ -210,21 +218,10 @@ func (c *Client) GetBlockList(minX, minY, minZ, maxX, maxY, maxZ, blocksNeeded i
 	}
 
 	// Tradução Local -> Global para o FortressVision
-	if res != nil && info != nil {
-		for i := range res.MapBlocks {
-			// Nota: No DFHack, MapX e MapY já são reportados como coordenadas TILE globais (region_x + local_tile_x).
-			// Somar BlockPosX/Y aqui causaria desalinhamento (dobraria o offset ou somaria blocos a tiles).
-			// Apenas o MapZ precisa ser ajustado se estivermos usando o sistema de índices locais (0-N).
-			res.MapBlocks[i].MapZ += info.BlockPosZ
-		}
-		for i := range res.Engravings {
-			res.Engravings[i].Pos.Z += info.BlockPosZ
-		}
-		for i := range res.OceanWaves {
-			res.OceanWaves[i].Pos.Z += info.BlockPosZ
-			res.OceanWaves[i].Dest.Z += info.BlockPosZ
-		}
-	}
+	// Nota: No DFHack, MapX e MapY já são reportados como coordenadas TILE globais (region_x + local_tile_x).
+	// Somar BlockPosX/Y aqui causaria desalinhamento (dobraria o offset ou somaria blocos a tiles).
+	// Apenas o MapZ precisa ser ajustado se estivermos usando o sistema de índices locais (0-N).
+	normalizer.NormalizeBlockList(res)
 	attachEngravingsToBlocks(res)
 
 	return res, err

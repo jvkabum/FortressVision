@@ -65,6 +65,7 @@ type HUD struct {
 	lblStats     *ui.Label
 	lblPop       *ui.Label
 	lblInspHead  *ui.Label
+	lblInspItem  *ui.Label
 	lblInspMat   *ui.Label
 	lblInspType  *ui.Label
 	lblInspAgua  *ui.Label
@@ -122,13 +123,15 @@ func New(host *engine.Host) *HUD {
 	// ═════════════════════════════════════════════════════════════════
 	// 3) Inspeção — centro-direita
 	// ═════════════════════════════════════════════════════════════════
-	h.inspW = 120
-	h.inspH = padT + 22 + lineH*4 + padT
+	h.inspW = 230
+	h.inspH = padT + 22 + lineH*5 + padT
 	h.pnlInspect = h.makePanel(tex, h.inspW, h.inspH, 0, 0, colorInspectBg)
 
 	row = padT
 	h.lblInspHead = h.addRowColor(h.pnlInspect, "INSPEÇÃO", 10, colorInspHead, padL, row)
 	row += 22
+	h.lblInspItem = h.addRowStat(h.pnlInspect, "Item:", "--", padL, row)
+	row += lineH
 	h.lblInspMat = h.addRowStat(h.pnlInspect, "Material:", "--", padL, row)
 	row += lineH
 	h.lblInspType = h.addRowStat(h.pnlInspect, "Tipo:", "--", padL, row)
@@ -322,4 +325,17 @@ func (h *HUD) UpdateInspect(mat, typ string, agua, magma int) {
 	h.set(h.lblInspType, typ)
 	h.set(h.lblInspAgua, fmt.Sprintf("%d/7", agua))
 	h.set(h.lblInspMagma, fmt.Sprintf("%d/7", magma))
+}
+
+// UpdateInspectItem atualiza o item selecionado pelo clique esquerdo.
+func (h *HUD) UpdateInspectItem(name string, stackSize int32) {
+	if name == "" {
+		name = "--"
+	} else if stackSize > 1 {
+		name = fmt.Sprintf("%s x%d", name, stackSize)
+	}
+	if len([]rune(name)) > 27 {
+		name = string([]rune(name)[:27]) + "..."
+	}
+	h.set(h.lblInspItem, name)
 }
