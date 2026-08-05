@@ -589,7 +589,7 @@ func (s *MapDataStore) StoreSingleBlockWithAffected(block *dfproto.MapBlock) (Ch
 					shape := tile.Shape()
 					if shape == dfproto.ShapeSapling || shape == dfproto.ShapeShrub {
 						currentPlants = append(currentPlants, dfproto.PlantDetail{
-							Pos:      dfproto.Coord{X: xx, Y: yy, Z: 0},
+							Pos:      dfproto.Coord{X: chunk.Origin.X + xx, Y: chunk.Origin.Y + yy, Z: block.MapZ},
 							Material: tile.Material,
 						})
 					}
@@ -657,10 +657,13 @@ func (s *MapDataStore) StorePlants(chunkX, chunkY, chunkZ int32, plants []dfprot
 	chunk.MTime++
 	chunk.IsDirty = true
 
-	// Atualiza os materiais nos tiles para refletir o crescimento/mudança
+	// As posições de plantas seguem o mesmo contrato absoluto dos itens e
+	// construções. Converta para índices locais somente ao atualizar o tile.
 	for _, p := range plants {
-		if p.Pos.X >= 0 && p.Pos.X < 16 && p.Pos.Y >= 0 && p.Pos.Y < 16 {
-			tile := chunk.Tiles[p.Pos.X][p.Pos.Y]
+		localX := p.Pos.X - chunk.Origin.X
+		localY := p.Pos.Y - chunk.Origin.Y
+		if localX >= 0 && localX < 16 && localY >= 0 && localY < 16 {
+			tile := chunk.Tiles[localX][localY]
 			if tile != nil {
 				tile.Material = p.Material
 			}

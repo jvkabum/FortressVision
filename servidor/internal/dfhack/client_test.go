@@ -15,8 +15,8 @@ func TestCoordinateNormalizerUsesAbsoluteDFFrame(t *testing.T) {
 	})
 
 	req := normalizer.ToRemoteBlockRequest(4, 5, 165, 7, 8, 166, 20)
-	if req.MinX != 2 || req.MaxX != 5 || req.MinY != 2 || req.MaxY != 5 || req.MinZ != 39 || req.MaxZ != 40 {
-		t.Fatalf("unexpected local request: %+v", req)
+	if req.MinX != 4 || req.MaxX != 7 || req.MinY != 5 || req.MaxY != 8 || req.MinZ != 165 || req.MaxZ != 166 {
+		t.Fatalf("absolute request was changed: %+v", req)
 	}
 
 	list := &dfproto.BlockList{
@@ -43,17 +43,17 @@ func TestCoordinateNormalizerUsesAbsoluteDFFrame(t *testing.T) {
 	normalizer.NormalizeBlockList(list)
 
 	block := list.MapBlocks[0]
-	if block.MapZ != 165 || block.TreeZ[0] != 165 {
-		t.Fatalf("block Z was not normalized: %+v", block)
+	if block.MapZ != 39 || block.TreeZ[0] != 39 {
+		t.Fatalf("block coordinates were changed: %+v", block)
 	}
-	if block.Buildings[0].PosZMin != 165 || block.Buildings[0].PosZMax != 166 || block.Buildings[0].Items[0].Item.Pos.Z != 165 {
-		t.Fatalf("building Z was not normalized: %+v", block.Buildings[0])
+	if block.Buildings[0].PosZMin != 39 || block.Buildings[0].PosZMax != 40 || block.Buildings[0].Items[0].Item.Pos.Z != 39 {
+		t.Fatalf("building coordinates were changed: %+v", block.Buildings[0])
 	}
-	if block.Flows[0].Pos.Z != 165 || block.Flows[0].Dest.Z != 166 || block.Items[0].Pos.Z != 165 || block.Plants[0].Pos.Z != 165 {
-		t.Fatalf("entity Z was not normalized: %+v", block)
+	if block.Flows[0].Pos.Z != 39 || block.Flows[0].Dest.Z != 40 || block.Items[0].Pos.Z != 39 || block.Plants[0].Pos.Z != 39 {
+		t.Fatalf("entity coordinates were changed: %+v", block)
 	}
-	if list.Engravings[0].Pos.Z != 165 || list.OceanWaves[0].Dest.Z != 166 {
-		t.Fatalf("envelope Z was not normalized: %+v", list)
+	if list.Engravings[0].Pos.Z != 39 || list.OceanWaves[0].Dest.Z != 40 {
+		t.Fatalf("envelope coordinates were changed: %+v", list)
 	}
 }
 
@@ -73,12 +73,12 @@ func TestCoordinateNormalizerSamplesViewAndCursor(t *testing.T) {
 	if sample.RawViewCenter != (util.DFCoord{X: 105, Y: 203, Z: 39}) {
 		t.Fatalf("unexpected raw view center: %v", sample.RawViewCenter)
 	}
-	if sample.AbsoluteCursor != (util.DFCoord{X: 104, Y: 203, Z: 165}) {
+	if sample.AbsoluteCursor != (util.DFCoord{X: 104, Y: 203, Z: 39}) {
 		t.Fatalf("unexpected absolute cursor: %v", sample.AbsoluteCursor)
 	}
 	normalizer.NormalizeViewInfo(view)
-	if view.ViewPosZ != 165 || view.CursorPosZ != 165 {
-		t.Fatalf("view was not normalized: %+v", view)
+	if view.ViewPosZ != 39 || view.CursorPosZ != 39 {
+		t.Fatalf("view coordinates were changed: %+v", view)
 	}
 }
 

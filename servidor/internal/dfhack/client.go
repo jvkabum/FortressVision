@@ -170,7 +170,7 @@ func (c *Client) GetViewInfo() (*dfproto.ViewInfo, error) {
 			}
 			c.mu.Unlock()
 			if changed {
-				fmt.Printf("[coords] cursor RFR raw=%v -> absoluto=%v (offset Z=%d)\n", sample.RawCursor, sample.AbsoluteCursor, normalizer.blockOrigin.Z)
+				fmt.Printf("[coords] cursor RFR raw=%v -> absoluto=%v (RFR ja fornece coordenadas absolutas; mapa=%v)\n", sample.RawCursor, sample.AbsoluteCursor, normalizer.mapPosition)
 			}
 		}
 		normalizer.NormalizeViewInfo(res)

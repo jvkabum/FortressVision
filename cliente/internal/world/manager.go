@@ -284,7 +284,7 @@ func (m *Manager) processVegetation(msg *fvnet.VegetationUpdateMessage) {
 	var plants []dfproto.PlantDetail
 	for _, p := range msg.Plants {
 		plants = append(plants, dfproto.PlantDetail{
-			Pos:      dfproto.Coord{X: p.X, Y: p.Y, Z: 0},
+			Pos:      dfproto.Coord{X: p.X, Y: p.Y, Z: origin.Z},
 			Material: dfproto.MatPair{MatType: p.MatType, MatIndex: p.MatIndex},
 		})
 	}
