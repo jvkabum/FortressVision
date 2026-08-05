@@ -726,8 +726,8 @@ func streamRegionToClient(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Clien
 						if dfClient != nil && dfClient.IsConnected() && dfClient.MapInfo != nil {
 							info := dfClient.MapInfo
 							// Verifica se a coordenada está dentro dos limites reais da fortaleza no mundo (Absoluto)
-							if origin.X < info.BlockPosX*16 || origin.X >= (info.BlockPosX+info.BlockSizeX)*16 ||
-								origin.Y < info.BlockPosY*16 || origin.Y >= (info.BlockPosY+info.BlockSizeY)*16 ||
+							if origin.X < 0 || origin.X >= info.BlockSizeX*16 ||
+								origin.Y < 0 || origin.Y >= info.BlockSizeY*16 ||
 								origin.Z < info.BlockPosZ || origin.Z >= info.BlockPosZ+info.BlockSizeZ {
 								// Fora dos limites do mapa gerado, é vazio.
 								store.MarkAsEmpty(origin)
@@ -736,8 +736,9 @@ func streamRegionToClient(hub *Hub, conn *websocket.Conn, dfClient *dfhack.Clien
 
 							log.Printf("[WS-Fallback] Chunk %v não encontrado. Requisitando ao DFHack...", origin)
 							// Converter Tile Coord (Origin) de volta para Block Index para a RPC
-							bx, by := origin.X/16, origin.Y/16
-							list, rpcErr := dfClient.GetBlockList(bx, by, origin.Z, bx, by, origin.Z, 1)
+							bx := info.BlockPosX + origin.X/16
+							by := info.BlockPosY + origin.Y/16
+							list, rpcErr := dfClient.GetBlockList(bx, by, origin.Z, bx, by, origin.Z+1, 1)
 							if rpcErr == nil && list != nil && len(list.MapBlocks) > 0 {
 								for _, block := range list.MapBlocks {
 									store.StoreSingleBlock(&block)

@@ -214,26 +214,24 @@ func meshGreedy2D(chunk *mapdata.Chunk, md *MeshData) {
 			// 0 = Topo (Pisos/Sólidos SEMPRE desenham a rampa de teto/topo porque fatiamos por camada e a visão topdown exige)
 			masks[0][x][y] = matVal
 
-			// Apenas calcular e validar oclusão (Culling lateral inteligente)
-			// Apenas paredes reais possuem laterais verticais cheias de 1.0 de altura em Kaiju.
-			// Chão no DF é essencialmente uma tampa no nível Z.
-			if !isFloor {
-				// Face Leste (+X) -> dx=1
-				if shouldDrawFace(chunk, x, y, 1, 0, isFloor) {
-					masks[1][x][y] = matVal
-				}
-				// Face Oeste (-X) -> dx=-1
-				if shouldDrawFace(chunk, x, y, -1, 0, isFloor) {
-					masks[2][x][y] = matVal
-				}
-				// Face Sul (+Y no mapa do DF) -> dy=1
-				if shouldDrawFace(chunk, x, y, 0, 1, isFloor) {
-					masks[3][x][y] = matVal
-				}
-				// Face Norte (-Y no mapa do DF) -> dy=-1
-				if shouldDrawFace(chunk, x, y, 0, -1, isFloor) {
-					masks[4][x][y] = matVal
-				}
+			// Faces externas também são necessárias nos pisos. Antes elas eram
+			// calculadas apenas para paredes, deixando grandes placas sem volume
+			// nas bordas quando o vizinho era ar ou não estava carregado.
+			// Face Leste (+X) -> dx=1
+			if shouldDrawFace(chunk, x, y, 1, 0, isFloor) {
+				masks[1][x][y] = matVal
+			}
+			// Face Oeste (-X) -> dx=-1
+			if shouldDrawFace(chunk, x, y, -1, 0, isFloor) {
+				masks[2][x][y] = matVal
+			}
+			// Face Sul (+Y no mapa do DF) -> dy=1
+			if shouldDrawFace(chunk, x, y, 0, 1, isFloor) {
+				masks[3][x][y] = matVal
+			}
+			// Face Norte (-Y no mapa do DF) -> dy=-1
+			if shouldDrawFace(chunk, x, y, 0, -1, isFloor) {
+				masks[4][x][y] = matVal
 			}
 		}
 	}

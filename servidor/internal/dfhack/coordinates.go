@@ -8,11 +8,11 @@ import (
 // CoordinateNormalizer is the explicit boundary between RemoteFortressReader
 // and the rest of FortressVision.
 //
-// RemoteFortressReader already uses DF's absolute coordinate frame. GetBlockList
-// receives absolute block indices, MapBlock.MapX/Y/Z are absolute map origins,
-// and item/unit/view coordinates are copied from DF structures without a map
-// origin offset. MapInfo.BlockPosX/Y/Z describes the map bounds; it is not an
-// offset to add to every result.
+// FortressVision keeps tile coordinates local to the loaded map in X/Y, while
+// Z is the absolute DF level. GetBlockList callers use global block indices in
+// X/Y, but RemoteFortressReader expects local block indices there. Its Z
+// request and MapBlock.MapZ are already absolute. Item/unit/view coordinates
+// are copied from DF structures in the same local-X/Y, absolute-Z frame.
 //
 // Keeping this boundary explicit prevents ad-hoc coordinate arithmetic from
 // reappearing in callers when the protocol is inspected or changed later.
@@ -39,15 +39,15 @@ func NewCoordinateNormalizer(info *dfproto.MapInfo) CoordinateNormalizer {
 	}
 }
 
-// ToRemoteBlockRequest preserves absolute block indices. RemoteFortressReader
-// passes these directly to Maps::getBlock.
+// ToRemoteBlockRequest converts global X/Y block indices to the local block
+// indices expected by RemoteFortressReader. Z must remain absolute.
 func (n CoordinateNormalizer) ToRemoteBlockRequest(minX, minY, minZ, maxX, maxY, maxZ, blocksNeeded int32) *dfproto.BlockRequest {
 	return &dfproto.BlockRequest{
 		BlocksNeeded: blocksNeeded,
-		MinX:         minX,
-		MaxX:         maxX,
-		MinY:         minY,
-		MaxY:         maxY,
+		MinX:         minX - n.mapPosition.X,
+		MaxX:         maxX - n.mapPosition.X,
+		MinY:         minY - n.mapPosition.Y,
+		MaxY:         maxY - n.mapPosition.Y,
 		MinZ:         minZ,
 		MaxZ:         maxZ,
 		ForceReload:  true,

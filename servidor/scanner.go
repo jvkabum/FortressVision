@@ -69,6 +69,11 @@ func (s *ServerScanner) scanLoop() {
 				time.Sleep(1 * time.Second)
 				return
 			}
+			info := s.dfClient.MapInfo
+			if info == nil {
+				time.Sleep(1 * time.Second)
+				return
+			}
 
 			// Ordem de prioridade em espiral (0, -1, 1, -2, 2...)
 			zOffsets := []int32{0}
@@ -77,7 +82,13 @@ func (s *ServerScanner) scanLoop() {
 				zOffsets = append(zOffsets, i)
 			}
 
-			center := util.DFCoord{X: view.ViewPosX, Y: view.ViewPosY, Z: interestZ}
+			// ViewInfo traz X/Y locais; o scanner consulta o RFR usando Ã­ndices
+			// globais de bloco, entÃ£o o centro precisa voltar ao frame global.
+			center := util.DFCoord{
+				X: view.ViewPosX + info.BlockPosX*util.BlockSize,
+				Y: view.ViewPosY + info.BlockPosY*util.BlockSize,
+				Z: interestZ,
+			}
 
 			for _, offset := range zOffsets {
 				z := center.Z + offset
@@ -87,20 +98,15 @@ func (s *ServerScanner) scanLoop() {
 					break
 				}
 
-				// Limites baseados no MapInfo local (0 a Size-1)
-				info := s.dfClient.MapInfo
-				if info == nil {
-					break
-				}
-
-				// NOTA: Agora usamos coordenadas ABSOLUTAS do mundo para tudo.
+				// Limites globais; ToRemoteBlockRequest converte X/Y para o frame
+				// local que o RemoteFortressReader espera.
 				bxMin := util.Max(info.BlockPosX*16, center.X-radius)
 				bxMax := util.Min((info.BlockPosX+info.BlockSizeX)*16-1, center.X+radius)
 				byMin := util.Max(info.BlockPosY*16, center.Y-radius)
 				byMax := util.Min((info.BlockPosY+info.BlockSizeY)*16-1, center.Y+radius)
 
 				// Pedimos a região em uma única chamada.
-				list, err := s.dfClient.GetBlockList(bxMin/16, byMin/16, z, bxMax/16, byMax/16, z, 500)
+				list, err := s.dfClient.GetBlockList(bxMin/16, byMin/16, z, bxMax/16, byMax/16, z+1, 500)
 				if err != nil {
 					time.Sleep(1 * time.Second)
 					continue
@@ -111,7 +117,7 @@ func (s *ServerScanner) scanLoop() {
 
 				if list != nil && len(list.MapBlocks) > 0 {
 					for _, block := range list.MapBlocks {
-						origin := responseBlockOrigin(block)
+						origin := util.NewDFCoord(block.MapX, block.MapY, block.MapZ).BlockCoord()
 						foundBlockMap[origin] = true
 
 						_, wasCached := s.store.GetChunk(origin)
@@ -147,7 +153,7 @@ func (s *ServerScanner) scanLoop() {
 				start := util.DFCoord{X: bxMin, Y: byMin}.BlockCoord()
 				for bx := start.X; bx <= bxMax; bx += 16 {
 					for by := start.Y; by <= byMax; by += 16 {
-						origin := util.NewDFCoord(bx, by, z).BlockCoord()
+						origin := util.NewDFCoord(bx-info.BlockPosX*util.BlockSize, by-info.BlockPosY*util.BlockSize, z).BlockCoord()
 						if !foundBlockMap[origin] {
 							if s.store.MarkAsEmpty(origin) {
 								s.hub.BroadcastEmptyChunk(origin)
@@ -249,7 +255,7 @@ func (s *ServerScanner) StartFullScan() {
 					for bx := int32(0); bx < (maxX - x); bx++ {
 						for by := int32(0); by < (maxY - y); by++ {
 							absBX, absBY := minX+x+bx, minY+y+by
-							origin := util.DFCoord{X: absBX * 16, Y: absBY * 16, Z: z}
+							origin := util.NewDFCoord((absBX-minX)*util.BlockSize, (absBY-minY)*util.BlockSize, z)
 							if !foundInBatch[origin] {
 								s.store.MarkAsEmpty(origin)
 								emptyInLayer++

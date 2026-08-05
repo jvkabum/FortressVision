@@ -7,7 +7,7 @@ import (
 	"FortressVision/shared/util"
 )
 
-func TestCoordinateNormalizerUsesAbsoluteDFFrame(t *testing.T) {
+func TestCoordinateNormalizerUsesLocalXYAndAbsoluteZ(t *testing.T) {
 	normalizer := NewCoordinateNormalizer(&dfproto.MapInfo{
 		BlockPosX: 2,
 		BlockPosY: 3,
@@ -15,8 +15,8 @@ func TestCoordinateNormalizerUsesAbsoluteDFFrame(t *testing.T) {
 	})
 
 	req := normalizer.ToRemoteBlockRequest(4, 5, 165, 7, 8, 166, 20)
-	if req.MinX != 4 || req.MaxX != 7 || req.MinY != 5 || req.MaxY != 8 || req.MinZ != 165 || req.MaxZ != 166 {
-		t.Fatalf("absolute request was changed: %+v", req)
+	if req.MinX != 2 || req.MaxX != 5 || req.MinY != 2 || req.MaxY != 5 || req.MinZ != 165 || req.MaxZ != 166 {
+		t.Fatalf("request frame is wrong: %+v", req)
 	}
 
 	list := &dfproto.BlockList{
