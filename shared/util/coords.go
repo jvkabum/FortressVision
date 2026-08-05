@@ -142,6 +142,20 @@ const (
 	DirAll Directions = 0x0FFF
 )
 
+// Direcoes compostas usadas pelo calculo de ambient occlusion do mesher.
+// Elas combinam um eixo horizontal com o eixo vertical sem consumir novos
+// bits, mantendo Directions como um conjunto de flags.
+const (
+	DirDownNorth Directions = DirDown | DirNorth
+	DirDownSouth Directions = DirDown | DirSouth
+	DirDownEast  Directions = DirDown | DirEast
+	DirDownWest  Directions = DirDown | DirWest
+	DirUpNorth   Directions = DirUp | DirNorth
+	DirUpSouth   Directions = DirUp | DirSouth
+	DirUpEast    Directions = DirUp | DirEast
+	DirUpWest    Directions = DirUp | DirWest
+)
+
 // Has verifica se uma direção está ativa.
 func (d Directions) Has(dir Directions) bool {
 	return d&dir != 0
@@ -159,6 +173,14 @@ var DirOffsets = map[Directions]DFCoord{
 	DirSouthWest: {X: -1, Y: 1, Z: 0},
 	DirUp:        {X: 0, Y: 0, Z: 1},
 	DirDown:      {X: 0, Y: 0, Z: -1},
+	DirDownNorth: {X: 0, Y: -1, Z: -1},
+	DirDownSouth: {X: 0, Y: 1, Z: -1},
+	DirDownEast:  {X: 1, Y: 0, Z: -1},
+	DirDownWest:  {X: -1, Y: 0, Z: -1},
+	DirUpNorth:   {X: 0, Y: -1, Z: 1},
+	DirUpSouth:   {X: 0, Y: 1, Z: 1},
+	DirUpEast:    {X: 1, Y: 0, Z: 1},
+	DirUpWest:    {X: -1, Y: 0, Z: 1},
 }
 
 // AddDir retorna uma nova coordenada deslocada na direção especificada.

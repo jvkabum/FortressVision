@@ -128,5 +128,5 @@ func TraceDraw(originX, originY, originZ int32) {
 
 // TraceDebug permite registrar mensagens genéricas de depuração no log de líquidos.
 func TraceDebug(msg string) {
-	Trace(0, "DEBUG", msg)
+	Trace(0, "DEBUG", "%s", msg)
 }

@@ -2,6 +2,7 @@ package mapdata
 
 import (
 	"FortressVision/shared/pkg/dfproto"
+	"fmt"
 	"log"
 	"sync"
 
@@ -28,6 +29,16 @@ func NewMaterialStore() *MaterialStore {
 		Colors:     make(map[dfproto.MatPair]rl.Color),
 		TextureMap: make(map[dfproto.TiletypeMaterial]string),
 	}
+}
+
+// GetMaterialName fornece uma representacao estavel para o painel legado.
+// O protocolo atual persiste o par numerico, mas nao mantem um catalogo de
+// nomes de materiais neste store; portanto nao inventamos um nome textual.
+func (s *MaterialStore) GetMaterialName(pair dfproto.MatPair) string {
+	if pair == (dfproto.MatPair{}) {
+		return "Desconhecido"
+	}
+	return fmt.Sprintf("MatType %d / MatIndex %d", pair.MatType, pair.MatIndex)
 }
 
 // GetTextureName retorna o nome do arquivo de textura para uma categoria de material.

@@ -108,6 +108,68 @@ func (t *Tile) MaterialCategory() dfproto.TiletypeMaterial {
 	return tt.Material
 }
 
+// GetCategorization preserva o contrato usado pelo painel do cliente Raylib.
+// A categoria vem do tiletype recebido do DFHack e a subcategoria descreve o
+// formato visual do tile.
+func (t *Tile) GetCategorization() (string, string) {
+	main := "Desconhecido"
+	switch t.MaterialCategory() {
+	case dfproto.TilematStone:
+		main = "Pedra"
+	case dfproto.TilematSoil:
+		main = "Solo"
+	case dfproto.TilematGrassLight, dfproto.TilematGrassDark, dfproto.TilematGrassDry, dfproto.TilematGrassDead:
+		main = "Grama"
+	case dfproto.TilematTreeMaterial, dfproto.TilematPlant, dfproto.TilematMushroom:
+		main = "Vegetacao"
+	case dfproto.TilematMineral:
+		main = "Minerio"
+	case dfproto.TilematFrozenLiquid:
+		main = "Gelo"
+	case dfproto.TilematMagma, dfproto.TilematLavaStone:
+		main = "Magmatico"
+	case dfproto.TilematConstruction:
+		main = "Construcao"
+	case dfproto.TilematRiverShore, dfproto.TilematBrookShore, dfproto.TilematPool:
+		main = "Agua"
+	}
+
+	sub := "Generico"
+	switch t.Shape() {
+	case dfproto.ShapeFloor:
+		sub = "Piso"
+	case dfproto.ShapeWall:
+		sub = "Parede"
+	case dfproto.ShapeFortification:
+		sub = "Fortificacao"
+	case dfproto.ShapeRamp, dfproto.ShapeRampTop:
+		sub = "Rampa"
+	case dfproto.ShapeStairUp, dfproto.ShapeStairDown, dfproto.ShapeStairUpDown:
+		sub = "Escada"
+	case dfproto.ShapeBoulder:
+		sub = "Pedregulho"
+	case dfproto.ShapePebbles:
+		sub = "Pedras"
+	case dfproto.ShapeTreeShape:
+		sub = "Copa da arvore"
+	case dfproto.ShapeTrunkBranch:
+		sub = "Tronco"
+	case dfproto.ShapeBranch:
+		sub = "Galho"
+	case dfproto.ShapeTwig:
+		sub = "Graveto"
+	case dfproto.ShapeSapling:
+		sub = "Muda"
+	case dfproto.ShapeShrub:
+		sub = "Arbusto"
+	case dfproto.ShapeEndlessPit:
+		sub = "Poco infinito"
+	case dfproto.ShapeEmpty, dfproto.ShapeNoShape:
+		sub = "Ar"
+	}
+	return main, sub
+}
+
 func (t *Tile) IsWall() bool {
 	shape := t.Shape()
 	switch shape {
